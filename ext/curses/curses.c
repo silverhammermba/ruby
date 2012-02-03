@@ -2701,10 +2701,10 @@ Init_curses(void)
     rb_define_module_function(mCurses, "close_screen", curses_close_screen, 0);
     rb_define_module_function(mCurses, "closed?", curses_closed, 0);
     rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
-    rb_define_module_function(mCurses, "refresh", curses_refresh, 0);
+    //rb_define_module_function(mCurses, "refresh", curses_refresh, 0);
     rb_define_module_function(mCurses, "doupdate", curses_doupdate, 0);
-    rb_define_module_function(mCurses, "clear", curses_clear, 0);
-    rb_define_module_function(mCurses, "clrtoeol", curses_clrtoeol, 0);
+    //rb_define_module_function(mCurses, "clear", curses_clear, 0);
+    //rb_define_module_function(mCurses, "clrtoeol", curses_clrtoeol, 0);
     rb_define_module_function(mCurses, "echo", curses_echo, 0);
     rb_define_module_function(mCurses, "noecho", curses_noecho, 0);
     rb_define_module_function(mCurses, "raw", curses_raw, 0);
@@ -2718,31 +2718,31 @@ Init_curses(void)
     rb_define_module_function(mCurses, "beep", curses_beep, 0);
     rb_define_module_function(mCurses, "flash", curses_flash, 0);
     rb_define_module_function(mCurses, "ungetch", curses_ungetch, 1);
-    rb_define_module_function(mCurses, "setpos", curses_setpos, 2);
-    rb_define_module_function(mCurses, "standout", curses_standout, 0);
-    rb_define_module_function(mCurses, "standend", curses_standend, 0);
-    rb_define_module_function(mCurses, "inch", curses_inch, 0);
-    rb_define_module_function(mCurses, "addch", curses_addch, 1);
-    rb_define_module_function(mCurses, "insch", curses_insch, 1);
-    rb_define_module_function(mCurses, "addstr", curses_addstr, 1);
-    rb_define_module_function(mCurses, "getch", curses_getch, 0);
-    rb_define_module_function(mCurses, "getstr", curses_getstr, 0);
-    rb_define_module_function(mCurses, "delch", curses_delch, 0);
-    rb_define_module_function(mCurses, "deleteln", curses_deleteln, 0);
-    rb_define_module_function(mCurses, "insertln", curses_insertln, 0);
+    //rb_define_module_function(mCurses, "setpos", curses_setpos, 2);
+    //rb_define_module_function(mCurses, "standout", curses_standout, 0);
+    //rb_define_module_function(mCurses, "standend", curses_standend, 0);
+    //rb_define_module_function(mCurses, "inch", curses_inch, 0);
+    //rb_define_module_function(mCurses, "addch", curses_addch, 1);
+    //rb_define_module_function(mCurses, "insch", curses_insch, 1);
+    //rb_define_module_function(mCurses, "addstr", curses_addstr, 1);
+    //rb_define_module_function(mCurses, "getch", curses_getch, 0);
+    //rb_define_module_function(mCurses, "getstr", curses_getstr, 0);
+    //rb_define_module_function(mCurses, "delch", curses_delch, 0);
+    //rb_define_module_function(mCurses, "deleteln", curses_deleteln, 0);
+    //rb_define_module_function(mCurses, "insertln", curses_insertln, 0);
     rb_define_module_function(mCurses, "keyname", curses_keyname, 1);
     rb_define_module_function(mCurses, "lines", curses_lines, 0);
     rb_define_module_function(mCurses, "cols", curses_cols, 0);
     rb_define_module_function(mCurses, "curs_set", curses_curs_set, 1);
-    rb_define_module_function(mCurses, "scrl", curses_scrl, 1);
-    rb_define_module_function(mCurses, "setscrreg", curses_setscrreg, 2);
-    rb_define_module_function(mCurses, "attroff", curses_attroff, 1);
-    rb_define_module_function(mCurses, "attron", curses_attron, 1);
-    rb_define_module_function(mCurses, "attrset", curses_attrset, 1);
-    rb_define_module_function(mCurses, "bkgdset", curses_bkgdset, 1);
-    rb_define_module_function(mCurses, "bkgd", curses_bkgd, 1);
-    rb_define_module_function(mCurses, "resizeterm", curses_resizeterm, 2);
-    rb_define_module_function(mCurses, "resize", curses_resizeterm, 2);
+    //rb_define_module_function(mCurses, "scrl", curses_scrl, 1);
+    //rb_define_module_function(mCurses, "setscrreg", curses_setscrreg, 2);
+    //rb_define_module_function(mCurses, "attroff", curses_attroff, 1);
+    //rb_define_module_function(mCurses, "attron", curses_attron, 1);
+    //rb_define_module_function(mCurses, "attrset", curses_attrset, 1);
+    //rb_define_module_function(mCurses, "bkgdset", curses_bkgdset, 1);
+    //rb_define_module_function(mCurses, "bkgd", curses_bkgd, 1);
+    //rb_define_module_function(mCurses, "resizeterm", curses_resizeterm, 2);
+    //rb_define_module_function(mCurses, "resize", curses_resizeterm, 2);
 #ifdef USE_COLOR
     rb_define_module_function(mCurses, "start_color", curses_start_color, 0);
     rb_define_module_function(mCurses, "init_pair", curses_init_pair, 3);
@@ -2764,7 +2764,7 @@ Init_curses(void)
     rb_define_module_function(mCurses, "mousemask", curses_mousemask, 1);
 #endif /* USE_MOUSE */
 
-    rb_define_module_function(mCurses, "timeout=", curses_timeout, 1);
+    //rb_define_module_function(mCurses, "timeout=", curses_timeout, 1);
     rb_define_module_function(mCurses, "def_prog_mode", curses_def_prog_mode, 0);
     rb_define_module_function(mCurses, "reset_prog_mode", curses_reset_prog_mode, 0);
 
