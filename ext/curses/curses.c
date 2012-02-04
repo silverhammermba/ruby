@@ -455,11 +455,11 @@ curses_char(VALUE c)
 
 	StringValue(c);
 	if (RSTRING_LEN(c) == 0 || RSTRING_LEN(c) > 1) {
-	    rb_raise(rb_eArgError, "string not corresponding a character");
+	    rb_raise(rb_eArgError, "string does not correspond to a character");
 	}
 	cc = RSTRING_PTR(c)[0];
 	if (cc > 0x7f) {
-	    rb_raise(rb_eArgError, "no multibyte string supported (yet)");
+	    rb_raise(rb_eArgError, "multibyte strings not supported (yet)");
 	}
 	return cc;
     }
@@ -706,32 +706,6 @@ curses_insertln(VALUE obj)
     insertln();
 #endif
     return Qnil;
-}
-
-/*
- * Document-method: Curses.keyname
- * call-seq: keyname(c)
- *
- * Returns the character string corresponding to key +c+
- */
-static VALUE
-curses_keyname(VALUE obj, VALUE c)
-{
-#ifdef HAVE_KEYNAME
-    int cc = curses_char(c);
-    const char *name;
-
-    curses_stdscr();
-    name = keyname(cc);
-    if (name) {
-	return rb_str_new_cstr(name);
-    }
-    else {
-	return Qnil;
-    }
-#else
-    return Qnil;
-#endif
 }
 
 /*
@@ -1426,6 +1400,34 @@ curses_reset_prog_mode(VALUE obj)
 #else
 #define curses_reset_prog_mode rb_f_notimplement
 #endif
+
+/*-------------------------- module Key -----------------------------*/
+
+/*
+ * Document-method: Key.name
+ * call-seq: name(c)
+ *
+ * Returns the character string corresponding to key +c+
+ */
+static VALUE
+key_getname(VALUE obj, VALUE c)
+{
+#ifdef HAVE_KEYNAME
+    int cc = curses_char(c);
+    const char *name;
+
+    curses_stdscr();
+    name = keyname(cc);
+    if (name) {
+	return rb_str_new_cstr(name);
+    }
+    else {
+	return Qnil;
+    }
+#else
+    return Qnil;
+#endif
+}
 
 /*-------------------------- class Window --------------------------*/
 
@@ -2754,7 +2756,7 @@ Init_curses(void)
     //rb_define_module_function(mCurses, "delch", curses_delch, 0);
     //rb_define_module_function(mCurses, "deleteln", curses_deleteln, 0);
     //rb_define_module_function(mCurses, "insertln", curses_insertln, 0);
-    rb_define_module_function(mCurses, "keyname", curses_keyname, 1);
+    //rb_define_module_function(mCurses, "keyname", curses_keyname, 1);
     rb_define_module_function(mCurses, "lines", curses_lines, 0);
     rb_define_module_function(mCurses, "cols", curses_cols, 0);
     rb_define_module_function(mCurses, "curs_set", curses_curs_set, 1);
@@ -2791,6 +2793,8 @@ Init_curses(void)
     //rb_define_module_function(mCurses, "timeout=", curses_timeout, 1);
     rb_define_module_function(mCurses, "def_prog_mode", curses_def_prog_mode, 0);
     rb_define_module_function(mCurses, "reset_prog_mode", curses_reset_prog_mode, 0);
+
+	rb_define_module_function(mKey, "name", key_getname, 1);
 
     /*
      * Document-class: Curses::Window
@@ -3386,7 +3390,7 @@ Init_curses(void)
     /* Document-const: MOUSE
      * Mouse event read
      */
-    rb_curses_define_const(KEY_MOUSE);
+    //rb_curses_define_const(KEY_MOUSE);
     rb_define_const(mKey, "MOUSE", INT2NUM(KEY_MOUSE));
 #endif
 #ifdef KEY_MIN
@@ -3396,7 +3400,7 @@ Init_curses(void)
     /* Document-const: MIN
      * The minimum allowed curses key value.
      */
-    rb_curses_define_const(KEY_MIN);
+    //rb_curses_define_const(KEY_MIN);
     rb_define_const(mKey, "MIN", INT2NUM(KEY_MIN));
 #endif
 #ifdef KEY_BREAK
@@ -3406,7 +3410,7 @@ Init_curses(void)
     /* Document-const: BREAK
      * Break key
      */
-    rb_curses_define_const(KEY_BREAK);
+    //rb_curses_define_const(KEY_BREAK);
     rb_define_const(mKey, "BREAK", INT2NUM(KEY_BREAK));
 #endif
 #ifdef KEY_DOWN
@@ -3416,7 +3420,7 @@ Init_curses(void)
     /* Document-const: DOWN
      * the down arrow key
      */
-    rb_curses_define_const(KEY_DOWN);
+    //rb_curses_define_const(KEY_DOWN);
     rb_define_const(mKey, "DOWN", INT2NUM(KEY_DOWN));
 #endif
 #ifdef KEY_UP
@@ -3426,7 +3430,7 @@ Init_curses(void)
     /* Document-const: UP
      * the up arrow key
      */
-    rb_curses_define_const(KEY_UP);
+    //rb_curses_define_const(KEY_UP);
     rb_define_const(mKey, "UP", INT2NUM(KEY_UP));
 #endif
 #ifdef KEY_LEFT
@@ -3436,7 +3440,7 @@ Init_curses(void)
     /* Document-const: LEFT
      * the left arrow key
      */
-    rb_curses_define_const(KEY_LEFT);
+    //rb_curses_define_const(KEY_LEFT);
     rb_define_const(mKey, "LEFT", INT2NUM(KEY_LEFT));
 #endif
 #ifdef KEY_RIGHT
@@ -3446,7 +3450,7 @@ Init_curses(void)
     /* Document-const: RIGHT
      * the right arrow key
      */
-    rb_curses_define_const(KEY_RIGHT);
+    //rb_curses_define_const(KEY_RIGHT);
     rb_define_const(mKey, "RIGHT", INT2NUM(KEY_RIGHT));
 #endif
 #ifdef KEY_HOME
@@ -3456,7 +3460,7 @@ Init_curses(void)
     /* Document-const: HOME
      * Home key (upward+left arrow)
      */
-    rb_curses_define_const(KEY_HOME);
+    //rb_curses_define_const(KEY_HOME);
     rb_define_const(mKey, "HOME", INT2NUM(KEY_HOME));
 #endif
 #ifdef KEY_BACKSPACE
@@ -3466,7 +3470,7 @@ Init_curses(void)
     /* Document-const: BACKSPACE
      * Backspace
      */
-    rb_curses_define_const(KEY_BACKSPACE);
+    //rb_curses_define_const(KEY_BACKSPACE);
     rb_define_const(mKey, "BACKSPACE", INT2NUM(KEY_BACKSPACE));
 #endif
 #ifdef KEY_F
@@ -3475,8 +3479,8 @@ Init_curses(void)
 	int i;
 	char c[8];
 	for (i=0; i<64; i++) {
-	    sprintf(c, "KEY_F%d", i);
-	    rb_define_const(mCurses, c, INT2NUM(KEY_F(i)));
+	    //sprintf(c, "KEY_F%d", i);
+	    //rb_define_const(mCurses, c, INT2NUM(KEY_F(i)));
 	    sprintf(c, "F%d", i);
 	    rb_define_const(mKey, c, INT2NUM(KEY_F(i)));
 	}
@@ -3489,7 +3493,7 @@ Init_curses(void)
     /* Document-const: DL
      * Delete line
      */
-    rb_curses_define_const(KEY_DL);
+    //rb_curses_define_const(KEY_DL);
     rb_define_const(mKey, "DL", INT2NUM(KEY_DL));
 #endif
 #ifdef KEY_IL
@@ -3499,7 +3503,7 @@ Init_curses(void)
     /* Document-const: IL
      * Insert line
      */
-    rb_curses_define_const(KEY_IL);
+    //rb_curses_define_const(KEY_IL);
     rb_define_const(mKey, "IL", INT2NUM(KEY_IL));
 #endif
 #ifdef KEY_DC
@@ -3509,7 +3513,7 @@ Init_curses(void)
     /* Document-const: DC
      * Delete character
      */
-    rb_curses_define_const(KEY_DC);
+    //rb_curses_define_const(KEY_DC);
     rb_define_const(mKey, "DC", INT2NUM(KEY_DC));
 #endif
 #ifdef KEY_IC
@@ -3519,7 +3523,7 @@ Init_curses(void)
     /* Document-const: IC
      * Insert char or enter insert mode
      */
-    rb_curses_define_const(KEY_IC);
+    //rb_curses_define_const(KEY_IC);
     rb_define_const(mKey, "IC", INT2NUM(KEY_IC));
 #endif
 #ifdef KEY_EIC
@@ -3529,7 +3533,7 @@ Init_curses(void)
     /* Document-const: EIC
      * Enter insert char mode
      */
-    rb_curses_define_const(KEY_EIC);
+    //rb_curses_define_const(KEY_EIC);
     rb_define_const(mKey, "EIC", INT2NUM(KEY_EIC));
 #endif
 #ifdef KEY_CLEAR
@@ -3539,7 +3543,7 @@ Init_curses(void)
     /* Document-const: CLEAR
      * Clear Screen
      */
-    rb_curses_define_const(KEY_CLEAR);
+    //rb_curses_define_const(KEY_CLEAR);
     rb_define_const(mKey, "CLEAR", INT2NUM(KEY_CLEAR));
 #endif
 #ifdef KEY_EOS
@@ -3549,7 +3553,7 @@ Init_curses(void)
     /* Document-const: EOS
      * Clear to end of screen
      */
-    rb_curses_define_const(KEY_EOS);
+    //rb_curses_define_const(KEY_EOS);
     rb_define_const(mKey, "EOS", INT2NUM(KEY_EOS));
 #endif
 #ifdef KEY_EOL
@@ -3559,7 +3563,7 @@ Init_curses(void)
     /* Document-const: EOL
      * Clear to end of line
      */
-    rb_curses_define_const(KEY_EOL);
+    //rb_curses_define_const(KEY_EOL);
     rb_define_const(mKey, "EOL", INT2NUM(KEY_EOL));
 #endif
 #ifdef KEY_SF
@@ -3569,7 +3573,7 @@ Init_curses(void)
     /* Document-const: SF
      * Scroll 1 line forward
      */
-    rb_curses_define_const(KEY_SF);
+    //rb_curses_define_const(KEY_SF);
     rb_define_const(mKey, "SF", INT2NUM(KEY_SF));
 #endif
 #ifdef KEY_SR
@@ -3579,7 +3583,7 @@ Init_curses(void)
     /* Document-const: SR
      * Scroll 1 line backware (reverse)
      */
-    rb_curses_define_const(KEY_SR);
+    //rb_curses_define_const(KEY_SR);
     rb_define_const(mKey, "SR", INT2NUM(KEY_SR));
 #endif
 #ifdef KEY_NPAGE
@@ -3589,7 +3593,7 @@ Init_curses(void)
     /* Document-const: NPAGE
      * Next page
      */
-    rb_curses_define_const(KEY_NPAGE);
+    //rb_curses_define_const(KEY_NPAGE);
     rb_define_const(mKey, "NPAGE", INT2NUM(KEY_NPAGE));
 #endif
 #ifdef KEY_PPAGE
@@ -3599,7 +3603,7 @@ Init_curses(void)
     /* Document-const: PPAGE
      * Previous page
      */
-    rb_curses_define_const(KEY_PPAGE);
+    //rb_curses_define_const(KEY_PPAGE);
     rb_define_const(mKey, "PPAGE", INT2NUM(KEY_PPAGE));
 #endif
 #ifdef KEY_STAB
@@ -3609,7 +3613,7 @@ Init_curses(void)
     /* Document-const: STAB
      * Set tab
      */
-    rb_curses_define_const(KEY_STAB);
+    //rb_curses_define_const(KEY_STAB);
     rb_define_const(mKey, "STAB", INT2NUM(KEY_STAB));
 #endif
 #ifdef KEY_CTAB
@@ -3619,7 +3623,7 @@ Init_curses(void)
     /* Document-const: CTAB
      * Clear tab
      */
-    rb_curses_define_const(KEY_CTAB);
+    //rb_curses_define_const(KEY_CTAB);
     rb_define_const(mKey, "CTAB", INT2NUM(KEY_CTAB));
 #endif
 #ifdef KEY_CATAB
@@ -3629,7 +3633,7 @@ Init_curses(void)
     /* Document-const: CATAB
      * Clear all tabs
      */
-    rb_curses_define_const(KEY_CATAB);
+    //rb_curses_define_const(KEY_CATAB);
     rb_define_const(mKey, "CATAB", INT2NUM(KEY_CATAB));
 #endif
 #ifdef KEY_ENTER
@@ -3639,7 +3643,7 @@ Init_curses(void)
     /* Document-const: ENTER
      * Enter or send
      */
-    rb_curses_define_const(KEY_ENTER);
+    //rb_curses_define_const(KEY_ENTER);
     rb_define_const(mKey, "ENTER", INT2NUM(KEY_ENTER));
 #endif
 #ifdef KEY_SRESET
@@ -3649,7 +3653,7 @@ Init_curses(void)
     /* Document-const: SRESET
      * Soft (partial) reset
      */
-    rb_curses_define_const(KEY_SRESET);
+    //rb_curses_define_const(KEY_SRESET);
     rb_define_const(mKey, "SRESET", INT2NUM(KEY_SRESET));
 #endif
 #ifdef KEY_RESET
@@ -3659,7 +3663,7 @@ Init_curses(void)
     /* Document-const: RESET
      * Reset or hard reset
      */
-    rb_curses_define_const(KEY_RESET);
+    //rb_curses_define_const(KEY_RESET);
     rb_define_const(mKey, "RESET", INT2NUM(KEY_RESET));
 #endif
 #ifdef KEY_PRINT
@@ -3669,7 +3673,7 @@ Init_curses(void)
     /* Document-const: PRINT
      * Print or copy
      */
-    rb_curses_define_const(KEY_PRINT);
+    //rb_curses_define_const(KEY_PRINT);
     rb_define_const(mKey, "PRINT", INT2NUM(KEY_PRINT));
 #endif
 #ifdef KEY_LL
@@ -3679,7 +3683,7 @@ Init_curses(void)
     /* Document-const: LL
      * Home down or bottom (lower left)
      */
-    rb_curses_define_const(KEY_LL);
+    //rb_curses_define_const(KEY_LL);
     rb_define_const(mKey, "LL", INT2NUM(KEY_LL));
 #endif
 #ifdef KEY_A1
@@ -3689,7 +3693,7 @@ Init_curses(void)
     /* Document-const: A1
      * Upper left of keypad
      */
-    rb_curses_define_const(KEY_A1);
+    //rb_curses_define_const(KEY_A1);
     rb_define_const(mKey, "A1", INT2NUM(KEY_A1));
 #endif
 #ifdef KEY_A3
@@ -3699,7 +3703,7 @@ Init_curses(void)
     /* Document-const: A3
      * Upper right of keypad
      */
-    rb_curses_define_const(KEY_A3);
+    //rb_curses_define_const(KEY_A3);
     rb_define_const(mKey, "A3", INT2NUM(KEY_A3));
 #endif
 #ifdef KEY_B2
@@ -3709,7 +3713,7 @@ Init_curses(void)
     /* Document-const: B2
      * Center of keypad
      */
-    rb_curses_define_const(KEY_B2);
+    //rb_curses_define_const(KEY_B2);
     rb_define_const(mKey, "B2", INT2NUM(KEY_B2));
 #endif
 #ifdef KEY_C1
@@ -3719,7 +3723,7 @@ Init_curses(void)
     /* Document-const: C1
      * Lower left of keypad
      */
-    rb_curses_define_const(KEY_C1);
+    //rb_curses_define_const(KEY_C1);
     rb_define_const(mKey, "C1", INT2NUM(KEY_C1));
 #endif
 #ifdef KEY_C3
@@ -3729,7 +3733,7 @@ Init_curses(void)
     /* Document-const: C3
      * Lower right of keypad
      */
-    rb_curses_define_const(KEY_C3);
+    //rb_curses_define_const(KEY_C3);
     rb_define_const(mKey, "C3", INT2NUM(KEY_C3));
 #endif
 #ifdef KEY_BTAB
@@ -3739,7 +3743,7 @@ Init_curses(void)
     /* Document-const: KEY_BTAB
      * Back tab key
      */
-    rb_curses_define_const(KEY_BTAB);
+    //rb_curses_define_const(KEY_BTAB);
     rb_define_const(mKey, "BTAB", INT2NUM(KEY_BTAB));
 #endif
 #ifdef KEY_BEG
@@ -3749,7 +3753,7 @@ Init_curses(void)
     /* Document-const: BEG
      * Beginning key
      */
-    rb_curses_define_const(KEY_BEG);
+    //rb_curses_define_const(KEY_BEG);
     rb_define_const(mKey, "BEG", INT2NUM(KEY_BEG));
 #endif
 #ifdef KEY_CANCEL
@@ -3759,7 +3763,7 @@ Init_curses(void)
     /* Document-const: CANCEL
      * Cancel key
      */
-    rb_curses_define_const(KEY_CANCEL);
+    //rb_curses_define_const(KEY_CANCEL);
     rb_define_const(mKey, "CANCEL", INT2NUM(KEY_CANCEL));
 #endif
 #ifdef KEY_CLOSE
@@ -3769,7 +3773,7 @@ Init_curses(void)
     /* Document-const: CLOSE
      * Close key
      */
-    rb_curses_define_const(KEY_CLOSE);
+    //rb_curses_define_const(KEY_CLOSE);
     rb_define_const(mKey, "CLOSE", INT2NUM(KEY_CLOSE));
 #endif
 #ifdef KEY_COMMAND
@@ -3779,7 +3783,7 @@ Init_curses(void)
     /* Document-const: COMMAND
      * Cmd (command) key
      */
-    rb_curses_define_const(KEY_COMMAND);
+    //rb_curses_define_const(KEY_COMMAND);
     rb_define_const(mKey, "COMMAND", INT2NUM(KEY_COMMAND));
 #endif
 #ifdef KEY_COPY
@@ -3789,7 +3793,7 @@ Init_curses(void)
     /* Document-const: COPY
      * Copy key
      */
-    rb_curses_define_const(KEY_COPY);
+    //rb_curses_define_const(KEY_COPY);
     rb_define_const(mKey, "COPY", INT2NUM(KEY_COPY));
 #endif
 #ifdef KEY_CREATE
@@ -3799,7 +3803,7 @@ Init_curses(void)
     /* Document-const: CREATE
      * Create key
      */
-    rb_curses_define_const(KEY_CREATE);
+    //rb_curses_define_const(KEY_CREATE);
     rb_define_const(mKey, "CREATE", INT2NUM(KEY_CREATE));
 #endif
 #ifdef KEY_END
@@ -3809,7 +3813,7 @@ Init_curses(void)
     /* Document-const: END
      * End key
      */
-    rb_curses_define_const(KEY_END);
+    //rb_curses_define_const(KEY_END);
     rb_define_const(mKey, "END", INT2NUM(KEY_END));
 #endif
 #ifdef KEY_EXIT
@@ -3819,7 +3823,7 @@ Init_curses(void)
     /* Document-const: EXIT
      * Exit key
      */
-    rb_curses_define_const(KEY_EXIT);
+    //rb_curses_define_const(KEY_EXIT);
     rb_define_const(mKey, "EXIT", INT2NUM(KEY_EXIT));
 #endif
 #ifdef KEY_FIND
@@ -3829,7 +3833,7 @@ Init_curses(void)
     /* Document-const: FIND
      * Find key
      */
-    rb_curses_define_const(KEY_FIND);
+    //rb_curses_define_const(KEY_FIND);
     rb_define_const(mKey, "FIND", INT2NUM(KEY_FIND));
 #endif
 #ifdef KEY_HELP
@@ -3839,7 +3843,7 @@ Init_curses(void)
     /* Document-const: HELP
      * Help key
      */
-    rb_curses_define_const(KEY_HELP);
+    //rb_curses_define_const(KEY_HELP);
     rb_define_const(mKey, "HELP", INT2NUM(KEY_HELP));
 #endif
 #ifdef KEY_MARK
@@ -3849,7 +3853,7 @@ Init_curses(void)
     /* Document-const: MARK
      * Mark key
      */
-    rb_curses_define_const(KEY_MARK);
+    //rb_curses_define_const(KEY_MARK);
     rb_define_const(mKey, "MARK", INT2NUM(KEY_MARK));
 #endif
 #ifdef KEY_MESSAGE
@@ -3859,7 +3863,7 @@ Init_curses(void)
     /* Document-const: MESSAGE
      * Message key
      */
-    rb_curses_define_const(KEY_MESSAGE);
+    //rb_curses_define_const(KEY_MESSAGE);
     rb_define_const(mKey, "MESSAGE", INT2NUM(KEY_MESSAGE));
 #endif
 #ifdef KEY_MOVE
@@ -3869,7 +3873,7 @@ Init_curses(void)
     /* Document-const: MOVE
      * Move key
      */
-    rb_curses_define_const(KEY_MOVE);
+    //rb_curses_define_const(KEY_MOVE);
     rb_define_const(mKey, "MOVE", INT2NUM(KEY_MOVE));
 #endif
 #ifdef KEY_NEXT
@@ -3879,7 +3883,7 @@ Init_curses(void)
     /* Document-const: NEXT
      * Next object key
      */
-    rb_curses_define_const(KEY_NEXT);
+    //rb_curses_define_const(KEY_NEXT);
     rb_define_const(mKey, "NEXT", INT2NUM(KEY_NEXT));
 #endif
 #ifdef KEY_OPEN
@@ -3889,7 +3893,7 @@ Init_curses(void)
     /* Document-const: OPEN
      * Open key
      */
-    rb_curses_define_const(KEY_OPEN);
+    //rb_curses_define_const(KEY_OPEN);
     rb_define_const(mKey, "OPEN", INT2NUM(KEY_OPEN));
 #endif
 #ifdef KEY_OPTIONS
@@ -3899,7 +3903,7 @@ Init_curses(void)
     /* Document-const: OPTIONS
      * Options key
      */
-    rb_curses_define_const(KEY_OPTIONS);
+    //rb_curses_define_const(KEY_OPTIONS);
     rb_define_const(mKey, "OPTIONS", INT2NUM(KEY_OPTIONS));
 #endif
 #ifdef KEY_PREVIOUS
@@ -3909,7 +3913,7 @@ Init_curses(void)
     /* Document-const: PREVIOUS
      * Previous object key
      */
-    rb_curses_define_const(KEY_PREVIOUS);
+    //rb_curses_define_const(KEY_PREVIOUS);
     rb_define_const(mKey, "PREVIOUS", INT2NUM(KEY_PREVIOUS));
 #endif
 #ifdef KEY_REDO
@@ -3919,7 +3923,7 @@ Init_curses(void)
     /* Document-const: REDO
      * Redo key
      */
-    rb_curses_define_const(KEY_REDO);
+    //rb_curses_define_const(KEY_REDO);
     rb_define_const(mKey, "REDO", INT2NUM(KEY_REDO));
 #endif
 #ifdef KEY_REFERENCE
@@ -3929,7 +3933,7 @@ Init_curses(void)
     /* Document-const: REFERENCE
      * Reference key
      */
-    rb_curses_define_const(KEY_REFERENCE);
+    //rb_curses_define_const(KEY_REFERENCE);
     rb_define_const(mKey, "REFERENCE", INT2NUM(KEY_REFERENCE));
 #endif
 #ifdef KEY_REFRESH
@@ -3939,7 +3943,7 @@ Init_curses(void)
     /* Document-const: REFRESH
      * Refresh key
      */
-    rb_curses_define_const(KEY_REFRESH);
+    //rb_curses_define_const(KEY_REFRESH);
     rb_define_const(mKey, "REFRESH", INT2NUM(KEY_REFRESH));
 #endif
 #ifdef KEY_REPLACE
@@ -3949,7 +3953,7 @@ Init_curses(void)
     /* Document-const: REPLACE
      * Replace key
      */
-    rb_curses_define_const(KEY_REPLACE);
+    //rb_curses_define_const(KEY_REPLACE);
     rb_define_const(mKey, "REPLACE", INT2NUM(KEY_REPLACE));
 #endif
 #ifdef KEY_RESTART
@@ -3959,7 +3963,7 @@ Init_curses(void)
     /* Document-const: RESTART
      * Restart key
      */
-    rb_curses_define_const(KEY_RESTART);
+    //rb_curses_define_const(KEY_RESTART);
     rb_define_const(mKey, "RESTART", INT2NUM(KEY_RESTART));
 #endif
 #ifdef KEY_RESUME
@@ -3969,7 +3973,7 @@ Init_curses(void)
     /* Document-const: RESUME
      * Resume key
      */
-    rb_curses_define_const(KEY_RESUME);
+    //rb_curses_define_const(KEY_RESUME);
     rb_define_const(mKey, "RESUME", INT2NUM(KEY_RESUME));
 #endif
 #ifdef KEY_SAVE
@@ -3979,7 +3983,7 @@ Init_curses(void)
     /* Document-const: SAVE
      * Save key
      */
-    rb_curses_define_const(KEY_SAVE);
+    //rb_curses_define_const(KEY_SAVE);
     rb_define_const(mKey, "SAVE", INT2NUM(KEY_SAVE));
 #endif
 #ifdef KEY_SBEG
@@ -3989,7 +3993,7 @@ Init_curses(void)
     /* Document-const: SBEG
      * Shifted beginning key
      */
-    rb_curses_define_const(KEY_SBEG);
+    //rb_curses_define_const(KEY_SBEG);
     rb_define_const(mKey, "SBEG", INT2NUM(KEY_SBEG));
 #endif
 #ifdef KEY_SCANCEL
@@ -3999,7 +4003,7 @@ Init_curses(void)
     /* Document-const: SCANCEL
      * Shifted cancel key
      */
-    rb_curses_define_const(KEY_SCANCEL);
+    //rb_curses_define_const(KEY_SCANCEL);
     rb_define_const(mKey, "SCANCEL", INT2NUM(KEY_SCANCEL));
 #endif
 #ifdef KEY_SCOMMAND
@@ -4009,7 +4013,7 @@ Init_curses(void)
     /* Document-const: SCOMMAND
      * Shifted command key
      */
-    rb_curses_define_const(KEY_SCOMMAND);
+    //rb_curses_define_const(KEY_SCOMMAND);
     rb_define_const(mKey, "SCOMMAND", INT2NUM(KEY_SCOMMAND));
 #endif
 #ifdef KEY_SCOPY
@@ -4019,7 +4023,7 @@ Init_curses(void)
     /* Document-const: SCOPY
      * Shifted copy key
      */
-    rb_curses_define_const(KEY_SCOPY);
+    //rb_curses_define_const(KEY_SCOPY);
     rb_define_const(mKey, "SCOPY", INT2NUM(KEY_SCOPY));
 #endif
 #ifdef KEY_SCREATE
@@ -4029,7 +4033,7 @@ Init_curses(void)
     /* Document-const: SCREATE
      * Shifted create key
      */
-    rb_curses_define_const(KEY_SCREATE);
+    //rb_curses_define_const(KEY_SCREATE);
     rb_define_const(mKey, "SCREATE", INT2NUM(KEY_SCREATE));
 #endif
 #ifdef KEY_SDC
@@ -4039,7 +4043,7 @@ Init_curses(void)
     /* Document-const: SDC
      * Shifted delete char key
      */
-    rb_curses_define_const(KEY_SDC);
+    //rb_curses_define_const(KEY_SDC);
     rb_define_const(mKey, "SDC", INT2NUM(KEY_SDC));
 #endif
 #ifdef KEY_SDL
@@ -4049,7 +4053,7 @@ Init_curses(void)
     /* Document-const: SDL
      * Shifted delete line key
      */
-    rb_curses_define_const(KEY_SDL);
+    //rb_curses_define_const(KEY_SDL);
     rb_define_const(mKey, "SDL", INT2NUM(KEY_SDL));
 #endif
 #ifdef KEY_SELECT
@@ -4059,7 +4063,7 @@ Init_curses(void)
     /* Document-const: SELECT
      * Select key
      */
-    rb_curses_define_const(KEY_SELECT);
+    //rb_curses_define_const(KEY_SELECT);
     rb_define_const(mKey, "SELECT", INT2NUM(KEY_SELECT));
 #endif
 #ifdef KEY_SEND
@@ -4069,7 +4073,7 @@ Init_curses(void)
     /* Document-const: SEND
      * Shifted end key
      */
-    rb_curses_define_const(KEY_SEND);
+    //rb_curses_define_const(KEY_SEND);
     rb_define_const(mKey, "SEND", INT2NUM(KEY_SEND));
 #endif
 #ifdef KEY_SEOL
@@ -4079,7 +4083,7 @@ Init_curses(void)
     /* Document-const: SEOL
      * Shifted clear line key
      */
-    rb_curses_define_const(KEY_SEOL);
+    //rb_curses_define_const(KEY_SEOL);
     rb_define_const(mKey, "SEOL", INT2NUM(KEY_SEOL));
 #endif
 #ifdef KEY_SEXIT
@@ -4089,7 +4093,7 @@ Init_curses(void)
     /* Document-const: SEXIT
      * Shifted exit key
      */
-    rb_curses_define_const(KEY_SEXIT);
+    //rb_curses_define_const(KEY_SEXIT);
     rb_define_const(mKey, "SEXIT", INT2NUM(KEY_SEXIT));
 #endif
 #ifdef KEY_SFIND
@@ -4099,7 +4103,7 @@ Init_curses(void)
     /* Document-const: SFIND
      * Shifted find key
      */
-    rb_curses_define_const(KEY_SFIND);
+    //rb_curses_define_const(KEY_SFIND);
     rb_define_const(mKey, "SFIND", INT2NUM(KEY_SFIND));
 #endif
 #ifdef KEY_SHELP
@@ -4109,7 +4113,7 @@ Init_curses(void)
     /* Document-const: SHELP
      * Shifted help key
      */
-    rb_curses_define_const(KEY_SHELP);
+    //rb_curses_define_const(KEY_SHELP);
     rb_define_const(mKey, "SHELP", INT2NUM(KEY_SHELP));
 #endif
 #ifdef KEY_SHOME
@@ -4119,7 +4123,7 @@ Init_curses(void)
     /* Document-const: SHOME
      * Shifted home key
      */
-    rb_curses_define_const(KEY_SHOME);
+    //rb_curses_define_const(KEY_SHOME);
     rb_define_const(mKey, "SHOME", INT2NUM(KEY_SHOME));
 #endif
 #ifdef KEY_SIC
@@ -4129,7 +4133,7 @@ Init_curses(void)
     /* Document-const: SIC
      * Shifted input key
      */
-    rb_curses_define_const(KEY_SIC);
+    //rb_curses_define_const(KEY_SIC);
     rb_define_const(mKey, "SIC", INT2NUM(KEY_SIC));
 #endif
 #ifdef KEY_SLEFT
@@ -4139,7 +4143,7 @@ Init_curses(void)
     /* Document-const: SLEFT
      * Shifted left arrow key
      */
-    rb_curses_define_const(KEY_SLEFT);
+    //rb_curses_define_const(KEY_SLEFT);
     rb_define_const(mKey, "SLEFT", INT2NUM(KEY_SLEFT));
 #endif
 #ifdef KEY_SMESSAGE
@@ -4149,7 +4153,7 @@ Init_curses(void)
     /* Document-const: SMESSAGE
      * Shifted message key
      */
-    rb_curses_define_const(KEY_SMESSAGE);
+    //rb_curses_define_const(KEY_SMESSAGE);
     rb_define_const(mKey, "SMESSAGE", INT2NUM(KEY_SMESSAGE));
 #endif
 #ifdef KEY_SMOVE
@@ -4159,7 +4163,7 @@ Init_curses(void)
     /* Document-const: SMOVE
      * Shifted move key
      */
-    rb_curses_define_const(KEY_SMOVE);
+    //rb_curses_define_const(KEY_SMOVE);
     rb_define_const(mKey, "SMOVE", INT2NUM(KEY_SMOVE));
 #endif
 #ifdef KEY_SNEXT
@@ -4169,7 +4173,7 @@ Init_curses(void)
     /* Document-const: SNEXT
      * Shifted next key
      */
-    rb_curses_define_const(KEY_SNEXT);
+    //rb_curses_define_const(KEY_SNEXT);
     rb_define_const(mKey, "SNEXT", INT2NUM(KEY_SNEXT));
 #endif
 #ifdef KEY_SOPTIONS
@@ -4179,7 +4183,7 @@ Init_curses(void)
     /* Document-const: SOPTIONS
      * Shifted options key
      */
-    rb_curses_define_const(KEY_SOPTIONS);
+    //rb_curses_define_const(KEY_SOPTIONS);
     rb_define_const(mKey, "SOPTIONS", INT2NUM(KEY_SOPTIONS));
 #endif
 #ifdef KEY_SPREVIOUS
@@ -4189,7 +4193,7 @@ Init_curses(void)
     /* Document-const: SPREVIOUS
      * Shifted previous key
      */
-    rb_curses_define_const(KEY_SPREVIOUS);
+    //rb_curses_define_const(KEY_SPREVIOUS);
     rb_define_const(mKey, "SPREVIOUS", INT2NUM(KEY_SPREVIOUS));
 #endif
 #ifdef KEY_SPRINT
@@ -4199,7 +4203,7 @@ Init_curses(void)
     /* Document-const: SPRINT
      * Shifted print key
      */
-    rb_curses_define_const(KEY_SPRINT);
+    //rb_curses_define_const(KEY_SPRINT);
     rb_define_const(mKey, "SPRINT", INT2NUM(KEY_SPRINT));
 #endif
 #ifdef KEY_SREDO
@@ -4209,7 +4213,7 @@ Init_curses(void)
     /* Document-const: SREDO
      * Shifted redo key
      */
-    rb_curses_define_const(KEY_SREDO);
+    //rb_curses_define_const(KEY_SREDO);
     rb_define_const(mKey, "SREDO", INT2NUM(KEY_SREDO));
 #endif
 #ifdef KEY_SREPLACE
@@ -4219,7 +4223,7 @@ Init_curses(void)
     /* Document-const: SREPLACE
      * Shifted replace key
      */
-    rb_curses_define_const(KEY_SREPLACE);
+    //rb_curses_define_const(KEY_SREPLACE);
     rb_define_const(mKey, "SREPLACE", INT2NUM(KEY_SREPLACE));
 #endif
 #ifdef KEY_SRIGHT
@@ -4229,7 +4233,7 @@ Init_curses(void)
     /* Document-const: SRIGHT
      * Shifted right arrow key
      */
-    rb_curses_define_const(KEY_SRIGHT);
+    //rb_curses_define_const(KEY_SRIGHT);
     rb_define_const(mKey, "SRIGHT", INT2NUM(KEY_SRIGHT));
 #endif
 #ifdef KEY_SRSUME
@@ -4239,7 +4243,7 @@ Init_curses(void)
     /* Document-const: SRSUME
      * Shifted resume key
      */
-    rb_curses_define_const(KEY_SRSUME);
+    //rb_curses_define_const(KEY_SRSUME);
     rb_define_const(mKey, "SRSUME", INT2NUM(KEY_SRSUME));
 #endif
 #ifdef KEY_SSAVE
@@ -4249,7 +4253,7 @@ Init_curses(void)
     /* Document-const: SSAVE
      * Shifted save key
      */
-    rb_curses_define_const(KEY_SSAVE);
+    //rb_curses_define_const(KEY_SSAVE);
     rb_define_const(mKey, "SSAVE", INT2NUM(KEY_SSAVE));
 #endif
 #ifdef KEY_SSUSPEND
@@ -4259,7 +4263,7 @@ Init_curses(void)
     /* Document-const: SSUSPEND
      * Shifted suspend key
      */
-    rb_curses_define_const(KEY_SSUSPEND);
+    //rb_curses_define_const(KEY_SSUSPEND);
     rb_define_const(mKey, "SSUSPEND", INT2NUM(KEY_SSUSPEND));
 #endif
 #ifdef KEY_SUNDO
@@ -4269,7 +4273,7 @@ Init_curses(void)
     /* Document-const: SUNDO
      * Shifted undo key
      */
-    rb_curses_define_const(KEY_SUNDO);
+    //rb_curses_define_const(KEY_SUNDO);
     rb_define_const(mKey, "SUNDO", INT2NUM(KEY_SUNDO));
 #endif
 #ifdef KEY_SUSPEND
@@ -4279,7 +4283,7 @@ Init_curses(void)
     /* Document-const: SUSPEND
      * Suspend key
      */
-    rb_curses_define_const(KEY_SUSPEND);
+    //rb_curses_define_const(KEY_SUSPEND);
     rb_define_const(mKey, "SUSPEND", INT2NUM(KEY_SUSPEND));
 #endif
 #ifdef KEY_UNDO
@@ -4289,7 +4293,7 @@ Init_curses(void)
     /* Document-const: UNDO
      * Undo key
      */
-    rb_curses_define_const(KEY_UNDO);
+    //rb_curses_define_const(KEY_UNDO);
     rb_define_const(mKey, "UNDO", INT2NUM(KEY_UNDO));
 #endif
 #ifdef KEY_RESIZE
@@ -4299,7 +4303,7 @@ Init_curses(void)
     /* Document-const: RESIZE
      * Screen Resized
      */
-    rb_curses_define_const(KEY_RESIZE);
+    //rb_curses_define_const(KEY_RESIZE);
     rb_define_const(mKey, "RESIZE", INT2NUM(KEY_RESIZE));
 #endif
 #ifdef KEY_MAX
@@ -4309,15 +4313,15 @@ Init_curses(void)
     /* Document-const: MAX
      * The maximum allowed curses key value.
      */
-    rb_curses_define_const(KEY_MAX);
+    //rb_curses_define_const(KEY_MAX);
     rb_define_const(mKey, "MAX", INT2NUM(KEY_MAX));
 #endif
     {
 	int c;
-	char name[] = "KEY_CTRL_x";
+	char name[] = "CTRL_x";
 	for (c = 'A'; c <= 'Z'; c++) {
 	    name[sizeof(name) - 2] = c;
-	    rb_define_const(mCurses, name, INT2FIX(c - 'A' + 1));
+	    rb_define_const(mKey, name, INT2FIX(c - 'A' + 1));
 	}
     }
 #undef rb_curses_define_const
