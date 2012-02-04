@@ -649,7 +649,7 @@ getstr_func(void *arg)
 /*
  * Document-method: Curses.getstr
  *
- * This is equivalent to a series f Curses::Window.getch calls
+ * This is equivalent to a series f Curses::Window.getc calls
  *
  */
 static VALUE
@@ -1600,8 +1600,8 @@ window_move(VALUE obj, VALUE y, VALUE x)
 }
 
 /*
- * Document-method: Curses::Window.setpos
- * call-seq: setpos(y, x)
+ * Document-method: Curses::Window.pos=
+ * call-seq: pos=y,x
  *
  * A setter for the position of the cursor
  * in the current window,
@@ -1609,12 +1609,12 @@ window_move(VALUE obj, VALUE y, VALUE x)
  *
  */
 static VALUE
-window_setpos(VALUE obj, VALUE y, VALUE x)
+window_setpos(VALUE obj, VALUE pos)
 {
     struct windata *winp;
 
     GetWINDOW(obj, winp);
-    wmove(winp->window, NUM2INT(y), NUM2INT(x));
+    wmove(winp->window, NUM2INT(rb_ary_entry(pos, 0)), NUM2INT(rb_ary_entry(pos, 1)));
     return Qnil;
 }
 
@@ -1923,7 +1923,7 @@ wgetch_func(void *_arg)
 }
 
 /*
- * Document-method: Curses::Window.getch
+ * Document-method: Curses::Window.getc
  *
  * Read and returns a character from the window.
  *
@@ -1968,9 +1968,9 @@ wgetstr_func(void *_arg)
 }
 
 /*
- * Document-method: Curses::Window.getstr
+ * Document-method: Curses::Window.gets
  *
- * This is equivalent to a series f Curses::Window.getch calls
+ * This is equivalent to a series f Curses::Window.getc calls
  *
  */
 static VALUE
@@ -1986,7 +1986,7 @@ window_getstr(VALUE obj)
 }
 
 /*
- * Document-method: Curses::Window.delch
+ * Document-method: Curses::Window.delc
  *
  * Delete the character under the cursor
  *
@@ -2376,7 +2376,7 @@ window_resize(VALUE obj, VALUE lin, VALUE col)
  * interpret the escape sequences itself.  If the keypad in the terminal
  * can be turned on (made to transmit) and off (made to work locally),
  * turning on this option causes the terminal keypad to be turned on when
- * Curses::Window.getch is called.
+ * Curses::Window.getc is called.
  *
  * The default value for keypad is false.
  *
@@ -2406,9 +2406,9 @@ window_keypad(VALUE obj, VALUE val)
  * Document-method: Curses::Window.nodelay
  * call-seq: nodelay(bool)
  *
- * Causes Curses::Window.getch to be a non-blocking call.  If no input is ready, getch returns ERR.
+ * Causes Curses::Window.getc to be a non-blocking call.  If no input is ready, getch returns ERR.
  *
- * If disabled (+bool+ is +false+), Curses::Window.getch waits until a key is pressed.
+ * If disabled (+bool+ is +false+), Curses::Window.getc waits until a key is pressed.
  *
  */
 static VALUE
@@ -2774,26 +2774,26 @@ Init_curses(void)
     rb_define_method(cWindow, "noutrefresh", window_noutrefresh, 0);
     rb_define_method(cWindow, "box", window_box, -1);
     rb_define_method(cWindow, "move", window_move, 2);
-    rb_define_method(cWindow, "setpos", window_setpos, 2);
+    rb_define_method(cWindow, "pos=", window_setpos, 1);
 #if defined(USE_COLOR) && defined(HAVE_WCOLOR_SET)
     rb_define_method(cWindow, "color_set", window_color_set, 1);
 #endif /* USE_COLOR && HAVE_WCOLOR_SET */
-    rb_define_method(cWindow, "cury", window_cury, 0);
-    rb_define_method(cWindow, "curx", window_curx, 0);
-    rb_define_method(cWindow, "maxy", window_maxy, 0);
-    rb_define_method(cWindow, "maxx", window_maxx, 0);
-    rb_define_method(cWindow, "begy", window_begy, 0);
-    rb_define_method(cWindow, "begx", window_begx, 0);
+    rb_define_method(cWindow, "y", window_cury, 0);
+    rb_define_method(cWindow, "x", window_curx, 0);
+    rb_define_method(cWindow, "lines", window_maxy, 0);
+    rb_define_method(cWindow, "columns", window_maxx, 0);
+    rb_define_method(cWindow, "top", window_begy, 0);
+    rb_define_method(cWindow, "left", window_begx, 0);
     rb_define_method(cWindow, "standout", window_standout, 0);
     rb_define_method(cWindow, "standend", window_standend, 0);
-    rb_define_method(cWindow, "inch", window_inch, 0);
-    rb_define_method(cWindow, "addch", window_addch, 1);
-    rb_define_method(cWindow, "insch", window_insch, 1);
-    rb_define_method(cWindow, "addstr", window_addstr, 1);
+    rb_define_method(cWindow, "inc", window_inch, 0);
+    rb_define_method(cWindow, "putc", window_addch, 1);
+    rb_define_method(cWindow, "insertc", window_insch, 1);
+    rb_define_method(cWindow, "print", window_addstr, 1);
     rb_define_method(cWindow, "<<", window_addstr2, 1);
-    rb_define_method(cWindow, "getch", window_getch, 0);
-    rb_define_method(cWindow, "getstr", window_getstr, 0);
-    rb_define_method(cWindow, "delch", window_delch, 0);
+    rb_define_method(cWindow, "getc", window_getch, 0);
+    rb_define_method(cWindow, "gets", window_getstr, 0);
+    rb_define_method(cWindow, "deletec", window_delch, 0);
     rb_define_method(cWindow, "deleteln", window_deleteln, 0);
     rb_define_method(cWindow, "insertln", window_insertln, 0);
     rb_define_method(cWindow, "scroll", window_scroll, 0);
@@ -2802,7 +2802,7 @@ Init_curses(void)
     rb_define_method(cWindow, "setscrreg", window_setscrreg, 2);
     rb_define_method(cWindow, "scrl", window_scrl, 1);
     rb_define_method(cWindow, "resize", window_resize, 2);
-    rb_define_method(cWindow, "keypad", window_keypad, 1);
+    //rb_define_method(cWindow, "keypad", window_keypad, 1);
     rb_define_method(cWindow, "keypad=", window_keypad, 1);
 
     rb_define_method(cWindow, "attroff", window_attroff, 1);
