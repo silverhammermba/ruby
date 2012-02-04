@@ -296,37 +296,32 @@ curses_doupdate(VALUE obj)
 }
 
 /*
- * Document-method: Curses.echo
+ * Document-method: Curses.echo=
+ * call-seq: echo=bool
  *
- * Enables characters typed by the user
+ * If +bool+ is true, enables characters typed by the user
  * to be echoed by Curses.getch as they are typed.
+ *
+ * Defaults to true.
  */
 static VALUE
-curses_echo(VALUE obj)
+curses_echo(VALUE obj, VALUE b)
 {
     curses_stdscr();
-    echo();
-    return Qnil;
+	if (RTEST(b)) {
+		echo();
+		return Qtrue;
+	} else {
+		noecho();
+		return Qfalse;
+	}
 }
 
 /*
- * Document-method: Curses.noecho
+ * Document-method: Curses.raw=
+ * call-seq: raw=bool
  *
- * Disables characters typed by the user
- * to be echoed by Curses.getch as they are typed.
- */
-static VALUE
-curses_noecho(VALUE obj)
-{
-    curses_stdscr();
-    noecho();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.raw
- *
- * Put the terminal into raw mode.
+ * If +bool+ is true, puts the terminal into raw mode.
  *
  * Raw mode is similar to Curses.cbreak mode, in that characters typed
  * are immediately passed through to the user program.
@@ -338,32 +333,23 @@ curses_noecho(VALUE obj)
  * that are not set by curses.
  */
 static VALUE
-curses_raw(VALUE obj)
+curses_raw(VALUE obj, VALUE b)
 {
     curses_stdscr();
-    raw();
-    return Qnil;
+	if(RTEST(b)) {
+		raw();
+		return Qtrue;
+	} else {
+		noraw();
+		return Qfalse;
+	}
 }
 
 /*
- * Document-method: Curses.noraw
+ * Document-method: Curses.cbreak=
+ * call-seq: cbreak=bool
  *
- * Put the terminal out of raw mode.
- *
- * see Curses.raw for more detail
- */
-static VALUE
-curses_noraw(VALUE obj)
-{
-    curses_stdscr();
-    noraw();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.cbreak
- *
- * Put the terminal into cbreak mode.
+ * If +bool+ is true, puts the terminal into cbreak mode.
  *
  * Normally, the tty driver buffers typed characters until
  * a newline or carriage return is typed. The Curses.cbreak
@@ -383,64 +369,43 @@ curses_noraw(VALUE obj)
  * see also Curses.raw
  */
 static VALUE
-curses_cbreak(VALUE obj)
+curses_cbreak(VALUE obj, VALUE b)
 {
     curses_stdscr();
-    cbreak();
-    return Qnil;
+	if(RTEST(b)) {
+		cbreak();
+		return Qtrue;
+	} else {
+		nocbreak();
+		return Qfalse;
+	}
 }
 
 /*
- * Document-method: Curses.nocbreak
+ * Document-method: Curses.nl=
+ * call-seq: nl=(bool)
  *
- * Put the terminal into normal mode (out of cbreak mode).
- *
- * See Curses.cbreak for more detail.
- */
-static VALUE
-curses_nocbreak(VALUE obj)
-{
-    curses_stdscr();
-    nocbreak();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.nl
- *
- * Enable the underlying display device to translate
- * the return key into newline on input, and whether it
- * translates newline into return and line-feed on output
- * (in either case, the call Curses.addch('\n') does the
- * equivalent of return and line feed on the virtual screen).
+ * If +bool+ is true, enables the underlying display device to translate the
+ * return key into newline on input, and whether it translates newline into
+ * return and line-feed on output (in either case, the call Curses.addch('\n')
+ * does the equivalent of return and line feed on the virtual screen).
  *
  * Initially, these translations do occur. If you disable
- * them using Curses.nonl, curses will be able to make better use
+ * them using Curses.nl=(false), curses will be able to make better use
  * of the line-feed capability, resulting in faster cursor
  * motion. Also, curses will then be able to detect the return key.
  */
 static VALUE
-curses_nl(VALUE obj)
+curses_nl(VALUE obj, VALUE b)
 {
     curses_stdscr();
-    nl();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.nl
- *
- * Disable the underlying display device to translate
- * the return key into newline on input
- *
- * See Curses.nl for more detail
- */
-static VALUE
-curses_nonl(VALUE obj)
-{
-    curses_stdscr();
-    nonl();
-    return Qnil;
+	if (RTEST(b)) {
+		nl();
+		return Qtrue;
+	} else {
+		nonl();
+		return Qfalse;
+	}
 }
 
 /*
@@ -2700,21 +2665,21 @@ Init_curses(void)
     rb_define_module_function(mCurses, "init_screen", curses_init_screen, 0);
     rb_define_module_function(mCurses, "close_screen", curses_close_screen, 0);
     rb_define_module_function(mCurses, "closed?", curses_closed, 0);
-    rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
+    //rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
     //rb_define_module_function(mCurses, "refresh", curses_refresh, 0);
     rb_define_module_function(mCurses, "doupdate", curses_doupdate, 0);
     //rb_define_module_function(mCurses, "clear", curses_clear, 0);
     //rb_define_module_function(mCurses, "clrtoeol", curses_clrtoeol, 0);
-    rb_define_module_function(mCurses, "echo", curses_echo, 0);
-    rb_define_module_function(mCurses, "noecho", curses_noecho, 0);
-    rb_define_module_function(mCurses, "raw", curses_raw, 0);
-    rb_define_module_function(mCurses, "noraw", curses_noraw, 0);
-    rb_define_module_function(mCurses, "cbreak", curses_cbreak, 0);
-    rb_define_module_function(mCurses, "nocbreak", curses_nocbreak, 0);
-    rb_define_module_function(mCurses, "crmode", curses_nocbreak, 0);
-    rb_define_module_function(mCurses, "nocrmode", curses_nocbreak, 0);
-    rb_define_module_function(mCurses, "nl", curses_nl, 0);
-    rb_define_module_function(mCurses, "nonl", curses_nonl, 0);
+    rb_define_module_function(mCurses, "echo=", curses_echo, 1);
+    //rb_define_module_function(mCurses, "noecho", curses_noecho, 0);
+    rb_define_module_function(mCurses, "raw=", curses_raw, 1);
+    //rb_define_module_function(mCurses, "noraw", curses_noraw, 0);
+    rb_define_module_function(mCurses, "cbreak=", curses_cbreak, 1);
+    //rb_define_module_function(mCurses, "nocbreak", curses_nocbreak, 0);
+    //rb_define_module_function(mCurses, "crmode", curses_nocbreak, 0);
+    //rb_define_module_function(mCurses, "nocrmode", curses_nocbreak, 0);
+    rb_define_module_function(mCurses, "nl=", curses_nl, 1);
+    //rb_define_module_function(mCurses, "nonl", curses_nonl, 0);
     rb_define_module_function(mCurses, "beep", curses_beep, 0);
     rb_define_module_function(mCurses, "flash", curses_flash, 0);
     rb_define_module_function(mCurses, "ungetch", curses_ungetch, 1);
