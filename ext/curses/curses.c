@@ -65,7 +65,7 @@ static VALUE mKey;
 static VALUE cWindow;
 static VALUE cPad;
 #ifdef USE_MOUSE
-static VALUE cMouseEvent;
+static VALUE cMouse;
 #endif
 
 static VALUE rb_stdscr;
@@ -1239,7 +1239,7 @@ curses_getmouse(VALUE obj)
     VALUE val;
 
     curses_stdscr();
-    val = TypedData_Make_Struct(cMouseEvent,struct mousedata,
+    val = TypedData_Make_Struct(cMouse,struct mousedata,
 				&mousedata_type,mdata);
     mdata->mevent = (MEVENT*)xmalloc(sizeof(MEVENT));
     return (getmouse(mdata->mevent) == OK) ? val : Qnil;
@@ -1308,31 +1308,31 @@ static VALUE func_name (VALUE mouse) \
 }
 
 /*
- * Document-method: Curses::MouseEvent.eid
+ * Document-method: Curses::Mouse.eid
  *
  * Returns the current mouse id
  */
 DEFINE_MOUSE_GET_MEMBER(curs_mouse_id, id)
 /*
- * Document-method: Curses::MouseEvent.x
+ * Document-method: Curses::Mouse.x
  *
  * Returns the current mouse's X coordinate
  */
 DEFINE_MOUSE_GET_MEMBER(curs_mouse_x, x)
 /*
- * Document-method: Curses::MouseEvent.y
+ * Document-method: Curses::Mouse.y
  *
  * Returns the current mouse's Y coordinate
  */
 DEFINE_MOUSE_GET_MEMBER(curs_mouse_y, y)
 /*
- * Document-method: Curses::MouseEvent.z
+ * Document-method: Curses::Mouse.z
  *
  * Returns the current mouse's Z coordinate
  */
 DEFINE_MOUSE_GET_MEMBER(curs_mouse_z, z)
 /*
- * Document-method: Curses::MouseEvent.bstate
+ * Document-method: Curses::Mouse.bstate
  *
  * Returns the current mouse's button state.  Use this with the button state
  * constants to determine which buttons were pressed.
@@ -2658,7 +2658,7 @@ pad_noutrefresh(VALUE obj, VALUE pminrow, VALUE pmincol, VALUE sminrow,
  * === Classes
  *
  * * Curses::Window - class with the means to draw a window or box
- * * Curses::MouseEvent - class for collecting mouse events
+ * * Curses::Mouse - class for collecting mouse events
  *
  * === Modules
  *
@@ -2696,11 +2696,11 @@ Init_curses(void)
 
 #ifdef USE_MOUSE
     /*
-     * Document-class: Curses::MouseEvent
+     * Document-class: Curses::Mouse
      *
      * == Description
      *
-     * Curses::MouseEvent
+     * Curses::Mouse
      *
      * == Example
      *
@@ -2708,13 +2708,17 @@ Init_curses(void)
      *     :include: mouse.rb
      *
      */
-    cMouseEvent = rb_define_class_under(mCurses,"MouseEvent",rb_cObject);
-    rb_undef_method(CLASS_OF(cMouseEvent),"new");
-    rb_define_method(cMouseEvent, "eid", curs_mouse_id, 0);
-    rb_define_method(cMouseEvent, "x", curs_mouse_x, 0);
-    rb_define_method(cMouseEvent, "y", curs_mouse_y, 0);
-    rb_define_method(cMouseEvent, "z", curs_mouse_z, 0);
-    rb_define_method(cMouseEvent, "bstate", curs_mouse_bstate, 0);
+    cMouse = rb_define_class_under(mCurses,"Mouse",rb_cObject);
+    rb_undef_method(CLASS_OF(cMouse),"new");
+    rb_define_module_function(cMouse, "get", curses_getmouse, 0);
+    rb_define_module_function(cMouse, "unget", curses_ungetmouse, 1);
+    rb_define_module_function(cMouse, "interval", curses_mouseinterval, 1);
+    rb_define_module_function(cMouse, "mask", curses_mousemask, 1);
+    rb_define_method(cMouse, "eid", curs_mouse_id, 0);
+    rb_define_method(cMouse, "x", curs_mouse_x, 0);
+    rb_define_method(cMouse, "y", curs_mouse_y, 0);
+    rb_define_method(cMouse, "z", curs_mouse_z, 0);
+    rb_define_method(cMouse, "bstate", curs_mouse_bstate, 0);
 #endif /* USE_MOUSE */
 
     rb_define_module_function(mCurses, "ESCDELAY=", curses_escdelay_set, 1);
@@ -2783,12 +2787,6 @@ Init_curses(void)
     rb_define_module_function(mCurses, "color_pair", curses_color_pair, 1);
     rb_define_module_function(mCurses, "pair_number", curses_pair_number, 1);
 #endif /* USE_COLOR */
-#ifdef USE_MOUSE
-    rb_define_module_function(mCurses, "getmouse", curses_getmouse, 0);
-    rb_define_module_function(mCurses, "ungetmouse", curses_ungetmouse, 1);
-    rb_define_module_function(mCurses, "mouseinterval", curses_mouseinterval, 1);
-    rb_define_module_function(mCurses, "mousemask", curses_mousemask, 1);
-#endif /* USE_MOUSE */
 
     //rb_define_module_function(mCurses, "timeout=", curses_timeout, 1);
     rb_define_module_function(mCurses, "def_prog_mode", curses_def_prog_mode, 0);
@@ -3139,7 +3137,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON1_PRESSED);
+    rb_define_const(cMouse, "BUTTON1_PRESSED", UINT2NUM(BUTTON1_PRESSED));
 #endif
 #ifdef BUTTON1_RELEASED
     /* Document-const: BUTTON1_RELEASED
@@ -3149,7 +3147,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON1_RELEASED);
+    rb_define_const(cMouse, "BUTTON1_RELEASED", UINT2NUM(BUTTON1_RELEASED));
 #endif
 #ifdef BUTTON1_CLICKED
     /* Document-const: BUTTON1_CLICKED
@@ -3159,7 +3157,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON1_CLICKED);
+    rb_define_const(cMouse, "BUTTON1_CLICKED", UINT2NUM(BUTTON1_CLICKED));
 #endif
 #ifdef BUTTON1_DOUBLE_CLICKED
     /* Document-const: BUTTON1_DOUBLE_CLICKED
@@ -3169,7 +3167,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON1_DOUBLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON1_DOUBLE_CLICKED", UINT2NUM(BUTTON1_DOUBLE_CLICKED));
 #endif
 #ifdef BUTTON1_TRIPLE_CLICKED
     /* Document-const: BUTTON1_TRIPLE_CLICKED
@@ -3179,7 +3177,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON1_TRIPLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON1_TRIPLE_CLICKED", UINT2NUM(BUTTON1_TRIPLE_CLICKED));
 #endif
 #ifdef BUTTON2_PRESSED
     /* Document-const: BUTTON2_PRESSED
@@ -3189,7 +3187,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON2_PRESSED);
+    rb_define_const(cMouse, "BUTTON2_PRESSED", UINT2NUM(BUTTON2_PRESSED));
 #endif
 #ifdef BUTTON2_RELEASED
     /* Document-const: BUTTON2_RELEASED
@@ -3199,7 +3197,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON2_RELEASED);
+    rb_define_const(cMouse, "BUTTON2_RELEASED", UINT2NUM(BUTTON2_RELEASED));
 #endif
 #ifdef BUTTON2_CLICKED
     /* Document-const: BUTTON2_CLICKED
@@ -3209,7 +3207,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON2_CLICKED);
+    rb_define_const(cMouse, "BUTTON2_CLICKED", UINT2NUM(BUTTON2_CLICKED));
 #endif
 #ifdef BUTTON2_DOUBLE_CLICKED
     /* Document-const: BUTTON2_DOUBLE_CLICKED
@@ -3219,7 +3217,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON2_DOUBLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON2_DOUBLE_CLICKED", UINT2NUM(BUTTON2_DOUBLE_CLICKED));
 #endif
 #ifdef BUTTON2_TRIPLE_CLICKED
     /* Document-const: BUTTON2_TRIPLE_CLICKED
@@ -3229,7 +3227,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON2_TRIPLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON2_TRIPLE_CLICKED", UINT2NUM(BUTTON2_TRIPLE_CLICKED));
 #endif
 #ifdef BUTTON3_PRESSED
     /* Document-const: BUTTON3_PRESSED
@@ -3239,7 +3237,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON3_PRESSED);
+    rb_define_const(cMouse, "BUTTON3_PRESSED", UINT2NUM(BUTTON3_PRESSED));
 #endif
 #ifdef BUTTON3_RELEASED
     /* Document-const: BUTTON3_RELEASED
@@ -3249,7 +3247,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON3_RELEASED);
+    rb_define_const(cMouse, "BUTTON3_RELEASED", UINT2NUM(BUTTON3_RELEASED));
 #endif
 #ifdef BUTTON3_CLICKED
     /* Document-const: BUTTON3_CLICKED
@@ -3259,7 +3257,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON3_CLICKED);
+    rb_define_const(cMouse, "BUTTON3_CLICKED", UINT2NUM(BUTTON3_CLICKED));
 #endif
 #ifdef BUTTON3_DOUBLE_CLICKED
     /* Document-const: BUTTON3_DOUBLE_CLICKED
@@ -3269,7 +3267,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON3_DOUBLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON3_DOUBLE_CLICKED", UINT2NUM(BUTTON3_DOUBLE_CLICKED));
 #endif
 #ifdef BUTTON3_TRIPLE_CLICKED
     /* Document-const: BUTTON3_TRIPLE_CLICKED
@@ -3279,7 +3277,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON3_TRIPLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON3_TRIPLE_CLICKED", UINT2NUM(BUTTON3_TRIPLE_CLICKED));
 #endif
 #ifdef BUTTON4_PRESSED
     /* Document-const: BUTTON4_PRESSED
@@ -3289,7 +3287,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON4_PRESSED);
+    rb_define_const(cMouse, "BUTTON4_PRESSED", UINT2NUM(BUTTON4_PRESSED));
 #endif
 #ifdef BUTTON4_RELEASED
     /* Document-const: BUTTON4_RELEASED
@@ -3299,7 +3297,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON4_RELEASED);
+    rb_define_const(cMouse, "BUTTON4_RELEASED", UINT2NUM(BUTTON4_RELEASED));
 #endif
 #ifdef BUTTON4_CLICKED
     /* Document-const: BUTTON4_CLICKED
@@ -3309,7 +3307,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON4_CLICKED);
+    rb_define_const(cMouse, "BUTTON4_CLICKED", UINT2NUM(BUTTON4_CLICKED));
 #endif
 #ifdef BUTTON4_DOUBLE_CLICKED
     /* Document-const: BUTTON4_DOUBLE_CLICKED
@@ -3319,7 +3317,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON4_DOUBLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON4_DOUBLE_CLICKED", UINT2NUM(BUTTON4_DOUBLE_CLICKED));
 #endif
 #ifdef BUTTON4_TRIPLE_CLICKED
     /* Document-const: BUTTON4_TRIPLE_CLICKED
@@ -3329,7 +3327,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON4_TRIPLE_CLICKED);
+    rb_define_const(cMouse, "BUTTON4_TRIPLE_CLICKED", UINT2NUM(BUTTON4_TRIPLE_CLICKED));
 #endif
 #ifdef BUTTON_SHIFT
     /* Document-const: BUTTON_SHIFT
@@ -3339,7 +3337,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON_SHIFT);
+    rb_define_const(cMouse, "SHIFT", UINT2NUM(BUTTON_SHIFT));
 #endif
 #ifdef BUTTON_CTRL
     /* Document-const: BUTTON_CTRL
@@ -3349,7 +3347,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON_CTRL);
+    rb_define_const(cMouse, "CTRL", UINT2NUM(BUTTON_CTRL));
 #endif
 #ifdef BUTTON_ALT
     /* Document-const: BUTTON_ALT
@@ -3359,7 +3357,7 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(BUTTON_ALT);
+    rb_define_const(cMouse, "ALT", UINT2NUM(BUTTON_ALT));
 #endif
 #ifdef ALL_MOUSE_EVENTS
     /* Document-const: ALL_MOUSE_EVENTS
@@ -3369,7 +3367,8 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(ALL_MOUSE_EVENTS);
+    //rb_curses_define_const(ALL_MOUSE_EVENTS);
+	rb_define_const(cMouse, "ALL_EVENTS", UINT2NUM(ALL_MOUSE_EVENTS));
 #endif
 #ifdef REPORT_MOUSE_POSITION
     /* Document-const: REPORT_MOUSE_POSITION
@@ -3379,7 +3378,8 @@ Init_curses(void)
      *
      * See Curses.getmouse
      */
-    rb_curses_define_const(REPORT_MOUSE_POSITION);
+    //rb_curses_define_const(REPORT_MOUSE_POSITION);
+	rb_define_const(cMouse, "REPORT_POSITION", UINT2NUM(REPORT_MOUSE_POSITION));
 #endif
 #endif /* USE_MOUSE */
 
