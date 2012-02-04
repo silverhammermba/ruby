@@ -1600,6 +1600,25 @@ window_move(VALUE obj, VALUE y, VALUE x)
 }
 
 /*
+ * Document-method: Curses::Window.pos
+ *
+ * A getter for the position of the cursor
+ * in the current window, returns coordinates
+ * as [Y, X]
+ *
+ */
+static VALUE
+window_curpos(VALUE obj)
+{
+	struct windata *winp;
+	int y, x;
+
+	GetWINDOW(obj, winp);
+	getyx(winp->window, y, x);
+	return rb_ary_new3(2, INT2FIX(y), INT2FIX(x));
+}
+
+/*
  * Document-method: Curses::Window.pos=
  * call-seq: pos=y,x
  *
@@ -1615,7 +1634,7 @@ window_setpos(VALUE obj, VALUE pos)
 
     GetWINDOW(obj, winp);
     wmove(winp->window, NUM2INT(rb_ary_entry(pos, 0)), NUM2INT(rb_ary_entry(pos, 1)));
-    return Qnil;
+    return pos;
 }
 
 /*
@@ -1635,6 +1654,26 @@ window_cury(VALUE obj)
 }
 
 /*
+ * Document-method: Curses::Window.y=
+ * call-seq: y.=(z)
+ *
+ * A setter for the vertical position of the cursor in the current window,
+ * using coordinates +z+
+ *
+ */
+static VALUE
+window_sety(VALUE obj, VALUE y)
+{
+    struct windata *winp;
+	int z, x;
+
+    GetWINDOW(obj, winp);
+	getyx(winp->window, z, x);
+    wmove(winp->window, NUM2INT(y), x);
+    return y;
+}
+
+/*
  * Document-method: Curses::Window.curx
  *
  * A getter for the current column (X coord) of the window
@@ -1648,6 +1687,26 @@ window_curx(VALUE obj)
     GetWINDOW(obj, winp);
     getyx(winp->window, y, x);
     return INT2FIX(x);
+}
+
+/*
+ * Document-method: Curses::Window.x=
+ * call-seq: x.=(z)
+ *
+ * A setter for the horizontal position of the cursor in the current window,
+ * using coordinates +z+
+ *
+ */
+static VALUE
+window_setx(VALUE obj, VALUE x)
+{
+    struct windata *winp;
+	int y, z;
+
+    GetWINDOW(obj, winp);
+	getyx(winp->window, y, z);
+    wmove(winp->window, y, NUM2INT(x));
+    return x;
 }
 
 /*
@@ -2682,7 +2741,7 @@ Init_curses(void)
     //rb_define_module_function(mCurses, "nonl", curses_nonl, 0);
     rb_define_module_function(mCurses, "beep", curses_beep, 0);
     rb_define_module_function(mCurses, "flash", curses_flash, 0);
-    rb_define_module_function(mCurses, "ungetch", curses_ungetch, 1);
+    rb_define_module_function(mCurses, "ungetc", curses_ungetch, 1);
     //rb_define_module_function(mCurses, "setpos", curses_setpos, 2);
     //rb_define_module_function(mCurses, "standout", curses_standout, 0);
     //rb_define_module_function(mCurses, "standend", curses_standend, 0);
@@ -2774,12 +2833,15 @@ Init_curses(void)
     rb_define_method(cWindow, "noutrefresh", window_noutrefresh, 0);
     rb_define_method(cWindow, "box", window_box, -1);
     rb_define_method(cWindow, "move", window_move, 2);
+    rb_define_method(cWindow, "pos", window_curpos, 0);
     rb_define_method(cWindow, "pos=", window_setpos, 1);
 #if defined(USE_COLOR) && defined(HAVE_WCOLOR_SET)
     rb_define_method(cWindow, "color_set", window_color_set, 1);
 #endif /* USE_COLOR && HAVE_WCOLOR_SET */
     rb_define_method(cWindow, "y", window_cury, 0);
+    rb_define_method(cWindow, "y=", window_sety, 1);
     rb_define_method(cWindow, "x", window_curx, 0);
+    rb_define_method(cWindow, "x=", window_setx, 1);
     rb_define_method(cWindow, "lines", window_maxy, 0);
     rb_define_method(cWindow, "columns", window_maxx, 0);
     rb_define_method(cWindow, "top", window_begy, 0);
