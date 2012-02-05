@@ -4,73 +4,56 @@
 require "curses"
 include Curses
 
-def onsig(sig)
-  close_screen
-  exit sig
-end
-
 def ranf
-  rand(32767).to_f / 32767
+	rand(32767).to_f / 32767
 end
 
-# main #
-for i in 1 .. 15  # SIGHUP .. SIGTERM
-  if trap(i, "SIG_IGN") != 0 then  # 0 for SIG_IGN
-    trap(i) {|sig| onsig(sig) }
-  end
-end
-
-init_screen
-nl
-noecho
 srand
 
-xpos = {}
-ypos = {}
-r = lines - 4
-c = cols - 4
-for i in 0 .. 4
-  xpos[i] = (c * ranf).to_i + 2
-  ypos[i] = (r * ranf).to_i + 2
+init do |screen|
+	nl = true
+	echo = false
+	curs_set 0
+
+	r = screen.lines - 4
+	c = screen.columns - 4
+	ypos = Array.new(5) { (r * ranf).to_i + 2 }
+	xpos = Array.new(5) { (c * ranf).to_i + 2 }
+
+	i = 0
+	while true
+		y = (r * ranf).to_i + 2
+		x = (c * ranf).to_i + 2
+
+		screen.print(y, x, ".")
+
+		screen.print(ypos[i], xpos[i], "o")
+
+		i = (i - 1) % 5
+		screen.print(ypos[i], xpos[i], "O")
+
+		i = (i - 1) % 5
+		screen.print(ypos[i] - 1, xpos[i],      "-")
+		screen.print(ypos[i],     xpos[i] - 1, "|.|")
+		screen.print(ypos[i] + 1, xpos[i],      "-")
+
+		i = (i - 1) % 5
+		screen.print(ypos[i] - 2, xpos[i],       "-")
+		screen.print(ypos[i] - 1, xpos[i] - 1,  "/ \\")
+		screen.print(ypos[i],     xpos[i] - 2, "| O |")
+		screen.print(ypos[i] + 1, xpos[i] - 1, "\\ /")
+		screen.print(ypos[i] + 2, xpos[i],       "-")
+
+		i = (i - 1) % 5
+		screen.print(ypos[i] - 2, xpos[i],       " ")
+		screen.print(ypos[i] - 1, xpos[i] - 1,  "   ")
+		screen.print(ypos[i],     xpos[i] - 2, "     ")
+		screen.print(ypos[i] + 1, xpos[i] - 1,  "   ")
+		screen.print(ypos[i] + 2, xpos[i],       " ")
+
+		xpos[i] = x
+		ypos[i] = y
+		screen.refresh
+		sleep(0.5)
+	end
 end
-
-i = 0
-while TRUE
-  x = (c * ranf).to_i + 2
-  y = (r * ranf).to_i + 2
-
-
-  setpos(y, x); addstr(".")
-
-  setpos(ypos[i], xpos[i]); addstr("o")
-
-  i = if i == 0 then 4 else i - 1 end
-  setpos(ypos[i], xpos[i]); addstr("O")
-
-  i = if i == 0 then 4 else i - 1 end
-  setpos(ypos[i] - 1, xpos[i]);      addstr("-")
-  setpos(ypos[i],     xpos[i] - 1); addstr("|.|")
-  setpos(ypos[i] + 1, xpos[i]);      addstr("-")
-
-  i = if i == 0 then 4 else i - 1 end
-  setpos(ypos[i] - 2, xpos[i]);       addstr("-")
-  setpos(ypos[i] - 1, xpos[i] - 1);  addstr("/ \\")
-  setpos(ypos[i],     xpos[i] - 2); addstr("| O |")
-  setpos(ypos[i] + 1, xpos[i] - 1); addstr("\\ /")
-  setpos(ypos[i] + 2, xpos[i]);       addstr("-")
-
-  i = if i == 0 then 4 else i - 1 end
-  setpos(ypos[i] - 2, xpos[i]);       addstr(" ")
-  setpos(ypos[i] - 1, xpos[i] - 1);  addstr("   ")
-  setpos(ypos[i],     xpos[i] - 2); addstr("     ")
-  setpos(ypos[i] + 1, xpos[i] - 1);  addstr("   ")
-  setpos(ypos[i] + 2, xpos[i]);       addstr(" ")
-
-
-  xpos[i] = x
-  ypos[i] = y
-  refresh
-  sleep(0.5)
-end
-
-# end of main

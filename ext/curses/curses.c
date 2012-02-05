@@ -151,7 +151,7 @@ curses_init_screen(int argc, VALUE *argv, VALUE obj)
     if (rb_stdscr) return rb_stdscr;
     initscr();
     if (stdscr == 0) {
-	rb_raise(rb_eRuntimeError, "can't initialize curses");
+		rb_raise(rb_eRuntimeError, "can't initialize curses");
     }
     clear();
     rb_stdscr = prep_window(cWindow, stdscr);
@@ -178,7 +178,11 @@ curses_init_screen(int argc, VALUE *argv, VALUE obj)
  *
  * Many curses functions use this window.
  */
-#define curses_stdscr() curses_init_screen(0, NULL, mCurses)
+static VALUE
+curses_stdscr(void)
+{
+	return curses_init_screen(0, NULL, mCurses);
+}
 
 /*
  * Document-method: Curses.close_screen
@@ -2288,29 +2292,48 @@ window_scroll(VALUE obj)
 }
 
 /*
- * Document-method: Curses::Window.scrl
- * call-seq: scrl(num)
+ * Document-method: Curses::Window.scroll
+ * call-seq: scroll(num)
  *
- * Scrolls the current window Fixnum +num+ lines.
- * The current cursor position is not changed.
+ * Scrolls the current window Fixnum +num+ lines or 1 line if no argument is
+ * given. The current cursor position is not changed.
  *
  * For positive +num+, it scrolls up.
  *
  * For negative +num+, it scrolls down.
  *
+ * Returns true if the screen was able to scroll.
+ *
  */
 static VALUE
-window_scrl(VALUE obj, VALUE n)
+window_scrl(int argc, VALUE *argv, VALUE obj)
 {
-#ifdef HAVE_WSCRL
-    struct windata *winp;
+	VALUE n;
+	int args;
 
-    GetWINDOW(obj, winp);
-    /* may have to raise exception on ERR */
-    return (wscrl(winp->window,NUM2INT(n)) == OK) ? Qtrue : Qfalse;
+	/* if no argument was supplied, or it was 1 */
+	if(rb_scan_args(argc, argv, "01", &n) == 0 || NUM2INT(n) == 1)
+	{
+		struct windata *winp;
+
+		GetWINDOW(obj, winp);
+		/* may have to raise exception on ERR */
+		return (scroll(winp->window) == OK) ? Qtrue : Qfalse;
+	/* if an argument was supplied other than 0 or 1 */
+	} else if (NUM2INT(n) != 0) {
+#ifdef HAVE_WSCRL
+		struct windata *winp;
+
+		GetWINDOW(obj, winp);
+		/* may have to raise exception on ERR */
+		return (wscrl(winp->window,NUM2INT(n)) == OK) ? Qtrue : Qfalse;
 #else
-    return Qfalse;
+		return Qfalse;
 #endif
+	/* if the argument was 0 */
+	} else {
+		return Qtrue;
+	}
 }
 
 /*
@@ -2803,7 +2826,7 @@ Init_curses(void)
     rb_define_module_function(mCurses, "init", curses_init_screen, -1);
     rb_define_module_function(mCurses, "close", curses_close_screen, 0);
     rb_define_module_function(mCurses, "closed?", curses_closed, 0);
-    //rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
+    rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
     //rb_define_module_function(mCurses, "refresh", curses_refresh, 0);
     rb_define_module_function(mCurses, "doupdate", curses_doupdate, 0);
     //rb_define_module_function(mCurses, "clear", curses_clear, 0);
@@ -2834,8 +2857,8 @@ Init_curses(void)
     //rb_define_module_function(mCurses, "deleteln", curses_deleteln, 0);
     //rb_define_module_function(mCurses, "insertln", curses_insertln, 0);
     //rb_define_module_function(mCurses, "keyname", curses_keyname, 1);
-    rb_define_module_function(mCurses, "lines", curses_lines, 0);
-    rb_define_module_function(mCurses, "cols", curses_cols, 0);
+    //rb_define_module_function(mCurses, "lines", curses_lines, 0);
+    //rb_define_module_function(mCurses, "columns", curses_cols, 0);
     rb_define_module_function(mCurses, "curs_set", curses_curs_set, 1);
     //rb_define_module_function(mCurses, "scrl", curses_scrl, 1);
     //rb_define_module_function(mCurses, "setscrreg", curses_setscrreg, 2);
@@ -2934,11 +2957,11 @@ Init_curses(void)
     rb_define_method(cWindow, "deletec", window_delch, 0);
     rb_define_method(cWindow, "deleteln", window_deleteln, 0);
     rb_define_method(cWindow, "insertln", window_insertln, 0);
-    rb_define_method(cWindow, "scroll", window_scroll, 0);
-    rb_define_method(cWindow, "scrollok", window_scrollok, 1);
+    //rb_define_method(cWindow, "scroll", window_scroll, 0);
+    rb_define_method(cWindow, "scroll=", window_scrollok, 1);
     rb_define_method(cWindow, "idlok", window_idlok, 1);
     rb_define_method(cWindow, "setscrreg", window_setscrreg, 2);
-    rb_define_method(cWindow, "scrl", window_scrl, 1);
+    rb_define_method(cWindow, "scroll", window_scrl, -1);
     rb_define_method(cWindow, "resize", window_resize, 2);
     //rb_define_method(cWindow, "keypad", window_keypad, 1);
     rb_define_method(cWindow, "keypad=", window_keypad, 1);
