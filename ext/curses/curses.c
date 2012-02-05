@@ -142,9 +142,12 @@ prep_window(VALUE class, WINDOW *window)
  * see also Curses.stdscr
  */
 static VALUE
-curses_init_screen(void)
+curses_init_screen(int argc, VALUE *argv, VALUE obj)
 {
+	VALUE blk;
+
     rb_secure(4);
+	rb_scan_args(argc, argv, "0&", &blk);
     if (rb_stdscr) return rb_stdscr;
     initscr();
     if (stdscr == 0) {
@@ -152,7 +155,17 @@ curses_init_screen(void)
     }
     clear();
     rb_stdscr = prep_window(cWindow, stdscr);
-    return rb_stdscr;
+	if (NIL_P(blk)) {
+		return rb_stdscr;
+	} else {
+		blk = rb_yield(rb_stdscr);
+#ifdef HAVE_ISENDWIN
+		if (!isendwin())
+#endif
+		endwin();
+		rb_stdscr = 0;
+		return blk;
+	}
 }
 
 /*
@@ -165,7 +178,7 @@ curses_init_screen(void)
  *
  * Many curses functions use this window.
  */
-#define curses_stdscr curses_init_screen
+#define curses_stdscr() curses_init_screen(0, NULL, mCurses)
 
 /*
  * Document-method: Curses.close_screen
@@ -1458,7 +1471,7 @@ window_initialize(VALUE obj, VALUE h, VALUE w, VALUE top, VALUE left)
     WINDOW *window;
 
     rb_secure(4);
-    curses_init_screen();
+    curses_stdscr();
     TypedData_Get_Struct(obj, struct windata, &windata_type, winp);
     if (winp->window) delwin(winp->window);
     window = newwin(NUM2INT(h), NUM2INT(w), NUM2INT(top), NUM2INT(left));
@@ -2594,7 +2607,7 @@ pad_initialize(VALUE obj, VALUE h, VALUE w)
     WINDOW *window;
 
     rb_secure(4);
-    curses_init_screen();
+    curses_stdscr();
     TypedData_Get_Struct(obj, struct windata, &windata_type, padp);
     if (padp->window) delwin(padp->window);
     window = newpad(NUM2INT(h), NUM2INT(w));
@@ -2787,8 +2800,8 @@ Init_curses(void)
     rb_define_module_function(mCurses, "TABSIZE=", curses_tabsize_set, 1);
 
     rb_define_module_function(mCurses, "use_default_colors", curses_use_default_colors, 0);
-    rb_define_module_function(mCurses, "init_screen", curses_init_screen, 0);
-    rb_define_module_function(mCurses, "close_screen", curses_close_screen, 0);
+    rb_define_module_function(mCurses, "init", curses_init_screen, -1);
+    rb_define_module_function(mCurses, "close", curses_close_screen, 0);
     rb_define_module_function(mCurses, "closed?", curses_closed, 0);
     //rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
     //rb_define_module_function(mCurses, "refresh", curses_refresh, 0);
