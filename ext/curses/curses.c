@@ -1896,6 +1896,28 @@ window_inch(VALUE obj)
 }
 
 /*
+ * Document-method: Curses::Window.[]
+ * call-seq: [](y, x)
+ *
+ * Returns the character at position Y,X of the window without moving the
+ * cursor.
+ */
+static VALUE
+window_aref(VALUE obj, VALUE y, VALUE x) // TODO accept ranges
+{
+    struct windata *winp;
+	int cy, cx;
+	VALUE ch;
+
+    GetWINDOW(obj, winp);
+	getyx(winp->window, cy, cx);
+    wmove(winp->window, NUM2INT(y), NUM2INT(x));
+    ch = CH2FIX(winch(winp->window));
+	wmove(winp->window, cy, cx);
+	return ch;
+}
+
+/*
  * Document-method: Curses::Window.addch
  * call-seq: addch(ch)
  *
@@ -1933,24 +1955,62 @@ window_insch(VALUE obj, VALUE ch)
 }
 
 /*
- * Document-method: Curses::Window.addstr
- * call-seq: addstr(str)
+ * Document-method: Curses::Window.print
+ * call-seq: print(str)
  *
  * add a string of characters +str+, to the window and advance cursor
  *
  */
 static VALUE
-window_addstr(VALUE obj, VALUE str)
+window_addstr(int argc, VALUE *argv, VALUE obj)
 {
-    if (!NIL_P(str)) {
 	struct windata *winp;
+	int str;
 
-	StringValue(str);
-	str = rb_str_export_locale(str);
 	GetWINDOW(obj, winp);
-	waddstr(winp->window, StringValueCStr(str));
-    }
-    return Qnil;
+
+	if (argc == 1) {
+		str = 0;
+	} else if (argc == 3) {
+		wmove(winp->window, NUM2INT(argv[0]), NUM2INT(argv[1]));
+		str = 2;
+	} else {
+		rb_raise(rb_eArgError, "wrong number of arguments(%d for 1/3)", argc);
+	}
+	if (!NIL_P(argv[str])) {
+		StringValue(argv[str]);
+		argv[str] = rb_str_export_locale(argv[str]);
+		waddstr(winp->window, StringValueCStr(argv[str]));
+	}
+	return Qnil;
+}
+
+/*
+ * Document-method: Curses::Window.puts
+ * call-seq: puts(str)
+ *
+ * add a string of characters +str+ to the window and advance the cursor to the
+ * next line, if necessary
+ */
+static VALUE
+window_putstr(int argc, VALUE *argv, VALUE obj)
+{
+	struct windata *winp;
+	int bx, x, z;
+
+	window_addstr(argc, argv, obj);
+
+	GetWINDOW(obj, winp);
+	getyx(winp->window, z, x);
+#ifdef getbegyx
+    getbegyx(winp->window, z, bx);
+#else
+	bx = winp->window->_begx;
+#endif
+	if (x != bx)
+		waddstr(winp->window, "\n");
+
+	return Qnil;
 }
 
 /*
@@ -1966,7 +2026,7 @@ window_addstr(VALUE obj, VALUE str)
 static VALUE
 window_addstr2(VALUE obj, VALUE str)
 {
-    window_addstr(obj, str);
+    window_addstr(1, &str, obj);
     return obj;
 }
 
@@ -2778,8 +2838,7 @@ Init_curses(void)
     rb_define_module_function(mCurses, "init_pair", curses_init_pair, 3);
     rb_define_module_function(mCurses, "init_color", curses_init_color, 4);
     rb_define_module_function(mCurses, "has_colors?", curses_has_colors, 0);
-    rb_define_module_function(mCurses, "can_change_color?",
-			      curses_can_change_color, 0);
+    rb_define_module_function(mCurses, "can_change_color?", curses_can_change_color, 0);
     rb_define_module_function(mCurses, "colors", curses_colors, 0);
     rb_define_module_function(mCurses, "color_content", curses_color_content, 1);
     rb_define_module_function(mCurses, "color_pairs", curses_color_pairs, 0);
@@ -2851,9 +2910,11 @@ Init_curses(void)
     rb_define_method(cWindow, "standout", window_standout, 0);
     rb_define_method(cWindow, "standend", window_standend, 0);
     rb_define_method(cWindow, "inc", window_inch, 0);
+    rb_define_method(cWindow, "[]", window_aref, 2);
     rb_define_method(cWindow, "putc", window_addch, 1);
     rb_define_method(cWindow, "insertc", window_insch, 1);
-    rb_define_method(cWindow, "print", window_addstr, 1);
+    rb_define_method(cWindow, "print", window_addstr, -1);
+    rb_define_method(cWindow, "puts", window_putstr, -1);
     rb_define_method(cWindow, "<<", window_addstr2, 1);
     rb_define_method(cWindow, "getc", window_getch, 0);
     rb_define_method(cWindow, "gets", window_getstr, 0);
