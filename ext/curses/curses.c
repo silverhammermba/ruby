@@ -1516,6 +1516,8 @@ window_addstr(int argc, VALUE *argv, VALUE obj)
         rb_raise(rb_eArgError, "wrong number of arguments(%d for 1/3)", argc);
     }
     if (!NIL_P(argv[str])) {
+		if (TYPE(argv[str]) != T_STRING)
+			argv[str] = rb_funcall(argv[str], rb_intern("to_s"), 0);
         StringValue(argv[str]);
         argv[str] = rb_str_export_locale(argv[str]);
         waddstr(winp->window, StringValueCStr(argv[str]));
