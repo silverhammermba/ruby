@@ -135,14 +135,14 @@ prep_window(VALUE class, WINDOW *window)
 /*-------------------------- module Curses --------------------------*/
 
 /*
- * Document-method: Curses.init_screen
+ * Document-method: Curses.init
  *
  * Initialize a standard screen
  *
  * see also Curses.stdscr
  */
 static VALUE
-curses_init_screen(int argc, VALUE *argv, VALUE obj)
+curses_init(int argc, VALUE *argv, VALUE obj)
 {
     VALUE blk;
 
@@ -181,24 +181,24 @@ curses_init_screen(int argc, VALUE *argv, VALUE obj)
 static VALUE
 curses_stdscr(void)
 {
-    return curses_init_screen(0, NULL, mCurses);
+    return curses_init(0, NULL, mCurses);
 }
 
 /*
- * Document-method: Curses.close_screen
+ * Document-method: Curses.close
  *
- * A program should always call Curses.close_screen before exiting or
+ * A program should always call Curses.close
  * escaping from curses mode temporarily. This routine
  * restores tty modes, moves the cursor to the lower
  * left-hand corner of the screen and resets the terminal
  * into the proper non-visual mode.
  *
- * Calling Curses.refresh or Curses.doupdate after a temporary
+ * Calling Curses.stdscr.refresh or Curses.doupdate after a temporary
  * escape causes the program to resume visual mode.
  *
  */
 static VALUE
-curses_close_screen(void)
+curses_close(void)
 {
     curses_stdscr();
 #ifdef HAVE_ISENDWIN
@@ -213,7 +213,7 @@ curses_close_screen(void)
  * This is no runtime method,
  * but a function called before the proc ends
  *
- * Similar to Curses.close_screen, except that it also
+ * Similar to Curses.close, except that it also
  * garbage collects/unregisters the Curses.stdscr
  */
 static void
@@ -333,13 +333,12 @@ curses_raw(VALUE obj, VALUE b)
  * are unaffected), making characters typed by the user
  * immediately available to the program.
  *
- * The Curses.nocbreak routine returns the terminal to normal (cooked) mode.
+ * Curses.cbreak=false returns the terminal to normal (cooked) mode.
  *
  * Initially the terminal may or may not be in cbreak mode,
  * as the mode is inherited; therefore, a program should
- * call Curses.cbreak or Curses.nocbreak explicitly.
- * Most interactive programs using curses set the cbreak mode.
- * Note that Curses.cbreak overrides Curses.raw.
+ * set Curses.cbreak explicitly.  Most interactive programs using curses set
+ * the cbreak mode.  Note that Curses.cbreak overrides Curses.raw.
  *
  * see also Curses.raw
  */
@@ -362,8 +361,9 @@ curses_cbreak(VALUE obj, VALUE b)
  *
  * If +bool+ is true, enables the underlying display device to translate the
  * return key into newline on input, and whether it translates newline into
- * return and line-feed on output (in either case, the call Curses.addch('\n')
- * does the equivalent of return and line feed on the virtual screen).
+ * return and line-feed on output (in either case, the call
+ * Curses.stdscr.putc("\n") does the equivalent of return and line feed on the
+ * virtual screen).
  *
  * Initially, these translations do occur. If you disable
  * them using Curses.nl=(false), curses will be able to make better use
@@ -442,16 +442,16 @@ curses_char(VALUE c)
 
 #ifdef HAVE_UNGETCH
 /*
- * Document-method: Curses.ungetch
- * call-seq: ungetch(ch)
+ * Document-method: Curses.ungetc
+ * call-seq: ungetc(ch)
  *
  * Places +ch+ back onto the input queue to be returned by
- * the next call to Curses.getch.
+ * the next call to Curses.stdscr.getc.
  *
  * There is just one input queue for all windows.
  */
 static VALUE
-curses_ungetch(VALUE obj, VALUE ch)
+curses_ungetc(VALUE obj, VALUE ch)
 {
     int c = curses_char(ch);
     curses_stdscr();
@@ -459,7 +459,7 @@ curses_ungetch(VALUE obj, VALUE ch)
     return Qnil;
 }
 #else
-#define curses_ungetch rb_f_notimplement
+#define curses_ungetc rb_f_notimplement
 #endif
 
 /*
@@ -761,7 +761,7 @@ no_mevent(void)
 } while (0)
 
 static void
-curses_mousedata_free(void *p)
+mousedata_free(void *p)
 {
     struct mousedata *mdata = p;
     if (mdata->mevent)
@@ -769,7 +769,7 @@ curses_mousedata_free(void *p)
 }
 
 static size_t
-curses_mousedata_memsize(const void *p)
+mousedata_memsize(const void *p)
 {
     const struct mousedata *mdata = p;
     size_t size = sizeof(*mdata);
@@ -780,11 +780,11 @@ curses_mousedata_memsize(const void *p)
 
 static const rb_data_type_t mousedata_type = {
     "mousedata",
-    {0, curses_mousedata_free, curses_mousedata_memsize,}
+    {0, mousedata_free, mousedata_memsize,}
 };
 
 /*
- * Document-method: Curses.getmouse
+ * Document-method: Curses::Mouse.get
  *
  * Returns coordinates of the mouse.
  *
@@ -806,12 +806,12 @@ mouse_get(VALUE obj)
 }
 
 /*
- * Document-method: Curses.ungetmouse
+ * Document-method: Curses::Mouse::unget
  *
  * It pushes a KEY_MOUSE event onto the input queue, and associates with that
  * event the given state data and screen-relative character-cell coordinates.
  *
- * The Curses.ungetmouse function behaves analogously to Curses.ungetch.
+ * The Curses.ungetmouse function behaves analogously to Curses.ungetc.
  */
 static VALUE
 mouse_unget(VALUE obj, VALUE mevent)
@@ -824,31 +824,43 @@ mouse_unget(VALUE obj, VALUE mevent)
 }
 
 /*
- * Document-method: Curses.mouseinterval
- * call-seq: mouseinterval(interval)
+ * Document-method: Curses::Mouse.interval
  *
- * The Curses.mouseinterval function sets the maximum time
- * (in thousands of a second) that can elapse between press
- * and release events for them to be recognized as a click.
- *
- * Use Curses.mouseinterval(0) to disable click resolution.
- * This function returns the previous interval value.
- *
- * Use Curses.mouseinterval(-1) to obtain the interval without
- * altering it.
+ * Return the maximum time (in thousands of a second) that can elapse between
+ * press and release events for them to be recognized as a click.
  *
  * The default is one sixth of a second.
  */
 static VALUE
-mouse_interval(VALUE obj, VALUE interval)
+mouse_interval_get(VALUE obj)
+{
+    curses_stdscr();
+    return mouseinterval(-1);
+}
+
+/*
+ * Document-method: Curses::Mouse.interval=
+ * call-seq: interval=(int)
+ *
+ * The Curses::Mouse.interval= function sets the maximum time
+ * (in thousands of a second) that can elapse between press
+ * and release events for them to be recognized as a click.
+ *
+ * Use Curses::Mouse.interval=(0) to disable click resolution.
+ * This function returns the previous int value.
+ *
+ * The default is one sixth of a second.
+ */
+static VALUE
+mouse_interval_set(VALUE obj, VALUE interval)
 {
     curses_stdscr();
     return mouseinterval(NUM2INT(interval)) ? Qtrue : Qfalse;
 }
 
 /*
- * Document-method: Curses.mousemask
- * call-seq: mousemask(mask)
+ * Document-method: Curses::Mouse.mask
+ * call-seq: mask(m)
  *
  * Returns the +mask+ of the reportable events
  */
@@ -1002,7 +1014,7 @@ window_initialize(VALUE obj, VALUE h, VALUE w, VALUE top, VALUE left)
     window = newwin(NUM2INT(h), NUM2INT(w), NUM2INT(top), NUM2INT(left));
     wclear(window);
     winp->window = window;
-
+	// TODO raise some error if the window is too big or too small
     return obj;
 }
 
@@ -1456,15 +1468,15 @@ window_aref(VALUE obj, VALUE y, VALUE x) // TODO accept ranges
 }
 
 /*
- * Document-method: Curses::Window.addch
- * call-seq: addch(ch)
+ * Document-method: Curses::Window.putc
+ * call-seq: putc(ch)
  *
  * Add a character +ch+, with attributes, to the window, then advance the cursor.
  *
- * see also the system manual for curs_addch(3)
+ * see also the system manual for curs_putc(3)
  */
 static VALUE
-window_addch(VALUE obj, VALUE ch)
+window_putc(VALUE obj, VALUE ch)
 {
     struct windata *winp;
 
@@ -1482,7 +1494,7 @@ window_addch(VALUE obj, VALUE ch)
  *
  */
 static VALUE
-window_insch(VALUE obj, VALUE ch)
+window_insertc(VALUE obj, VALUE ch)
 {
     struct windata *winp;
 
@@ -1500,7 +1512,7 @@ window_insch(VALUE obj, VALUE ch)
  *
  */
 static VALUE
-window_addstr(int argc, VALUE *argv, VALUE obj)
+window_print(int argc, VALUE *argv, VALUE obj)
 {
     struct windata *winp;
     int str;
@@ -1533,12 +1545,12 @@ window_addstr(int argc, VALUE *argv, VALUE obj)
  * next line, if necessary
  */
 static VALUE
-window_putstr(int argc, VALUE *argv, VALUE obj)
+window_puts(int argc, VALUE *argv, VALUE obj)
 {
     struct windata *winp;
     int bx, x, z;
 
-    window_addstr(argc, argv, obj);
+    window_print(argc, argv, obj);
 
     GetWINDOW(obj, winp);
     getyx(winp->window, z, x);
@@ -1592,7 +1604,7 @@ wgetch_func(void *_arg)
  *
  */
 static VALUE
-window_getch(VALUE obj)
+window_getc(VALUE obj)
 {
     struct windata *winp;
     struct wgetch_arg arg;
@@ -1638,7 +1650,7 @@ wgetstr_func(void *_arg)
  *
  */
 static VALUE
-window_getstr(VALUE obj)
+window_gets(VALUE obj)
 {
     struct windata *winp;
     struct wgetstr_arg arg;
@@ -1650,13 +1662,13 @@ window_getstr(VALUE obj)
 }
 
 /*
- * Document-method: Curses::Window.delc
+ * Document-method: Curses::Window.deletec
  *
  * Delete the character under the cursor
  *
  */
 static VALUE
-window_delch(VALUE obj)
+window_deletec(VALUE obj)
 {
     struct windata *winp;
 
@@ -1702,8 +1714,8 @@ window_insertln(VALUE obj)
 }
 
 /*
- * Document-method: Curses::Window.scrollok
- * call-seq: scrollok(bool)
+ * Document-method: Curses::Window.scroll=
+ * call-seq: scroll=(bool)
  *
  * Controls what happens when the cursor of a window
  * is moved off the edge of the window or scrolling region,
@@ -1714,7 +1726,7 @@ window_insertln(VALUE obj)
  *
  * If enabled, (+bool+ is true), the window is scrolled up one line
  * (Note that to get the physical scrolling effect on the terminal,
- * it is also necessary to call Curses::Window.idlok)
+ * it is also necessary to call Curses::Window.idl=(true))
  */
 static VALUE
 window_scroll_set(VALUE obj, VALUE bf)
@@ -1727,8 +1739,8 @@ window_scroll_set(VALUE obj, VALUE bf)
 }
 
 /*
- * Document-method: Curses::Window.idlok
- * call-seq: idlok(bool)
+ * Document-method: Curses::Window.idl=
+ * call-seq: idl=(bool)
  *
  * If +bool+ is +true+ curses considers using the hardware insert/delete
  * line feature of terminals so equipped.
@@ -1743,12 +1755,12 @@ window_scroll_set(VALUE obj, VALUE bf)
  *
  */
 static VALUE
-window_idlok(VALUE obj, VALUE bf)
+window_idl(VALUE obj, VALUE bf)
 {
     struct windata *winp;
 
     GetWINDOW(obj, winp);
-    idlok(winp->window, RTEST(bf) ? TRUE : FALSE);
+    idl(winp->window, RTEST(bf) ? TRUE : FALSE);
     return Qnil;
 }
 
@@ -1907,7 +1919,7 @@ window_attron(VALUE obj, VALUE attrs)
  *
  * The following video attributes, defined in <curses.h>, can
  * be passed to the routines Curses::Window.attron, Curses::Window.attroff,
- * and Curses::Window.attrset, or OR'd with the characters passed to addch.
+ * and Curses::Window.attrset, or OR'd with the characters passed to putc.
  *   A_NORMAL        Normal display (no highlight)
  *   A_STANDOUT      Best highlighting mode of the terminal.
  *   A_UNDERLINE     Underlining
@@ -2027,14 +2039,6 @@ window_resize(VALUE obj, VALUE lin, VALUE col)
  * call-seq:
  *   keypad=(bool)
  *
- * See Curses::Window.keypad
- */
-
-/*
- * Document-method: Curses::Window.keypad
- * call-seq:
- *   keypad(bool)
- *
  * Enables the keypad of the user's terminal.
  *
  * If enabled (+bool+ is +true+), the user can press a function key
@@ -2061,8 +2065,7 @@ window_keypad(VALUE obj, VALUE val)
     return Qnil;
 #else
     /* may have to raise exception on ERR */
-    return (keypad(winp->window,RTEST(val) ? TRUE : FALSE)) == OK ?
-    Qtrue : Qfalse;
+    return (keypad(winp->window,RTEST(val) ? TRUE : FALSE)) == OK ? Qtrue : Qfalse;
 #endif
 }
 #else
@@ -2318,7 +2321,8 @@ Init_curses(void)
     rb_undef_method(CLASS_OF(cMouse),"new");
     rb_define_module_function(cMouse, "get", mouse_get, 0);
     rb_define_module_function(cMouse, "unget", mouse_unget, 1);
-    rb_define_module_function(cMouse, "interval", mouse_interval, 1);
+    rb_define_module_function(cMouse, "interval", mouse_interval_get, 0);
+    rb_define_module_function(cMouse, "interval=", mouse_interval_set, 1);
     rb_define_module_function(cMouse, "mask", mouse_mask, 1);
     rb_define_method(cMouse, "eid", mouse_id, 0);
     rb_define_method(cMouse, "x", mouse_x, 0);
@@ -2333,8 +2337,8 @@ Init_curses(void)
     rb_define_module_function(mCurses, "TABSIZE=", curses_tabsize_set, 1);
 
     rb_define_module_function(mCurses, "use_default_colors", curses_use_default_colors, 0);
-    rb_define_module_function(mCurses, "init", curses_init_screen, -1);
-    rb_define_module_function(mCurses, "close", curses_close_screen, 0);
+    rb_define_module_function(mCurses, "init", curses_init, -1);
+    rb_define_module_function(mCurses, "close", curses_close, 0);
     rb_define_module_function(mCurses, "closed?", curses_closed, 0);
     rb_define_module_function(mCurses, "stdscr", curses_stdscr, 0);
     rb_define_module_function(mCurses, "doupdate", curses_doupdate, 0);
@@ -2344,7 +2348,7 @@ Init_curses(void)
     rb_define_module_function(mCurses, "nl=", curses_nl, 1);
     rb_define_module_function(mCurses, "beep", curses_beep, 0);
     rb_define_module_function(mCurses, "flash", curses_flash, 0);
-    rb_define_module_function(mCurses, "ungetc", curses_ungetch, 1);
+    rb_define_module_function(mCurses, "ungetc", curses_ungetc, 1);
     rb_define_module_function(mCurses, "curs_set", curses_curs_set, 1);
 #ifdef USE_COLOR
     rb_define_module_function(mCurses, "start_color", curses_start_color, 0);
@@ -2423,18 +2427,18 @@ Init_curses(void)
     rb_define_method(cWindow, "standend", window_standend, 0);
     rb_define_method(cWindow, "inc", window_inch, 0);
     rb_define_method(cWindow, "[]", window_aref, 2);
-    rb_define_method(cWindow, "putc", window_addch, 1);
-    rb_define_method(cWindow, "insertc", window_insch, 1);
-    rb_define_method(cWindow, "print", window_addstr, -1);
-    rb_define_method(cWindow, "puts", window_putstr, -1);
+    rb_define_method(cWindow, "putc", window_putc, 1);
+    rb_define_method(cWindow, "insertc", window_insertc, 1);
+    rb_define_method(cWindow, "print", window_print, -1);
+    rb_define_method(cWindow, "puts", window_puts, -1);
     rb_define_method(cWindow, "<<", window_addstr2, 1);
-    rb_define_method(cWindow, "getc", window_getch, 0);
-    rb_define_method(cWindow, "gets", window_getstr, 0);
-    rb_define_method(cWindow, "deletec", window_delch, 0);
+    rb_define_method(cWindow, "getc", window_getc, 0);
+    rb_define_method(cWindow, "gets", window_gets, 0);
+    rb_define_method(cWindow, "deletec", window_deletec, 0);
     rb_define_method(cWindow, "deleteln", window_deleteln, 0);
     rb_define_method(cWindow, "insertln", window_insertln, 0);
     rb_define_method(cWindow, "scroll=", window_scroll_set, 1);
-    rb_define_method(cWindow, "idl=", window_idlok, 1);
+    rb_define_method(cWindow, "idl=", window_idl, 1);
     rb_define_method(cWindow, "setscrreg", window_setscrreg, 2);
     rb_define_method(cWindow, "scroll", window_scroll, -1);
     rb_define_method(cWindow, "resize", window_resize, 2);
