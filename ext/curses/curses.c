@@ -251,48 +251,6 @@ curses_closed(void)
 #endif
 
 /*
- * Document-method: Curses.clear
- *
- * Clears every position on the screen completely,
- * so that a subsequent call by Curses.refresh for the screen/window
- * will be repainted from scratch.
- */
-static VALUE
-curses_clear(VALUE obj)
-{
-    curses_stdscr();
-    wclear(stdscr);
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.clrtoeol
- *
- * Clears to the end of line, that the cursor is currently on.
- */
-static VALUE
-curses_clrtoeol(void)
-{
-    curses_stdscr();
-    clrtoeol();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.refresh
- *
- * Refreshes the windows and lines.
- *
- */
-static VALUE
-curses_refresh(VALUE obj)
-{
-    curses_stdscr();
-    refresh();
-    return Qnil;
-}
-
-/*
  * Document-method: Curses.doupdate
  *
  * Refreshes the windows and lines.
@@ -505,249 +463,6 @@ curses_ungetch(VALUE obj, VALUE ch)
 #endif
 
 /*
- * Document-method: Curses.setpos
- * call-seq: setpos(y, x)
- *
- * A setter for the position of the cursor,
- * using coordinates +x+ and +y+
- *
- */
-static VALUE
-curses_setpos(VALUE obj, VALUE y, VALUE x)
-{
-    curses_stdscr();
-    move(NUM2INT(y), NUM2INT(x));
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.standout
- *
- * Enables the best highlighting mode of the terminal.
- *
- * This is equivalent to Curses:Window.attron(A_STANDOUT)
- *
- * see also Curses::Window.attrset additional information
- */
-static VALUE
-curses_standout(VALUE obj)
-{
-    curses_stdscr();
-    standout();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.standend
- *
- * Enables the Normal display (no highlight)
- *
- * This is equivalent to Curses.attron(A_NORMAL)
- *
- * see also Curses::Window.attrset for additional information.
- */
-static VALUE
-curses_standend(VALUE obj)
-{
-    curses_stdscr();
-    standend();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.inch
- *
- * Returns the character at the current position.
- */
-static VALUE
-curses_inch(VALUE obj)
-{
-    curses_stdscr();
-    return CH2FIX(inch());
-}
-
-/*
- * Document-method: Curses.addch
- * call-seq: addch(ch)
- *
- * Add a character +ch+, with attributes, then advance the cursor.
- *
- * see also the system manual for curs_addch(3)
- */
-static VALUE
-curses_addch(VALUE obj, VALUE ch)
-{
-    curses_stdscr();
-    addch(NUM2CH(ch));
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.insch
- * call-seq: insch(ch)
- *
- * Insert a character +ch+, before the cursor.
- *
- */
-static VALUE
-curses_insch(VALUE obj, VALUE ch)
-{
-    curses_stdscr();
-    insch(NUM2CH(ch));
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.addstr
- * call-seq: addstr(str)
- *
- * add a string of characters +str+, to the window and advance cursor
- *
- */
-static VALUE
-curses_addstr(VALUE obj, VALUE str)
-{
-    StringValue(str);
-    str = rb_str_export_locale(str);
-    curses_stdscr();
-    if (!NIL_P(str)) {
-	addstr(StringValueCStr(str));
-    }
-    return Qnil;
-}
-
-static VALUE
-getch_func(void *arg)
-{
-    int *ip = (int *)arg;
-    *ip = getch();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.getch
- *
- * Read and returns a character from the window.
- *
- * See Curses::Key to all the function KEY_* available
- *
- */
-static VALUE
-curses_getch(VALUE obj)
-{
-    int c;
-
-    curses_stdscr();
-    rb_thread_blocking_region(getch_func, (void *)&c, RUBY_UBF_IO, 0);
-    if (c == EOF) return Qnil;
-    if (rb_isprint(c)) {
-	char ch = (char)c;
-
-	return rb_locale_str_new(&ch, 1);
-    }
-    return UINT2NUM(c);
-}
-
-/* This should be big enough.. I hope */
-#define GETSTR_BUF_SIZE 1024
-
-static VALUE
-getstr_func(void *arg)
-{
-    char *rtn = (char *)arg;
-#if defined(HAVE_GETNSTR)
-    getnstr(rtn,GETSTR_BUF_SIZE-1);
-#else
-    getstr(rtn);
-#endif
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.getstr
- *
- * This is equivalent to a series f Curses::Window.getc calls
- *
- */
-static VALUE
-curses_getstr(VALUE obj)
-{
-    char rtn[GETSTR_BUF_SIZE];
-
-    curses_stdscr();
-    rb_thread_blocking_region(getstr_func, (void *)rtn, RUBY_UBF_IO, 0);
-    return rb_locale_str_new_cstr(rtn);
-}
-
-/*
- * Document-method: Curses.delch
- *
- * Delete the character under the cursor
- *
- */
-static VALUE
-curses_delch(VALUE obj)
-{
-    curses_stdscr();
-    delch();
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.deleteln
- *
- * Delete the line under the cursor.
- *
- */
-static VALUE
-curses_deleteln(VALUE obj)
-{
-    curses_stdscr();
-#if defined(HAVE_DELETELN) || defined(deleteln)
-    deleteln();
-#endif
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.insertln
- *
- * Inserts a line above the cursor, and the bottom line is lost
- *
- */
-static VALUE
-curses_insertln(VALUE obj)
-{
-    curses_stdscr();
-#if defined(HAVE_INSERTLN) || defined(insertln)
-    insertln();
-#endif
-    return Qnil;
-}
-
-/*
- * Document-method: Curses.lines
- *
- * Returns the number of lines on the screen
- */
-static VALUE
-curses_lines(void)
-{
-    return INT2FIX(LINES);
-}
-
-/*
- * Document-method: Curses.cols
- *
- * Returns the number of columns on the screen
- */
-static VALUE
-curses_cols(void)
-{
-    return INT2FIX(COLS);
-}
-
-/*
  * Document-method: Curses.curs_set
  * call-seq: curs_set(visibility)
  *
@@ -765,152 +480,6 @@ curses_curs_set(VALUE obj, VALUE visibility)
     return (n = curs_set(NUM2INT(visibility)) != ERR) ? INT2FIX(n) : Qnil;
 #else
     return Qnil;
-#endif
-}
-
-/*
- * Document-method: Curses.scrl
- * call-seq: scrl(num)
- *
- * Scrolls the current window Fixnum +num+ lines.
- * The current cursor position is not changed.
- *
- * For positive +num+, it scrolls up.
- *
- * For negative +num+, it scrolls down.
- *
- */
-static VALUE
-curses_scrl(VALUE obj, VALUE n)
-{
-    /* may have to raise exception on ERR */
-#ifdef HAVE_SCRL
-    curses_stdscr();
-    return (scrl(NUM2INT(n)) == OK) ? Qtrue : Qfalse;
-#else
-    return Qfalse;
-#endif
-}
-
-/*
- * Document-method: Curses.setscrreg
- *
- * call-seq:
- *   setscrreg(top, bottom)
- *
- * Set a software scrolling region in a window.
- * +top+ and +bottom+ are lines numbers of the margin.
- *
- * If this option and Curses.scrollok are enabled, an attempt to move off
- * the bottom margin line causes all lines in the scrolling region
- * to scroll one line in the direction of the first line.
- * Only the text of the window is scrolled.
- *
- */
-static VALUE
-curses_setscrreg(VALUE obj, VALUE top, VALUE bottom)
-{
-    /* may have to raise exception on ERR */
-#ifdef HAVE_SETSCRREG
-    curses_stdscr();
-    return (setscrreg(NUM2INT(top), NUM2INT(bottom)) == OK) ? Qtrue : Qfalse;
-#else
-    return Qfalse;
-#endif
-}
-
-/*
- * Document-method: Curses.attroff
- * call-seq: attroff(attrs)
- *
- * Turns on the named attributes +attrs+ without affecting any others.
- *
- * See also Curses::Window.attrset for additional information.
- */
-static VALUE
-curses_attroff(VALUE obj, VALUE attrs)
-{
-    curses_stdscr();
-    return window_attroff(rb_stdscr,attrs);
-    /* return INT2FIX(attroff(NUM2INT(attrs))); */
-}
-
-/*
- * Document-method: Curses.attron
- * call-seq: attron(attrs)
- *
- * Turns off the named attributes +attrs+
- * without turning any other attributes on or off.
- *
- * See also Curses::Window.attrset for additional information.
- */
-static VALUE
-curses_attron(VALUE obj, VALUE attrs)
-{
-    curses_stdscr();
-    return window_attron(rb_stdscr,attrs);
-    /* return INT2FIX(attroff(NUM2INT(attrs))); */
-}
-
-/*
- * Document-method: Curses.attrset
- * call-seq: attrset(attrs)
- *
- * Sets the current attributes of the given window to +attrs+.
- *
- * see also Curses::Window.attrset
- *
- */
-static VALUE
-curses_attrset(VALUE obj, VALUE attrs)
-{
-    curses_stdscr();
-    return window_attrset(rb_stdscr,attrs);
-    /* return INT2FIX(attroff(NUM2INT(attrs))); */
-}
-
-/*
- * Document-method: Curses.bkgdset
- * call-seq: bkgdset(ch)
- *
- * Manipulate the background of the named window
- * with character Integer +ch+
- *
- * The background becomes a property of the character
- * and moves with the character through any scrolling
- * and insert/delete line/character operations.
- *
- * see also the system manual for curs_bkgd(3)
- */
-static VALUE
-curses_bkgdset(VALUE obj, VALUE ch)
-{
-#ifdef HAVE_BKGDSET
-    curses_stdscr();
-    bkgdset(NUM2CH(ch));
-#endif
-    return Qnil;
-}
-
-/*
- * call-seq: bkgd(ch)
- *
- * Window background manipulation routines.
- *
- * Set the background property of the current
- * and then apply the character Integer +ch+ setting
- * to every character position in that window.
- *
- * see also the system manual for curs_bkgd(3)
- */
-static VALUE
-curses_bkgd(VALUE obj, VALUE ch)
-{
-#ifdef HAVE_BKGD
-    curses_stdscr();
-    return (bkgd(NUM2CH(ch)) == OK) ? Qtrue : Qfalse;
-#else
-    return Qfalse;
 #endif
 }
 
@@ -990,32 +559,6 @@ curses_escdelay_get(VALUE obj)
 #else
 #define curses_escdelay_get rb_f_notimplement
 #endif
-
-/*
- * Document-method: Curses.resize
- * call-seq: resize(lines, cols)
- *
- * alias for Curses.resizeterm
- *
- */
-
-/*
- * Document-method: Curses.resizeterm
- * call-seq: resizeterm(lines, cols)
- *
- * Resize the current term to Fixnum +lines+ and Fixnum +cols+
- *
- */
-static VALUE
-curses_resizeterm(VALUE obj, VALUE lin, VALUE col)
-{
-#if defined(HAVE_RESIZETERM)
-    curses_stdscr();
-    return (resizeterm(NUM2INT(lin),NUM2INT(col)) == OK) ? Qtrue : Qfalse;
-#else
-    return Qnil;
-#endif
-}
 
 #ifdef USE_COLOR
 /*
@@ -1250,7 +793,7 @@ static const rb_data_type_t mousedata_type = {
  * See the BUTTON*, ALL_MOUSE_EVENTS and REPORT_MOUSE_POSITION constants, to examine the mask of the event
  */
 static VALUE
-curses_getmouse(VALUE obj)
+mouse_get(VALUE obj)
 {
     struct mousedata *mdata;
     VALUE val;
@@ -1271,7 +814,7 @@ curses_getmouse(VALUE obj)
  * The Curses.ungetmouse function behaves analogously to Curses.ungetch.
  */
 static VALUE
-curses_ungetmouse(VALUE obj, VALUE mevent)
+mouse_unget(VALUE obj, VALUE mevent)
 {
     struct mousedata *mdata;
 
@@ -1297,7 +840,7 @@ curses_ungetmouse(VALUE obj, VALUE mevent)
  * The default is one sixth of a second.
  */
 static VALUE
-curses_mouseinterval(VALUE obj, VALUE interval)
+mouse_interval(VALUE obj, VALUE interval)
 {
     curses_stdscr();
     return mouseinterval(NUM2INT(interval)) ? Qtrue : Qfalse;
@@ -1310,7 +853,7 @@ curses_mouseinterval(VALUE obj, VALUE interval)
  * Returns the +mask+ of the reportable events
  */
 static VALUE
-curses_mousemask(VALUE obj, VALUE mask)
+mouse_mask(VALUE obj, VALUE mask)
 {
     curses_stdscr();
     return INT2NUM(mousemask(NUM2UINT(mask),NULL));
@@ -1329,56 +872,34 @@ static VALUE func_name (VALUE mouse) \
  *
  * Returns the current mouse id
  */
-DEFINE_MOUSE_GET_MEMBER(curs_mouse_id, id)
+DEFINE_MOUSE_GET_MEMBER(mouse_id, id)
 /*
  * Document-method: Curses::Mouse.x
  *
  * Returns the current mouse's X coordinate
  */
-DEFINE_MOUSE_GET_MEMBER(curs_mouse_x, x)
+DEFINE_MOUSE_GET_MEMBER(mouse_x, x)
 /*
  * Document-method: Curses::Mouse.y
  *
  * Returns the current mouse's Y coordinate
  */
-DEFINE_MOUSE_GET_MEMBER(curs_mouse_y, y)
+DEFINE_MOUSE_GET_MEMBER(mouse_y, y)
 /*
  * Document-method: Curses::Mouse.z
  *
  * Returns the current mouse's Z coordinate
  */
-DEFINE_MOUSE_GET_MEMBER(curs_mouse_z, z)
+DEFINE_MOUSE_GET_MEMBER(mouse_z, z)
 /*
  * Document-method: Curses::Mouse.bstate
  *
  * Returns the current mouse's button state.  Use this with the button state
  * constants to determine which buttons were pressed.
  */
-DEFINE_MOUSE_GET_MEMBER(curs_mouse_bstate, bstate)
+DEFINE_MOUSE_GET_MEMBER(mouse_bstate, bstate)
 #undef define_curs_mouse_member
 #endif /* USE_MOUSE */
-
-#ifdef HAVE_TIMEOUT
-/*
- * Document-method: Curses.timeout=
- * call-seq: timeout=(delay)
- *
- * Sets block and non-blocking reads for the window.
- * - If delay is negative, blocking read is used (i.e., waits indefinitely for input).
- * - If delay is zero, then non-blocking read is used (i.e., read returns ERR if no input is waiting).
- * - If delay is positive, then read blocks for delay milliseconds, and returns ERR if there is still no input.
- *
- */
-static VALUE
-curses_timeout(VALUE obj, VALUE delay)
-{
-    curses_stdscr();
-    timeout(NUM2INT(delay));
-    return Qnil;
-}
-#else
-#define curses_timeout rb_f_notimplement
-#endif
 
 #ifdef HAVE_DEF_PROG_MODE
 /*
@@ -2191,7 +1712,7 @@ window_insertln(VALUE obj)
  * it is also necessary to call Curses::Window.idlok)
  */
 static VALUE
-window_scrollok(VALUE obj, VALUE bf)
+window_scroll_set(VALUE obj, VALUE bf)
 {
     struct windata *winp;
 
@@ -2278,21 +1799,6 @@ window_color_set(VALUE obj, VALUE col)
 
 /*
  * Document-method: Curses::Window.scroll
- *
- * Scrolls the current window up one line.
- */
-static VALUE
-window_scroll(VALUE obj)
-{
-    struct windata *winp;
-
-    GetWINDOW(obj, winp);
-    /* may have to raise exception on ERR */
-    return (scroll(winp->window) == OK) ? Qtrue : Qfalse;
-}
-
-/*
- * Document-method: Curses::Window.scroll
  * call-seq: scroll(num)
  *
  * Scrolls the current window Fixnum +num+ lines or 1 line if no argument is
@@ -2306,7 +1812,7 @@ window_scroll(VALUE obj)
  *
  */
 static VALUE
-window_scrl(int argc, VALUE *argv, VALUE obj)
+window_scroll(int argc, VALUE *argv, VALUE obj)
 {
 	VALUE n;
 	int args;
@@ -2586,7 +2092,7 @@ window_nodelay(VALUE obj, VALUE val)
 #define window_nodelay rb_f_notimplement
 #endif
 
-#ifdef HAVE_WTIMEOUT
+#if defined HAVE_WTIMEOUT || defined HAVE_NODELAY
 /*
  * Document-method: Curses::Window.timeout=
  * call-seq: timeout=(delay)
@@ -2603,8 +2109,33 @@ window_timeout(VALUE obj, VALUE delay)
     struct windata *winp;
     GetWINDOW(obj,winp);
 
+#ifdef HAVE_WTIMEOUT
     wtimeout(winp->window,NUM2INT(delay));
-    return Qnil;
+    return Qtrue;
+#else
+	if (NUM2INT(delay) == 0)
+	{
+#if defined(__NetBSD__) && !defined(NCURSES_VERSION)
+		nodelay(winp->window, TRUE);
+		return Qnil;
+#else
+		return nodelay(winp->window, TRUE) == OK ? Qtrue : Qfalse;
+#endif
+	}
+	else if (NUM2INT(delay) < 0)
+	{
+#if defined(__NetBSD__) && !defined(NCURSES_VERSION)
+		nodelay(winp->window, FALSE);
+		return Qnil;
+#else
+		return nodelay(winp->window, FALSE) == OK ? Qtrue : Qfalse;
+#endif
+	}
+	else
+	{
+		return Qfalse;
+	}
+#endif
 }
 #else
 #define window_timeout rb_f_notimplement
@@ -2806,10 +2337,10 @@ Init_curses(void)
      */
     cMouse = rb_define_class_under(mCurses,"Mouse",rb_cObject);
     rb_undef_method(CLASS_OF(cMouse),"new");
-    rb_define_module_function(cMouse, "get", curses_getmouse, 0);
-    rb_define_module_function(cMouse, "unget", curses_ungetmouse, 1);
-    rb_define_module_function(cMouse, "interval", curses_mouseinterval, 1);
-    rb_define_module_function(cMouse, "mask", curses_mousemask, 1);
+    rb_define_module_function(cMouse, "get", mouse_get, 0);
+    rb_define_module_function(cMouse, "unget", mouse_unget, 1);
+    rb_define_module_function(cMouse, "interval", mouse_interval, 1);
+    rb_define_module_function(cMouse, "mask", mouse_mask, 1);
     rb_define_method(cMouse, "eid", curs_mouse_id, 0);
     rb_define_method(cMouse, "x", curs_mouse_x, 0);
     rb_define_method(cMouse, "y", curs_mouse_y, 0);
@@ -2958,10 +2489,10 @@ Init_curses(void)
     rb_define_method(cWindow, "deleteln", window_deleteln, 0);
     rb_define_method(cWindow, "insertln", window_insertln, 0);
     //rb_define_method(cWindow, "scroll", window_scroll, 0);
-    rb_define_method(cWindow, "scroll=", window_scrollok, 1);
-    rb_define_method(cWindow, "idlok", window_idlok, 1);
+    rb_define_method(cWindow, "scroll=", window_scroll_set, 1);
+    rb_define_method(cWindow, "idl=", window_idlok, 1);
     rb_define_method(cWindow, "setscrreg", window_setscrreg, 2);
-    rb_define_method(cWindow, "scroll", window_scrl, -1);
+    rb_define_method(cWindow, "scroll", window_scroll, -1);
     rb_define_method(cWindow, "resize", window_resize, 2);
     //rb_define_method(cWindow, "keypad", window_keypad, 1);
     rb_define_method(cWindow, "keypad=", window_keypad, 1);
