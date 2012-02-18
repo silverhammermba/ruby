@@ -967,7 +967,7 @@ fdbm_reject(VALUE obj)
  * - {Berkeley DB}[http://en.wikipedia.org/wiki/Berkeley_DB] versions
  *   1 thru 5, also known as BDB and Sleepycat DB, now owned by Oracle
  *   Corporation.
- * - Berkeley DB 1.x, still found in FreeBSD and OpenBSD.
+ * - Berkeley DB 1.x, still found in 4.4BSD derivatives (FreeBSD, OpenBSD, etc).
  * - {gdbm}[http://www.gnu.org/software/gdbm/], the GNU implementation of dbm.
  * - {qdbm}[http://fallabs.com/qdbm/index.html], another open source
  *   reimplementation of dbm.
@@ -1082,10 +1082,10 @@ Init_dbm(void)
 #if defined(HAVE_DB_VERSION)
     /* The version of the dbm library, if using Berkeley DB */
     rb_define_const(rb_cDBM, "VERSION",  rb_str_new2(db_version(NULL, NULL, NULL)));
-#elif defined(HAVE_GDBM_VERSION)
+#elif defined(HAVE_DECLARED_LIBVAR_GDBM_VERSION)
     /* since gdbm 1.9 */
     rb_define_const(rb_cDBM, "VERSION",  rb_str_new2(gdbm_version));
-#elif defined(HAVE_LIBVAR_GDBM_VERSION)
+#elif defined(HAVE_UNDECLARED_LIBVAR_GDBM_VERSION)
     /* ndbm.h doesn't declare gdbm_version until gdbm 1.8.3.
      * See extconf.rb for more information. */
     {
@@ -1096,6 +1096,10 @@ Init_dbm(void)
     rb_define_const(rb_cDBM, "VERSION",  rb_sprintf("QDBM %s", dpversion));
 #elif defined(_DB_H_)
     rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("Berkeley DB (unknown)"));
+#elif defined(_GDBM_H_)
+    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("GDBM (unknown)"));
+#elif defined(_DBM_IOERR)
+    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("NDBM (4.3BSD)"));
 #else
     rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("unknown"));
 #endif

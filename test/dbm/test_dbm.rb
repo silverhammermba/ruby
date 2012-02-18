@@ -96,6 +96,24 @@ if defined? DBM
       end
     end
 
+    def test_dbmfile_suffix
+      prefix = File.basename(@path)
+      suffixes = Dir.entries(@tmpdir).grep(/\A#{Regexp.escape prefix}/) { $' }.sort
+      case DBM::VERSION
+      when /\bNDBM\b/
+        assert_equal(%w[.dir .pag], suffixes)
+      when /\bGDBM\b/
+        assert_equal(%w[.dir .pag], suffixes)
+      when /\bBerkeley DB\b/
+        assert_equal(%w[.db], suffixes)
+      when /\bQDBM\b/
+        assert_equal(%w[.dir .pag], suffixes)
+      end
+      if suffixes == %w[.db]
+        assert_match(/\bBerkeley DB\b/, DBM::VERSION)
+      end
+    end
+
     def test_s_new_has_no_block
       # DBM.new ignore the block
       foo = true
@@ -105,7 +123,7 @@ if defined? DBM
     end
 
     def test_s_open_no_create
-      skip "dbm_open() is broken on libgdbm 1.8.0 or prior" if /GDBM version 1\.(?:[0-7]|8\.0)/ =~ DBM::VERSION
+      skip "dbm_open() is broken on libgdbm 1.8.0 or prior (#{DBM::VERSION})" if /GDBM version 1\.(?:[0-7]\b|8\.0)/ =~ DBM::VERSION
       assert_nil(dbm = DBM.open("#{@tmpdir}/#{@prefix}", nil))
     ensure
       dbm.close if dbm
@@ -529,7 +547,7 @@ if defined? DBM
     end
 
     def test_writer_open_notexist
-      skip "dbm_open() is broken on libgdbm 1.8.0 or prior" if /GDBM version 1\.(?:[0-7]|8\.0)/ =~ DBM::VERSION
+      skip "dbm_open() is broken on libgdbm 1.8.0 or prior (#{DBM::VERSION})" if /GDBM version 1\.(?:[0-7]\b|8\.0)/ =~ DBM::VERSION
       assert_raise(Errno::ENOENT) {
         DBM.open("#{@tmproot}/a", 0666, DBM::WRITER)
       }

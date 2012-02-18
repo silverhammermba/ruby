@@ -1,9 +1,477 @@
+Sun Feb 19 00:25:55 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb: don't choose 'dbm' if _GDB_H_ is defined which
+	  is available since GDBM 1.9 because 'gdbm_compat' is appropriate
+	  choise since GDBM 1.8.1.
+
+Sat Feb 18 23:27:00 2012  Kenta Murata  <mrkn@mrkn.jp>
+
+	* random.c: remove a duplicated comment.
+
+Sat Feb 18 18:43:13 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb (dblib): prefer recent GDBM over older GDBM.
+	  (have_declared_libvar): new function to check a declared variable
+	  exists in a library.
+	  (have_undeclared_libvar): renamed from renamed from have_libvar.
+	  (headers.db_check2): check that GDBM version variable if GDBM header
+	  is choosen.
+
+	* ext/dbm/dbm.c (Init_dbm): use HAVE_DECLARED_LIBVAR_GDBM_VERSION and
+	  HAVE_UNDECLARED_LIBVAR_GDBM_VERSION macro.
+
+Sat Feb 18 13:53:01 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/dbm/test_dbm.rb (test_dbmfile_suffix): DBM::VERSION should
+	  be Berkeley DB if foo.db is created by DBM.open.
+
+Sat Feb 18 13:40:37 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/dbm/test_dbm.rb (test_dbmfile_suffix): test dbm file suffix.
+
+Sat Feb 18 12:50:59 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/dbm.c (DBM::VERSION): define it by detecting _GDBM_H_ or
+	  _DBM_IOERR.
+
+Sat Feb 18 07:52:45 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* tool/enc-unicode.rb: don't use 1.9 feature on tools.
+
+Sat Feb 18 02:48:39 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/fileutils.rb: refactored FileUtil methods to use the
+	  `define_command` API.  Patch from 7rans <transfire@gmail.com>
+	* test/fileutils/test_dryrun.rb: corresponding test refactoring
+	* test/fileutils/test_nowrite.rb: ditto
+	* test/fileutils/test_verbose.rb: ditto
+
+Fri Feb 17 21:39:36 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb: remove dbm.
+
+Fri Feb 17 21:18:39 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb: refine header/libraty mismatch detection.
+	  check only for ndbm.h except libc.  check _GDBM_H_ for gdbm.
+	  check _DBM_IOERR for the original ndbm.
+
+Fri Feb 17 20:30:44 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb: don't check libdbm.  It is not a ndbm
+	  implementation.  (libdbm in Version 7 Unix is database library
+	  for single database per process.)
+
+Fri Feb 17 15:38:53 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* Merge Onigmo-5.13.1. [ruby-dev:45057] [Feature #5820]
+	  https://github.com/k-takata/Onigmo
+	  cp reg{comp,enc,error,exec,parse,syntax}.c reg{enc,int,parse}.h
+	  cp oniguruma.h
+	  cp tool/enc-unicode.rb
+	  cp -r enc/
+
+Fri Feb 17 15:20:30 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enum.c (enum_each_slice): arrays to be yielded can be newly
+	  created in the block.
+
+	* enum.c: move work variables to objects not to let called blocks
+	  access stack area out of scope.  [Bug #5801]
+
+Fri Feb 17 12:35:55 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* tool/merger.rb: remove borders from the commit message which is used
+	  when the commit doesn't change ChangeLog.
+
+Fri Feb 17 11:50:11 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* common.mk (btest, btest-ruby, test-sample test-knownbugs)
+	  (test-all, test-ruby): depend on prog.
+
+Fri Feb 17 09:56:22 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/mkmf.rb (create_header): log the content of header.
+
+Fri Feb 17 09:44:55 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* tool/transcode-tblgen.rb (import_ucm): don't use \h because the
+	  script should work with ruby 1.8.
+
+	* tool/enc-unicode.rb: ditto.
+
+Fri Feb 17 07:33:29 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enum.c (id_lshift): use constant ID.
+
+Fri Feb 17 07:30:53 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb: refactored to split too long conditions.
+
+Fri Feb 17 00:23:25 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/dbm/test_dbm.rb: fix skip condition for libgdbm 1.8.0 or prior.
+	  reported by Bohuslav Kabrda.
+	  [ruby-core:42685] [ruby-trunk - Bug #6036]
+
+Fri Feb 17 00:04:21 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/dbm/extconf.rb: check _DB_H_ macro unavailable except
+	  Berkeley DB library.
+
+Thu Feb 16 05:41:35 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* insns.def (splatarray): make new array if flag is set.
+
+	* compile.c (iseq_compile_each): make new array with
+	  splat. [ruby-core:21901][Feature #1125]
+
+Thu Feb 16 00:14:04 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* lib/abbrev.rb (Array#abbrev): add missing '"' in documentation.
+
+Wed Feb 15 22:20:19 2012  CHIKANAGA Tomoyuki  <nagachika00@gmail.com>
+
+	* cont.c (rb_fiber_reset_root_local_storage): add a new function to
+	  restore rb_thread_t::local_storage.
+
+	* cont.c (rb_obj_is_fiber): add a new function to tell finalizer to
+	  prevent fibers from destroy.
+
+	* gc.c (rb_objspace_call_finalizer): don't sweep fibers at finalizing
+	  objspace.
+
+	* internal.h (rb_fiber_reset_root_local_storage, rb_obj_is_fiber):
+	  add prototypes.
+
+	* vm.c (ruby_vm_destruct): reset main thread's local_storage before
+	  free main thread. rb_thread_t::local_storage is replaced by fiber's
+	  local storage when forked from fiber, and it should be already freed
+	  when the fiber was destroyed. [ruby-core:41456] [Bug #5700]
+
+	* test/ruby/test_fiber.rb (test_fork_from_fiber): add test for fork
+	  from fiber.
+
+Wed Feb 15 19:57:02 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/fiddle/closure.c (callback): deal with unsigned integers.
+	  [ruby-core:42458][Bug #5991][Bug #6022]
+
+	* ext/fiddle/conversions.c (value_to_generic, generic_to_value):
+	  ditto.
+
+	* ext/fiddle/closure.c (callback): same as r34506.
+
+Wed Feb 15 17:41:31 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* io.c (io_strsetbuf): call rb_str_modify to make str independent
+	  before calling rb_str_set_len for r34580.
+
+Wed Feb 15 12:30:10 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (Init_zlib):  Added Zlib::TEXT and note that
+	  Zlib::ASCII is deprecated in zlib 1.2.3 and newer.
+
+Wed Feb 15 12:24:40 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c:  Move constant descriptions to constants.  Remove
+	  extra comment block at the top of Init_zlib().
+
+Wed Feb 15 12:30:46 2012  Marc-Andre Lafortune  <ruby-core@marc-andre.ca>
+
+	* lib/ostruct.rb: Create getters and setters after dup.
+	  [Bug #6028] [rubyspecs:0380bcc]
+
+Wed Feb 15 10:59:52 2012  Narihiro Nakamura  <authornari@gmail.com>
+
+	* gc.c (HEAP_BITMAP_LIMIT): HEAP_BITMAP_LIMIT is computed on the
+	  basis of HEAP_SIZE because it must covers a whole heap block.
+	  [ruby-trunk - Bug #6006]
+
+Wed Feb 15 09:27:45 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (Init_zlib):  Added Zlib::FIXED and Zlib::RLE
+	  strategies.
+	* NEWS:  Add note about the new Zlib constants.
+
+Wed Feb 15 09:11:36 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c:  Improve documentation.  [ruby-trunk - Bug #5948]
+
+Wed Feb 15 07:28:54 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* encoding.c (Init_Encoding):  Add IO example of internal and external
+	  encoding.  Fixed a typo in the force_encoding example.  [#5949]
+
+Wed Feb 15 06:58:21 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* encoding.c (Init_Encoding):  Add Encoding documentation.
+	  [ruby-trunk - Bug #5949]
+	* encoding.c (rb_set_default_external):  Fix typo in documentation.
+
+Tue Feb 14 20:22:11 2012  Narihiro Nakamura  <authornari@gmail.com>
+
+	* gc.c (CEILDIV): rename to a appropriate name.
+
+Tue Feb 14 18:07:20 2012  Narihiro Nakamura  <authornari@gmail.com>
+
+	* gc.c (assign_heap_slot): SEGV happens cause on 64-bit platform
+	  sometime there should be `objs-=2` instead of `objs--`.
+	  [Bug #6006]
+	  patched by Sokolov Yura. https://github.com/ruby/ruby/pull/92
+
+Tue Feb 14 16:00:30 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (io_setstrbuf): cut down the buffer if longer.
+
+Tue Feb 14 15:06:37 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit/assertions.rb (build_message): skip escaped
+	  question marks.
+
+Tue Feb 14 12:10:04 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* variable.c (autoload_const_set, autoload_require): fix
+	  signatures.
+
+Tue Feb 14 05:23:40 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* process.c (proc_wait):  Change typo "SystemError" to
+	  "SystemCallError".  [ruby-trunk - Bug #5962]
+	* process.c (proc_wait2):  ditto
+
+Tue Feb 14 05:18:24 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* enumerator.c:  Document use of Enumerator.new for creating a lazy
+	  enumeration for filtering/chaining.  [ruby-trunk - Feature #707]
+
+Mon Feb 13 23:01:50 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* vm_method.c (rb_method_boundp):
+	  obj.respond_to?(:a_protected_method) should return false because
+	  calling a protected method may cause NoMethodError if called
+	  from outside the class inheritance tree.  Kernel#respond_to? is
+	  mostly used to test if it is safe to call a method, so the false
+	  positive should be avoided. [ruby-dev:40461] [ruby-dev:41739]
+	  [ruby-dev:41837]
+
+Mon Feb 13 21:52:06 2012  Narihiro Nakamura  <authornari@gmail.com>
+
+	* gc.c (HEAP_OBJ_LIMIT, HEAP_BITMAP_LIMIT): HEAP_OBJ_LIMIT used
+	  `sizeof(struct heaps_slot)` while heap is currently allocated
+	  with `struct heaps_header`.
+	  HEAP_BITMAP_LIMIT were calculated from
+	  `HEAP_OBJ_LIMIT/sizeof(uintptr_t)` - one Byte for each object,
+	  not one Bit. [Bug #6006]
+	  patched by Sokolov Yura. https://github.com/ruby/ruby/pull/92
+
+Mon Feb 13 18:30:32 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (io_setstrbuf): defer resizing buffer string until data is
+	  read actually.
+
+Mon Feb 13 10:24:39 2012  Loren Segal  <lsegal@soen.ca>
+
+	* io.c (Init_IO): use directive hack to make ARGF documentable
+	  in other tools.  [ruby-core:42515][Bug #6007]
+
+Sun Feb 12 20:43:54 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/ruby.h (rb_event_hook_func_t): add argument names.
+
+Sun Feb 12 16:30:23 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* tool/merger.rb (#default_merge_branch): Add support for
+	  Subversion 1.7 which adopted a whole new working directory
+	  structure.
+
+Sun Feb 12 15:14:41 2012  Kazuki Tsujimoto  <kazuki@callcc.net>
+
+	* benchmark/driver.rb: suppress unused/shadowing variable warnings.
+
+Sun Feb 12 03:14:40 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* vm_eval.c (check_funcall):  Call respond_to? with matching arity for
+	  legacy single-argument implementations.  [ruby-trunk - Bug #6000]
+
+Sat Feb 11 12:04:05 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* compile.c (defined_expr): guard the whole expression.
+	  [ruby-dev:45021][Bug#5786]
+
+Sat Feb 11 08:34:42 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (rb_inflate_add_dictionary):  Added
+	  Zlib::Inflate#add_dictionary to allow users to pre-specify
+	  for using during #inflate.  [ruby-trunk - Feature #5937]
+
+Sat Feb 11 08:23:02 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (do_inflate):  Inflate more data if buffered data
+	  exists.  Allows Zlib::Inflate#set_dictionary to work.
+	  [ruby-trunk - Bug #5929]
+
+Sat Feb 11 06:00:48 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* dir.c (fnmatch): The * needs to be escaped to avoid formatting in
+	  fnmatch comment.
+	  patched by @dalton. https://github.com/ruby/ruby/pull/91
+
+Fri Feb 10 03:41:31 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/parser.c: removed external encoding setter, allow parser
+	  to be reused.
+	* ext/psych/lib/psych/parser.rb: added external encoding setter.
+	* test/psych/test_parser.rb: test parser reuse
+
+Fri Feb 10 01:30:41 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/dl/dl.h (ALIGN_OF): use offsetof().
+
+	* ext/dl/dl.h (DLALIGN): round up at once and get rid of overflow.
+
+Fri Feb 10 00:47:07 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/ruby/envutil.rb (assert_no_memory_leak): new assertion to
+	  check memory leak by invoking child ruby process and watch its
+	  memory size.
+
+Thu Feb  9 23:41:44 2012  CHIKANAGA Tomoyuki  <nagachika00@gmail.com>
+
+	* test/pathname/test_pathname.rb (test_binread): add assertion to
+	  check encoding.
+
+Thu Feb  9 16:48:19 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/dl/dl.c (Init_dl): fix mangled document.
+
+Thu Feb  9 16:10:34 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/ruby/memory_status.rb (Memory::Win32): 64bit support.
+
+Thu Feb  9 16:08:55 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/dl/lib/value.rb (DL::ValueUtil.{unsigned_value,signed_value}):
+	  currently pack/unpack does not accept "q!" and "Q!".
+
+Thu Feb  9 16:01:29 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/fiddle/conversions.c (value_to_generic): src is not guaranteed as
+	  a Bignum if the type is LONG_LONG.  it may be a Fixnum if the value
+	  is small.
+
+Thu Feb  9 11:32:36 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/dl/lib/types.rb: Win64 support.
+
+Thu Feb  9 04:12:29 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* test/pathname/test_pathname.rb: not read but binread.
+	  patched by Benoit Daloze, [ruby-core:42440] [Bug #5984]
+
+Wed Feb  8 22:29:59 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* string.c (rb_str_modify_expand): fix memory leak.
+
+Wed Feb  8 14:06:59 2012  Hiroshi Nakamura  <nahi@ruby-lang.org>
+
+	* ext/openssl/ossl_ssl.c: Add SSL constants and allow to unset SSL
+	  option to prevent BEAST attack. See [Bug #5353].
+
+	  In OpenSSL, OP_DONT_INSERT_EMPTY_FRAGMENTS is used to prevent
+	  TLS-CBC-IV vulnerability described at
+	  http://www.openssl.org/~bodo/tls-cbc.txt
+	  It's known issue of TLSv1/SSLv3 but it attracts lots of attention
+	  these days as BEAST attack. (CVE-2011-3389)
+
+	  Until now ossl sets OP_ALL at SSLContext allocation and call
+	  SSL_CTX_set_options at connection.  SSL_CTX_set_options updates the
+	  value by using |= so bits set by OP_ALL cannot be unset afterwards.
+
+	  This commit changes to call SSL_CTX_set_options only 1 time for each
+	  SSLContext. It sets the specified value if SSLContext#options= are
+	  called and sets OP_ALL if not.
+
+	  To help users to unset bits in OP_ALL, this commit also adds several
+	  constant to SSL such as
+	  OpenSSL::SSL::OP_DONT_INSERT_EMPTY_FRAGMENTS.  These constants were
+	  not exposed in Ruby because there's no way to unset bits in OP_ALL
+	  before.
+
+	  Following is an example to enable 0/n split for BEAST prevention.
+
+	    ctx.options = OP_ALL & ~OP_DONT_INSERT_EMPTY_FRAGMENTS
+
+	* test/openssl/test_ssl.rb: Test above option exists.
+
+Wed Feb 8 13:12:02 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_x509name.c: Use the numerical representation of
+	  unrecognized OIDs instead of the sn "UNDEF".
+
+	* test/openssl/test_x509name.rb: Add tests for the fixed behavior.
+
+	  Patch provided by Paul Kehrer, thank you!
+	  [ruby-core:41769] [Feature #5787]
+
+Wed Feb  8 09:49:58 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* tool/merger.rb: don't abort, update first.
+
+Wed Feb 8 09:47:33 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_asn1.c: Call INT2NUM only once for GeneralString.
+	  Thanks to Mantas Mikulenas for noticing and providing a patch!
+	  [ruby-core:42358] [Bug #5972]
+
+Wed Feb 8 09:19:00 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_cipher.c: Add warning about key as IV.
+
+Tue Feb  7 20:08:12 2012  Ayumu AIZAWA  <ayumu.aizawa@gmail.com>
+
+	* error.c (exc_inspect): Fix typo. patch from Trent Ogren
+	  via https://github.com/ruby/ruby/pull/90
+
+Tue Feb  7 19:37:35 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* st.c: refactor packed entries using structs.
+
+Tue Feb  7 14:52:10 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* st.c (st_update): table can be unpacked in the callback.
+
+	* st.c (st_foreach): should not yield same pair when checking
+	  after unpacking.
+
+Mon Feb  6 21:55:13 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* tool/merger.rb: abort if the working directory is dirty.
+
+	* tool/merger.rb: update the working directory after commit.
+
+Mon Feb  6 00:16:27 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* encoding.c (rb_enc_compatible): return ASCII-8BIT even if 2nd string
+	  is ascii only string. [ruby-core:42354] [Bug #5968]
+
+Fri Feb  3 07:16:47 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/webrick.rb:  Moved proxy rewriting to WEBrick::HTTPProxy.
+	* lib/webrick/httpproxy.rb:  Add examples of creating a proxy server
+	  and response rewriting using HTTPProxy.
+
+Fri Feb  3 06:53:22 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/openssl/ossl_x509store.c:  Add class documentation for
+	  OpenSSL::X509::Store
+
 Thu Feb  2 22:28:13 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
 
 	* test/net/http/test_https_proxy.rb
 	  (HTTPSProxyTest#test_https_proxy_authentication):
 	  add workaround to avoid to hang up without openssl.
-	  see #5786
+	  see [ruby-dev:45021][Bug #5786]
 
 	* test/resolv/test_dns.rb (TestResolvDNS#test_query_ipv4_address):
 	  ditto.

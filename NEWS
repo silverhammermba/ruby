@@ -23,6 +23,8 @@ with all sufficient information, see the ChangeLog file.
     * incompatible changes:
       * system() and exec() closes non-standard file descriptors
         (The default of :close_others option is changed to true by default.)
+      * respond_to? against a protected method now returns false unless
+        the second argument is true.
 
   * Signal
     * incompatible changes:
@@ -60,6 +62,9 @@ with all sufficient information, see the ChangeLog file.
     * Shellwords#shelljoin() accepts non-string objects in the given
       array, each of which is stringified using to_s.
 
+* zlib
+  * Added support for the new deflate strategies Zlib::RLE and Zlib::FIXED.
+
 === Language changes
 === Compatibility issues (excluding feature bug fixes)
 
@@ -67,8 +72,14 @@ with all sufficient information, see the ChangeLog file.
 
     See above.
 
+  * Merge Onigmo.
+    https://github.com/k-takata/Onigmo
+
   * incompatible changes:
     The :close_others option is true by default for system() and exec().
     Also, the close-on-exec flag is set by default for all new file descriptors.
     This means file descriptors doesn't inherit to spawned process unless
     explicitly requested such as system(..., fd=>fd).
+
+  * Kernel#respond_to? against a protected method now returns false
+    unless the second argument is true.
