@@ -1494,13 +1494,14 @@ window_insch(VALUE obj, VALUE ch)
 
 /*
  * Document-method: Curses::Window.print
- * call-seq: print(str)
+ * call-seq: print(y, x, str)
  *
- * add a string of characters +str+, to the window and advance cursor
+ * move to coordinates +y+, +x+ and add a string of characters +str+, to the
+ * window and advance cursor
  *
  */
 static VALUE
-window_addstr(int argc, VALUE *argv, VALUE obj)
+window_print(int argc, VALUE *argv, VALUE obj)
 {
     struct windata *winp;
     int str;
@@ -1527,28 +1528,43 @@ window_addstr(int argc, VALUE *argv, VALUE obj)
 
 /*
  * Document-method: Curses::Window.puts
- * call-seq: puts(str)
+ * call-seq: puts(y, x, str)
  *
- * add a string of characters +str+ to the window and advance the cursor to the
- * next line, if necessary
+ * add a string of characters +str+ to the window at +y+, +x+ and advance the
+ * cursor to the next line, if necessary. Just prints a newline if called without +str+.
  */
 static VALUE
-window_putstr(int argc, VALUE *argv, VALUE obj)
+window_puts(int argc, VALUE *argv, VALUE obj)
 {
     struct windata *winp;
     int bx, x, z;
+	VALUE *targ;
 
-    window_addstr(argc, argv, obj);
+	if (argc == 0 || argc == 2)
+	{
+		targ = (VALUE *)calloc(argc + 1, sizeof(VALUE));
+		for (x = 0; x < argc; x++)
+			targ[x] = argv[x];
+		targ[argc] = rb_str_new2("");
+		window_print(argc + 1, targ, obj);
+		free(targ);
 
-    GetWINDOW(obj, winp);
-    getyx(winp->window, z, x);
+		GetWINDOW(obj, winp);
+		waddstr(winp->window, "\n");
+	} else {
+		window_print(argc, argv, obj);
+
+		GetWINDOW(obj, winp);
+		getyx(winp->window, z, x);
 #ifdef getbegyx
-    getbegyx(winp->window, z, bx);
+		getbegyx(winp->window, z, bx);
 #else
-    bx = winp->window->_begx;
+		bx = winp->window->_begx;
 #endif
-    if (x != bx)
-        waddstr(winp->window, "\n");
+		if (x != bx)
+			waddstr(winp->window, "\n");
+
+	}
 
     return Qnil;
 }
@@ -1566,7 +1582,7 @@ window_putstr(int argc, VALUE *argv, VALUE obj)
 static VALUE
 window_addstr2(VALUE obj, VALUE str)
 {
-    window_addstr(1, &str, obj);
+    window_print(1, &str, obj);
     return obj;
 }
 
@@ -2425,8 +2441,8 @@ Init_curses(void)
     rb_define_method(cWindow, "[]", window_aref, 2);
     rb_define_method(cWindow, "putc", window_addch, 1);
     rb_define_method(cWindow, "insertc", window_insch, 1);
-    rb_define_method(cWindow, "print", window_addstr, -1);
-    rb_define_method(cWindow, "puts", window_putstr, -1);
+    rb_define_method(cWindow, "print", window_print, -1);
+    rb_define_method(cWindow, "puts", window_puts, -1);
     rb_define_method(cWindow, "<<", window_addstr2, 1);
     rb_define_method(cWindow, "getc", window_getch, 0);
     rb_define_method(cWindow, "gets", window_getstr, 0);
