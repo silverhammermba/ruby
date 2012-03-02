@@ -5,7 +5,7 @@ require "curses"
 include Curses
 
 def ranf
-  rand(32767).to_f / 32767
+	rand(32767).to_f / 32767
 end
 
 srand
