@@ -1328,11 +1328,19 @@ rb_str_modify_expand(VALUE str, long expand)
     if (expand < 0) {
 	rb_raise(rb_eArgError, "negative expanding string size");
     }
-    if (!str_independent(str) ||
-	(expand > 0 &&
-	 (!STR_EMBED_P(str) ||
-	  RSTRING_LEN(str) + expand > RSTRING_EMBED_LEN_MAX))) {
+    if (!str_independent(str)) {
 	str_make_independent_expand(str, expand);
+    }
+    else if (expand > 0) {
+	long len = RSTRING_LEN(str);
+	long capa = len + expand;
+	if (!STR_EMBED_P(str)) {
+	    REALLOC_N(RSTRING(str)->as.heap.ptr, char, capa+1);
+	    RSTRING(str)->as.heap.aux.capa = capa;
+	}
+	else if (capa > RSTRING_EMBED_LEN_MAX) {
+	    str_make_independent_expand(str, expand);
+	}
     }
     ENC_CODERANGE_CLEAR(str);
 }
@@ -2139,9 +2147,9 @@ rb_str_concat(VALUE str1, VALUE str2)
  *
  *  Prepend---Prepend the given string to <i>str</i>.
  *
- *  a = "world"
- *  a.prepend("hello ") #=> "hello world"
- *  a                   #=> "hello world"
+ *     a = "world"
+ *     a.prepend("hello ") #=> "hello world"
+ *     a                   #=> "hello world"
  */
 
 static VALUE
@@ -6763,12 +6771,19 @@ rb_str_oct(VALUE str)
 
 /*
  *  call-seq:
- *     str.crypt(other_str)   -> new_str
+ *     str.crypt(salt_str)   -> new_str
  *
- *  Applies a one-way cryptographic hash to <i>str</i> by invoking the standard
- *  library function <code>crypt</code>. The argument is the salt string, which
- *  should be two characters long, each character drawn from
- *  <code>[a-zA-Z0-9./]</code>.
+ *  Applies a one-way cryptographic hash to <i>str</i> by invoking the
+ *  standard library function <code>crypt(3)</code> with the given
+ *  salt string.  While the format and the result are system and
+ *  implementation dependent, using a salt matching the regular
+ *  expression <code>\A[a-zA-Z0-9./]{2}</code> should be valid and
+ *  safe on any platform, in which only the first two characters are
+ *  significant.
+ *
+ *  This method is for use in system specific scripts, so if you want
+ *  a cross-platform hash function consider using Digest or OpenSSL
+ *  instead.
  */
 
 static VALUE

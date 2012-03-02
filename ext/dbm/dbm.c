@@ -196,11 +196,17 @@ fdbm_initialize(int argc, VALUE *argv, VALUE obj)
 #if defined(HAVE_DBM_DIRFNO)
         rb_fd_fix_cloexec(dbm_dirfno(dbm));
 #endif
+
+#if defined(RUBYDBM_DB_HEADER) && defined(HAVE_TYPE_DBC)
+    /* Disable Berkeley DB error messages such as:
+     * DB->put: attempt to modify a read-only database */
+        ((DBC*)dbm)->dbp->set_errfile(((DBC*)dbm)->dbp, NULL);
+#endif
     }
 
     if (!dbm) {
 	if (mode == -1) return Qnil;
-	rb_sys_fail(RSTRING_PTR(file));
+	rb_sys_fail_str(file);
     }
 
     dbmp = ALLOC(struct dbmdata);
@@ -967,7 +973,7 @@ fdbm_reject(VALUE obj)
  * - {Berkeley DB}[http://en.wikipedia.org/wiki/Berkeley_DB] versions
  *   1 thru 5, also known as BDB and Sleepycat DB, now owned by Oracle
  *   Corporation.
- * - Berkeley DB 1.x, still found in FreeBSD and OpenBSD.
+ * - Berkeley DB 1.x, still found in 4.4BSD derivatives (FreeBSD, OpenBSD, etc).
  * - {gdbm}[http://www.gnu.org/software/gdbm/], the GNU implementation of dbm.
  * - {qdbm}[http://fallabs.com/qdbm/index.html], another open source
  *   reimplementation of dbm.
@@ -1079,24 +1085,50 @@ Init_dbm(void)
      */
     rb_define_const(rb_cDBM, "NEWDB",   INT2FIX(O_RDWR|O_CREAT|O_TRUNC|RUBY_DBM_RW_BIT));
 
-#if defined(HAVE_DB_VERSION)
-    /* The version of the dbm library, if using Berkeley DB */
-    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2(db_version(NULL, NULL, NULL)));
-#elif defined(HAVE_GDBM_VERSION)
-    /* since gdbm 1.9 */
-    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2(gdbm_version));
-#elif defined(HAVE_LIBVAR_GDBM_VERSION)
-    /* ndbm.h doesn't declare gdbm_version until gdbm 1.8.3.
-     * See extconf.rb for more information. */
     {
-	RUBY_EXTERN char *gdbm_version;
-	rb_define_const(rb_cDBM, "VERSION",  rb_str_new2(gdbm_version));
-    }
-#elif defined(HAVE_DPVERSION)
-    rb_define_const(rb_cDBM, "VERSION",  rb_sprintf("QDBM %s", dpversion));
-#elif defined(_DB_H_)
-    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("Berkeley DB (unknown)"));
+        VALUE version;
+#if defined(_DBM_IOERR)
+        version = rb_str_new2("ndbm (4.3BSD)");
+#elif defined(RUBYDBM_GDBM_HEADER)
+#  if defined(HAVE_DECLARED_LIBVAR_GDBM_VERSION)
+        /* since gdbm 1.9 */
+        version = rb_str_new2(gdbm_version);
+#  elif defined(HAVE_UNDECLARED_LIBVAR_GDBM_VERSION)
+        /* ndbm.h doesn't declare gdbm_version until gdbm 1.8.3.
+         * See extconf.rb for more information. */
+        RUBY_EXTERN char *gdbm_version;
+        version = rb_str_new2(gdbm_version);
+#  else
+        version = rb_str_new2("GDBM (unknown)");
+#  endif
+#elif defined(RUBYDBM_DB_HEADER)
+#  if defined(HAVE_DB_VERSION)
+        /* The version of the dbm library, if using Berkeley DB */
+        version = rb_str_new2(db_version(NULL, NULL, NULL));
+#  else
+        version = rb_str_new2("Berkeley DB (unknown)");
+#  endif
+#elif defined(_RELIC_H)
+#  if defined(HAVE_DPVERSION)
+        version = rb_sprintf("QDBM %s", dpversion);
+#  else
+        version = rb_str_new2("QDBM (unknown)");
+#  endif
 #else
-    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("unknown"));
+        version = rb_str_new2("ndbm (unknown)");
 #endif
+        /*
+         * Identifies ndbm library version.
+         *
+         * Examples:
+         *
+         * - "ndbm (4.3BSD)"
+         * - "Berkeley DB 4.8.30: (April  9, 2010)"
+         * - "Berkeley DB (unknown)" (4.4BSD, maybe)
+         * - "GDBM version 1.8.3. 10/15/2002 (built Jul  1 2011 12:32:45)"
+         * - "QDBM 1.8.78"
+         *   
+         */
+        rb_define_const(rb_cDBM, "VERSION", version);
+    }
 }

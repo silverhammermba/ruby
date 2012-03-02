@@ -495,14 +495,13 @@ rb_gc_set_params(void)
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 static void gc_sweep(rb_objspace_t *);
 static void slot_sweep(rb_objspace_t *, struct heaps_slot *);
-static void gc_clear_mark_on_sweep_slots(rb_objspace_t *);
+static void rest_sweep(rb_objspace_t *);
 static void aligned_free(void *);
 
 void
 rb_objspace_free(rb_objspace_t *objspace)
 {
-    gc_clear_mark_on_sweep_slots(objspace);
-    gc_sweep(objspace);
+    rest_sweep(objspace);
     if (objspace->profile.record) {
 	free(objspace->profile.record);
 	objspace->profile.record = 0;
@@ -544,9 +543,10 @@ rb_objspace_free(rb_objspace_t *objspace)
 #define HEAP_ALIGN_MASK (~(~0UL << HEAP_ALIGN_LOG))
 #define REQUIRED_SIZE_BY_MALLOC (sizeof(size_t) * 5)
 #define HEAP_SIZE (HEAP_ALIGN - REQUIRED_SIZE_BY_MALLOC)
+#define CEILDIV(i, mod) (((i) + (mod) - 1)/(mod))
 
-#define HEAP_OBJ_LIMIT (unsigned int)(HEAP_SIZE/sizeof(struct RVALUE) - (sizeof(struct heaps_slot)/sizeof(struct RVALUE)+1))
-#define HEAP_BITMAP_LIMIT (HEAP_OBJ_LIMIT/sizeof(uintptr_t)+1)
+#define HEAP_OBJ_LIMIT (unsigned int)((HEAP_SIZE - sizeof(struct heaps_header))/sizeof(struct RVALUE))
+#define HEAP_BITMAP_LIMIT CEILDIV(CEILDIV(HEAP_SIZE, sizeof(struct RVALUE)), sizeof(uintptr_t)*8)
 
 #define GET_HEAP_HEADER(x) (HEAP_HEADER(((uintptr_t)x) & ~(HEAP_ALIGN_MASK)))
 #define GET_HEAP_SLOT(x) (GET_HEAP_HEADER(x)->base)
@@ -1164,9 +1164,7 @@ assign_heap_slot(rb_objspace_t *objspace)
     p = (RVALUE*)((VALUE)p + sizeof(struct heaps_header));
     if ((VALUE)p % sizeof(RVALUE) != 0) {
        p = (RVALUE*)((VALUE)p + sizeof(RVALUE) - ((VALUE)p % sizeof(RVALUE)));
-       if ((HEAP_SIZE - HEAP_OBJ_LIMIT * sizeof(RVALUE)) < (size_t)((char*)p - (char*)membase)) {
-           objs--;
-       }
+       objs = (HEAP_SIZE - (size_t)((VALUE)p - (VALUE)membase))/sizeof(RVALUE);
     }
 
     lo = 0;
@@ -2621,21 +2619,6 @@ mark_current_machine_context(rb_objspace_t *objspace, rb_thread_t *th)
 }
 
 static void
-gc_clear_mark_on_sweep_slots(rb_objspace_t *objspace)
-{
-    struct heaps_slot *scan;
-
-    if (objspace->heap.sweep_slots) {
-        while (heaps_increment(objspace));
-        while (objspace->heap.sweep_slots) {
-            scan = objspace->heap.sweep_slots;
-            gc_clear_slot_bits(scan);
-            objspace->heap.sweep_slots = objspace->heap.sweep_slots->next;
-        }
-    }
-}
-
-static void
 gc_marks(rb_objspace_t *objspace)
 {
     struct gc_list *list;
@@ -2645,8 +2628,6 @@ gc_marks(rb_objspace_t *objspace)
     objspace->heap.live_num = 0;
     objspace->count++;
 
-
-    gc_clear_mark_on_sweep_slots(objspace);
 
     SET_STACK_END;
 
@@ -2703,6 +2684,8 @@ garbage_collect(rb_objspace_t *objspace)
     }
 
     GC_PROF_TIMER_START;
+
+    rest_sweep(objspace);
 
     during_gc++;
     gc_marks(objspace);
@@ -3213,7 +3196,7 @@ rb_objspace_call_finalizer(rb_objspace_t *objspace)
     size_t i;
 
     /* run finalizers */
-    gc_clear_mark_on_sweep_slots(objspace);
+    rest_sweep(objspace);
 
     if (ATOMIC_EXCHANGE(finalizing, 1)) return;
 
@@ -3248,7 +3231,8 @@ rb_objspace_call_finalizer(rb_objspace_t *objspace)
 	while (p < pend) {
 	    if (BUILTIN_TYPE(p) == T_DATA &&
 		DATA_PTR(p) && RANY(p)->as.data.dfree &&
-		!rb_obj_is_thread((VALUE)p) && !rb_obj_is_mutex((VALUE)p) ) {
+		!rb_obj_is_thread((VALUE)p) && !rb_obj_is_mutex((VALUE)p) &&
+		!rb_obj_is_fiber((VALUE)p)) {
 		p->as.free.flags = 0;
 		if (RTYPEDDATA_P(p)) {
 		    RDATA(p)->dfree = RANY(p)->as.typeddata.type->function.dfree;

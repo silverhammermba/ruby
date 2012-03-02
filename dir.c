@@ -75,6 +75,8 @@ char *strchr(char*,char);
 #define opendir(p) rb_w32_uopendir(p)
 #endif
 
+#define rb_sys_fail_path(path) rb_sys_fail_str(path)
+
 #define FNM_NOESCAPE	0x01
 #define FNM_PATHNAME	0x02
 #define FNM_DOTMATCH	0x04
@@ -382,7 +384,7 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
 {
     struct dir_data *dp;
     rb_encoding  *fsenc;
-    VALUE dirname, opt;
+    VALUE dirname, opt, orig;
     static VALUE sym_enc;
 
     if (!sym_enc) {
@@ -400,7 +402,9 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
     }
 
     GlobPathValue(dirname, FALSE);
+    orig = rb_str_dup_frozen(dirname);
     dirname = rb_str_encode_ospath(dirname);
+    dirname = rb_str_dup_frozen(dirname);
 
     TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dp);
     if (dp->dir) closedir(dp->dir);
@@ -414,10 +418,10 @@ dir_initialize(int argc, VALUE *argv, VALUE dir)
 	    dp->dir = opendir(RSTRING_PTR(dirname));
 	}
 	if (dp->dir == NULL) {
-	    rb_sys_fail(RSTRING_PTR(dirname));
+	    rb_sys_fail_path(orig);
 	}
     }
-    dp->path = rb_str_dup_frozen(dirname);
+    dp->path = orig;
 
     return dir;
 }
@@ -481,8 +485,12 @@ dir_inspect(VALUE dir)
 
     TypedData_Get_Struct(dir, struct dir_data, &dir_data_type, dirp);
     if (!NIL_P(dirp->path)) {
-	const char *c = rb_obj_classname(dir);
-	return rb_sprintf("#<%s:%s>", c, RSTRING_PTR(dirp->path));
+	VALUE str = rb_str_new_cstr("#<");
+	rb_str_append(str, rb_class_name(CLASS_OF(dir)));
+	rb_str_cat2(str, ":");
+	rb_str_append(str, dirp->path);
+	rb_str_cat2(str, ">");
+	return str;
     }
     return rb_funcall(dir, rb_intern("to_s"), 0, 0);
 }
@@ -750,7 +758,7 @@ static void
 dir_chdir(VALUE path)
 {
     if (chdir(RSTRING_PTR(path)) < 0)
-	rb_sys_fail(RSTRING_PTR(path));
+	rb_sys_fail_path(path);
 }
 
 static int chdir_blocking = 0;
@@ -927,7 +935,7 @@ dir_s_chroot(VALUE dir, VALUE path)
 {
     check_dirname(&path);
     if (chroot(RSTRING_PTR(path)) == -1)
-	rb_sys_fail(RSTRING_PTR(path));
+	rb_sys_fail_path(path);
 
     return INT2FIX(0);
 }
@@ -965,7 +973,7 @@ dir_s_mkdir(int argc, VALUE *argv, VALUE obj)
 
     check_dirname(&path);
     if (mkdir(RSTRING_PTR(path), mode) == -1)
-	rb_sys_fail(RSTRING_PTR(path));
+	rb_sys_fail_path(path);
 
     return INT2FIX(0);
 }
@@ -984,7 +992,7 @@ dir_s_rmdir(VALUE obj, VALUE dir)
 {
     check_dirname(&dir);
     if (rmdir(RSTRING_PTR(dir)) < 0)
-	rb_sys_fail(RSTRING_PTR(dir));
+	rb_sys_fail_path(dir);
 
     return INT2FIX(0);
 }
@@ -1907,7 +1915,7 @@ dir_entries(int argc, VALUE *argv, VALUE io)
  *                          match all files beginning with
  *                          <code>c</code>; <code>*c</code> will match
  *                          all files ending with <code>c</code>; and
- *                          <code>*c*</code> will match all files that
+ *                          <code>\*c*</code> will match all files that
  *                          have <code>c</code> in them (including at
  *                          the beginning or end). Equivalent to
  *                          <code>/ .* /x</code> in regexp.

@@ -2356,4 +2356,26 @@ EOT
       end
     }
   end if /mswin|mingw/ =~ RUBY_PLATFORM
+
+  def test_error_nonascii
+    bug6071 = '[ruby-dev:45279]'
+    paths = ["\u{3042}".encode("sjis"), "\u{ff}".encode("iso-8859-1")]
+    encs = with_tmpdir {
+      paths.map {|path|
+        open(path) rescue $!.message.encoding
+      }
+    }
+    assert_equal(paths.map(&:encoding), encs, bug6071)
+  end
+
+  def test_inspect_nonascii
+    bug6072 = '[ruby-dev:45280]'
+    paths = ["\u{3042}".encode("sjis"), "\u{ff}".encode("iso-8859-1")]
+    encs = with_tmpdir {
+      paths.map {|path|
+        open(path, "wb") {|f| f.inspect.encoding}
+      }
+    }
+    assert_equal(paths.map(&:encoding), encs, bug6072)
+  end
 end

@@ -158,6 +158,7 @@ class TestMethod < Test::Unit::TestCase
     o = Object.new
     def o.foo; end
     assert_kind_of(Integer, o.method(:foo).hash)
+    assert_equal(Array.instance_method(:map).hash, Array.instance_method(:collect).hash)
   end
 
   def test_receiver_name_owner
@@ -420,7 +421,7 @@ class TestMethod < Test::Unit::TestCase
 
     assert_equal(true,  respond_to?(:mv1))
     assert_equal(false, respond_to?(:mv2))
-    assert_equal(true, respond_to?(:mv3))
+    assert_equal(false, respond_to?(:mv3))
 
     assert_equal(true,  respond_to?(:mv1, true))
     assert_equal(true,  respond_to?(:mv2, true))
@@ -442,7 +443,7 @@ class TestMethod < Test::Unit::TestCase
 
     assert_equal(true,  v.respond_to?(:mv1))
     assert_equal(false, v.respond_to?(:mv2))
-    assert_equal(true, v.respond_to?(:mv3))
+    assert_equal(false, v.respond_to?(:mv3))
 
     assert_equal(true,  v.respond_to?(:mv1, true))
     assert_equal(true,  v.respond_to?(:mv2, true))

@@ -112,7 +112,7 @@ def tag intv_p = false
 end
 
 def default_merge_branch
-  /branches\/ruby_1_8_/ =~ IO.binread(".svn/entries", 100) ? 'branches/ruby_1_8' : 'trunk'
+  %r{^URL: .*/branches/ruby_1_8_} =~ `svn info` ? 'branches/ruby_1_8' : 'trunk'
 end
 
 case ARGV[0]
@@ -125,6 +125,8 @@ when nil, "-h", "--help"
   help
   exit
 else
+  system 'svn up'
+
   q = $repos + (ARGV[1] || default_merge_branch)
   revs = ARGV[0].split /,\s*/
   log = ''
@@ -151,7 +153,7 @@ else
     if log_svn.empty?
       log_svn = IO.popen %w'svn log ' + r + [q] do |f|
         f.read
-      end
+      end.sub(/\A-+\nr.*\n/, '').sub(/\n-+\n\z/, '').gsub(/^(?=\S)/, "\t")
     end
 
     a = %w'svn merge --accept=postpone' + r + [q]

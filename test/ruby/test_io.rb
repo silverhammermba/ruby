@@ -972,7 +972,7 @@ class TestIO < Test::Unit::TestCase
     with_pipe do |r, w|
       s = ""
       t = Thread.new { r.readpartial(5, s) }
-      Thread.pass until s.size == 5
+      Thread.pass until t.stop?
       assert_raise(RuntimeError) { s.clear }
       w.write "foobarbaz"
       w.close
@@ -991,6 +991,17 @@ class TestIO < Test::Unit::TestCase
     }
   end
 
+  def test_readpartial_buffer_error
+    with_pipe do |r, w|
+      s = ""
+      t = Thread.new { r.readpartial(5, s) }
+      Thread.pass until t.stop?
+      t.kill
+      t.value
+      assert_equal("", s)
+    end
+  end
+
   def test_read
     pipe(proc do |w|
       w.write "foobarbaz"
@@ -1007,11 +1018,22 @@ class TestIO < Test::Unit::TestCase
     with_pipe do |r, w|
       s = ""
       t = Thread.new { r.read(5, s) }
-      Thread.pass until s.size == 5
+      Thread.pass until t.stop?
       assert_raise(RuntimeError) { s.clear }
       w.write "foobarbaz"
       w.close
       assert_equal("fooba", t.value)
+    end
+  end
+
+  def test_read_buffer_error
+    with_pipe do |r, w|
+      s = ""
+      t = Thread.new { r.read(5, s) }
+      Thread.pass until t.stop?
+      t.kill
+      t.value
+      assert_equal("", s)
     end
   end
 
@@ -1583,6 +1605,16 @@ End
     IO.foreach(t.path, "b", 3) {|x| a << x }
     assert_equal(["foo", "\nb", "ar\n", "b", "az\n"], a)
 
+    bug = '[ruby-dev:31525]'
+    assert_raise(ArgumentError, bug) {IO.foreach}
+
+    a = nil
+    assert_nothing_raised(ArgumentError, bug) {a = IO.foreach(t.path).to_a}
+    assert_equal(["foo\n", "bar\n", "baz\n"], a, bug)
+
+    bug6054 = '[ruby-dev:45267]'
+    e = assert_raise(IOError, bug6054) {IO.foreach(t.path, mode:"w").next}
+    assert_match(/not opened for reading/, e.message, bug6054)
   end
 
   def test_s_readlines
@@ -1991,15 +2023,18 @@ End
 
   def test_open_mode
     feature4742 = "[ruby-core:36338]"
+    bug6055 = '[ruby-dev:45268]'
 
     mkcdtmpdir do
-      refute_nil(f = File.open('symbolic', 'w'))
+      assert_not_nil(f = File.open('symbolic', 'w'))
       f.close
-      refute_nil(f = File.open('numeric',  File::WRONLY|File::TRUNC|File::CREAT))
+      assert_not_nil(f = File.open('numeric',  File::WRONLY|File::TRUNC|File::CREAT))
       f.close
-      refute_nil(f = File.open('hash-symbolic', :mode => 'w'))
+      assert_not_nil(f = File.open('hash-symbolic', :mode => 'w'))
       f.close
-      refute_nil(f = File.open('hash-numeric', :mode => File::WRONLY|File::TRUNC|File::CREAT), feature4742)
+      assert_not_nil(f = File.open('hash-numeric', :mode => File::WRONLY|File::TRUNC|File::CREAT), feature4742)
+      f.close
+      assert_nothing_raised(bug6055) {f = File.open('hash-symbolic', binmode: true)}
       f.close
     end
   end
@@ -2117,8 +2152,8 @@ End
       end
     }
     IO.pipe {|r,w|
-      assert(r.close_on_exec?) 
-      assert(w.close_on_exec?) 
+      assert(r.close_on_exec?)
+      assert(w.close_on_exec?)
     }
   end
 
@@ -2159,13 +2194,13 @@ End
 
   def test_setpos
     mkcdtmpdir {
-      File.open("tmp.txt", "w") {|f|
+      File.open("tmp.txt", "wb") {|f|
         f.puts "a"
         f.puts "bc"
         f.puts "def"
       }
       pos1 = pos2 = pos3 = nil
-      File.open("tmp.txt") {|f|
+      File.open("tmp.txt", "rb") {|f|
         assert_equal("a\n", f.gets)
         pos1 = f.pos
         assert_equal("bc\n", f.gets)
@@ -2174,20 +2209,25 @@ End
         pos3 = f.pos
         assert_equal(nil, f.gets)
       }
-      File.open("tmp.txt") {|f|
+      File.open("tmp.txt", "rb") {|f|
         f.pos = pos1
         assert_equal("bc\n", f.gets)
         assert_equal("def\n", f.gets)
         assert_equal(nil, f.gets)
       }
-      File.open("tmp.txt") {|f|
+      File.open("tmp.txt", "rb") {|f|
         f.pos = pos2
         assert_equal("def\n", f.gets)
         assert_equal(nil, f.gets)
       }
-      File.open("tmp.txt") {|f|
+      File.open("tmp.txt", "rb") {|f|
         f.pos = pos3
         assert_equal(nil, f.gets)
+      }
+      File.open("tmp.txt", "rb") {|f|
+        f.pos = File.size("tmp.txt")
+        s = "not empty string        "
+        assert_equal("", f.read(0,s))
       }
     }
   end
@@ -2199,5 +2239,39 @@ End
     assert_equal(0, $stdin.fileno)
     assert_equal(1, $stdout.fileno)
     assert_equal(2, $stderr.fileno)
+  end
+
+  def test_sysread_locktmp
+    bug6099 = '[ruby-dev:45297]'
+    buf = " " * 100
+    data = "a" * 100
+    with_pipe do |r,w|
+      th = Thread.new {r.sysread(100, buf)}
+      Thread.pass until th.stop?
+      buf.replace("")
+      assert_empty(buf)
+      w.write(data)
+      Thread.pass while th.alive?
+      th.join
+    end
+    assert_equal(data, buf)
+  end
+
+  def test_readpartial_locktmp
+    skip "nonblocking mode is not supported for pipe on this platform" if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+    bug6099 = '[ruby-dev:45297]'
+    buf = " " * 100
+    data = "a" * 100
+    with_pipe do |r,w|
+      r.fcntl(Fcntl::F_SETFL, Fcntl::O_NONBLOCK)
+      th = Thread.new {r.readpartial(100, buf)}
+      Thread.pass until th.stop?
+      buf.replace("")
+      assert_empty(buf)
+      w.write(data)
+      Thread.pass while th.alive?
+      th.join
+    end
+    assert_equal(data, buf)
   end
 end

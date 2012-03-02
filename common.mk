@@ -24,6 +24,7 @@ EXTCONF       = extconf.rb
 RBCONFIG      = ./.rbconfig.time
 LIBRUBY_EXTS  = ./.libruby-with-ext.time
 REVISION_H    = ./.revision.time
+PLATFORM_D    = ./$(PLATFORM_DIR)/.time
 RDOCOUT       = $(EXTOUT)/rdoc
 CAPIOUT       = doc/capi
 ID_H_TARGET   = -id.h-
@@ -191,11 +192,11 @@ golf: $(LIBRUBY) $(GOLFOBJS) PHONY
 	$(Q) $(MAKE) $(MFLAGS) MAINOBJ="$(GOLFOBJS)" PROGRAM=$(GORUBY)$(EXEEXT) program
 capi: $(CAPIOUT)/.timestamp PHONY
 
-doc/capi/.timestamp: Doxyfile $(PREP)
-	$(Q) $(MAKEDIRS) doc/capi
+$(CAPIOUT)/.timestamp: Doxyfile $(PREP)
+	$(Q) $(MAKEDIRS) "$(@D)"
 	$(ECHO) generating capi
 	$(Q) $(DOXYGEN) -b
-	$(Q) $(MINIRUBY) -e 'File.open("$(CAPIOUT)/.timestamp", "w"){|f| f.puts(Time.now)}'
+	$(Q) $(MINIRUBY) -e 'File.open(ARGV[0], "w"){|f| f.puts(Time.now)}' "$@"
 
 Doxyfile: $(srcdir)/template/Doxyfile.tmpl $(PREP) $(srcdir)/tool/generic_erb.rb $(RBCONFIG)
 	$(ECHO) generating $@
@@ -424,7 +425,7 @@ install-prereq: $(CLEAR_INSTALLED_LIST) PHONY
 clear-installed-list: PHONY
 	@> $(INSTALLED_LIST) set MAKE="$(MAKE)"
 
-clean: clean-ext clean-local clean-enc clean-golf clean-rdoc clean-capi clean-extout
+clean: clean-ext clean-local clean-enc clean-golf clean-rdoc clean-capi clean-extout clean-platform
 clean-local:: PHONY
 	@$(RM) $(OBJS) $(MINIOBJS) $(MAINOBJ) $(LIBRUBY_A) $(LIBRUBY_SO) $(LIBRUBY) $(LIBRUBY_ALIASES)
 	@$(RM) $(PROGRAM) $(WPROGRAM) miniruby$(EXEEXT) dmyext.$(OBJEXT) $(ARCHFILE) .*.time
@@ -434,10 +435,11 @@ clean-golf: PHONY
 	@$(RM) $(GORUBY)$(EXEEXT) $(GOLFOBJS)
 clean-rdoc: PHONY
 clean-capi: PHONY
+clean-platform: PHONY
 clean-extout: PHONY
 clean-docs: clean-rdoc clean-capi
 
-distclean: distclean-ext distclean-local distclean-enc distclean-golf distclean-extout
+distclean: distclean-ext distclean-local distclean-enc distclean-golf distclean-extout distclean-platform
 distclean-local:: clean-local
 	@$(RM) $(MKFILES) yasmdata.rb *.inc
 	@$(RM) config.cache config.status config.status.lineno $(PRELUDES)
@@ -448,6 +450,7 @@ distclean-golf: clean-golf
 distclean-rdoc: PHONY
 distclean-capi: PHONY
 distclean-extout: clean-extout
+distclean-platform: clean-platform
 
 realclean:: realclean-ext realclean-local realclean-enc realclean-golf realclean-extout
 realclean-local:: distclean-local
@@ -457,37 +460,40 @@ realclean-golf: distclean-golf
 realclean-capi: PHONY
 realclean-extout: distclean-extout
 
+clean-ext distclean-ext realclean-ext::
+	@$(RM) $(EXTS_MK)
+
 clean-enc distclean-enc realclean-enc: PHONY
 
-check: test test-all
+check: main test test-all
 	$(ECHO) check succeeded
 check-ruby: test test-ruby
 
-btest: miniruby$(EXEEXT) $(TEST_RUNNABLE)-btest
+btest: $(TEST_RUNNABLE)-btest
 no-btest: PHONY
-yes-btest: PHONY
+yes-btest: miniruby$(EXEEXT) PHONY
 	$(BOOTSTRAPRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(MINIRUBY)" $(OPTS)
 
-btest-ruby: miniruby$(EXEEXT) $(RBCONFIG) $(PROGRAM) $(TEST_RUNNABLE)-btest-ruby
+btest-ruby: $(TEST_RUNNABLE)-btest-ruby
 no-btest-ruby: PHONY
-yes-btest-ruby: PHONY
+yes-btest-ruby: prog PHONY
 	@$(RUNRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(PROGRAM) -I$(srcdir)/lib" -q $(OPTS)
 
-test-sample: miniruby$(EXEEXT) $(RBCONFIG) $(PROGRAM) $(TEST_RUNNABLE)-test-sample
+test-sample: $(TEST_RUNNABLE)-test-sample
 no-test-sample: PHONY
-yes-test-sample: PHONY
+yes-test-sample: prog PHONY
 	@$(RUNRUBY) $(srcdir)/tool/rubytest.rb
 
 test-knownbugs: test-knownbug
-test-knownbug: miniruby$(EXEEXT) $(PROGRAM) $(RBCONFIG) $(TEST_RUNNABLE)-test-knownbug
+test-knownbug: $(TEST_RUNNABLE)-test-knownbug
 no-test-knownbug: PHONY
-yes-test-knownbug: PHONY
+yes-test-knownbug: prog PHONY
 	-$(RUNRUBY) "$(srcdir)/bootstraptest/runner.rb" --ruby="$(PROGRAM)" $(OPTS) $(srcdir)/KNOWNBUGS.rb
 
 test: test-sample btest-ruby test-knownbug
 
 test-all: $(TEST_RUNNABLE)-test-all
-yes-test-all: PHONY
+yes-test-all: prog PHONY
 	$(RUNRUBY) "$(srcdir)/test/runner.rb" --ruby="$(RUNRUBY)" $(TESTS)
 TESTS_BUILD = mkmf
 no-test-all: PHONY
@@ -495,7 +501,7 @@ no-test-all: PHONY
 
 test-ruby: $(TEST_RUNNABLE)-test-ruby
 no-test-ruby: PHONY
-yes-test-ruby: PHONY
+yes-test-ruby: prog encs PHONY
 	$(RUNRUBY) "$(srcdir)/test/runner.rb" -q $(TESTS) ruby
 
 extconf: $(PREP)
@@ -572,7 +578,12 @@ dl_os2.$(OBJEXT): {$(VPATH)}dl_os2.c
 ia64.$(OBJEXT): {$(VPATH)}ia64.s
 	$(CC) $(CFLAGS) -c $<
 
-win32.$(OBJEXT): {$(VPATH)}win32.c $(RUBY_H_INCLUDES)
+$(PLATFORM_D):
+	$(Q) $(MAKEDIRS) $(PLATFORM_DIR)
+	@exit > $@
+
+win32/win32.$(OBJEXT): {$(VPATH)}win32/win32.c $(RUBY_H_INCLUDES) $(PLATFORM_D)
+win32/file.$(OBJEXT): {$(VPATH)}win32/file.c $(RUBY_H_INCLUDES) $(PLATFORM_D)
 
 ###
 

@@ -352,11 +352,11 @@ module MakeMakefile
     end
   end
 
-  def log_src(src)
+  def log_src(src, heading="checked program was")
     src = src.split(/^/)
     fmt = "%#{src.size.to_s.size}d: %s"
     Logging::message <<"EOM"
-checked program was:
+#{heading}:
 /* begin */
 EOM
     src.each_with_index {|line, no| Logging::message fmt, no+1, line}
@@ -550,6 +550,12 @@ MSG
     $CPPFLAGS = cppflags unless ret
   end
 
+  def try_cppflags(flags)
+    with_cppflags(flags) do
+      try_header("int main() {return 0;}")
+    end
+  end
+
   def with_cflags(flags)
     cflags = $CFLAGS
     $CFLAGS = flags
@@ -558,12 +564,24 @@ MSG
     $CFLAGS = cflags unless ret
   end
 
+  def try_cflags(flags)
+    with_cflags(flags) do
+      try_compile("int main() {return 0;}")
+    end
+  end
+
   def with_ldflags(flags)
     ldflags = $LDFLAGS
     $LDFLAGS = flags
     ret = yield
   ensure
     $LDFLAGS = ldflags unless ret
+  end
+
+  def try_ldflags(flags)
+    with_ldflags(flags) do
+      try_link("int main() {return 0;}")
+    end
   end
 
   def try_static_assert(expr, headers = nil, opt = "", &b)
@@ -1557,7 +1575,8 @@ SRC
       end
     end
     hdr << "#endif\n"
-    hdr = hdr.join
+    hdr = hdr.join("")
+    log_src(hdr, "#{header} is")
     unless (IO.read(header) == hdr rescue false)
       open(header, "wb") do |hfile|
         hfile.write(hdr)

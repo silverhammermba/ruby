@@ -185,6 +185,23 @@ if defined? Zlib
       assert_equal("foo", z.finish)
     end
 
+    def test_add_dictionary
+      dictionary = "foo"
+
+      deflate = Zlib::Deflate.new
+      deflate.set_dictionary dictionary
+      compressed = deflate.deflate "foofoofoo", Zlib::FINISH
+      deflate.close
+
+      out = nil
+      inflate = Zlib::Inflate.new
+      inflate.add_dictionary "foo"
+
+      out = inflate.inflate compressed
+
+      assert_equal "foofoofoo", out
+    end
+
     def test_inflate
       s = Zlib::Deflate.deflate("foo")
       z = Zlib::Inflate.new
@@ -193,6 +210,29 @@ if defined? Zlib
       assert_equal("foo", s)
       z.inflate("foo") # ???
       z << "foo" # ???
+    end
+
+    def test_inflate_dictionary
+      dictionary = "foo"
+
+      deflate = Zlib::Deflate.new
+      deflate.set_dictionary dictionary
+      compressed = deflate.deflate "foofoofoo", Zlib::FINISH
+      deflate.close
+
+      out = nil
+      inflate = Zlib::Inflate.new
+
+      begin
+        out = inflate.inflate compressed
+
+        flunk "Zlib::NeedDict was not raised"
+      rescue Zlib::NeedDict
+        inflate.set_dictionary dictionary
+        out = inflate.inflate ""
+      end
+
+      assert_equal "foofoofoo", out
     end
 
     def test_sync
@@ -708,6 +748,22 @@ if defined? Zlib
           Zlib::GzipReader.new(StringIO.new(s[0, idx])).read
         end
       end
+    end
+
+    def test_encoding
+      t = Tempfile.new("test_zlib_gzip_reader_encoding")
+      t.binmode
+      content = (0..255).to_a.pack('c*')
+      Zlib::GzipWriter.wrap(t) {|gz| gz.print(content) }
+      t.close
+
+      read_all = Zlib::GzipReader.open(t.path) {|gz| gz.read }
+      assert_equal(Encoding.default_external, read_all.encoding)
+
+      # chunks are in BINARY regardless of encoding settings
+      read_size = Zlib::GzipReader.open(t.path) {|gz| gz.read(1024) }
+      assert_equal(Encoding::ASCII_8BIT, read_size.encoding)
+      assert_equal(content, read_size)
     end
   end
 

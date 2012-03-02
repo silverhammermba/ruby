@@ -750,8 +750,8 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
  *  haven't been reported). Not all flags are available on all
  *  platforms, but a flag value of zero will work on all platforms.
  *
- *  Calling this method raises a <code>SystemError</code> if there are
- *  no child processes. Not available on all platforms.
+ *  Calling this method raises a SystemCallError if there are no child
+ *  processes. Not available on all platforms.
  *
  *     include Process
  *     fork { exit 99 }                 #=> 27429
@@ -803,8 +803,7 @@ proc_wait(int argc, VALUE *argv)
  *  Waits for a child process to exit (see Process::waitpid for exact
  *  semantics) and returns an array containing the process id and the
  *  exit status (a <code>Process::Status</code> object) of that
- *  child. Raises a <code>SystemError</code> if there are no child
- *  processes.
+ *  child. Raises a SystemCallError if there are no child processes.
  *
  *     Process.fork { exit 99 }   #=> 27437
  *     pid, status = Process.wait2
@@ -1799,6 +1798,7 @@ rb_exec_fillarg(VALUE prog, int argc, VALUE *argv, VALUE env, VALUE opthash, str
     e->argc = argc;
     e->argv = argv;
     e->prog = prog ? RSTRING_PTR(prog) : 0;
+    e->progname = prog;
 }
 
 VALUE
@@ -1876,7 +1876,7 @@ rb_f_exec(int argc, VALUE *argv)
     rb_exec_err(&earg, errmsg, sizeof(errmsg));
     if (errmsg[0])
         rb_sys_fail(errmsg);
-    rb_sys_fail(earg.prog);
+    rb_sys_fail_str(earg.progname);
     return Qnil;		/* dummy */
 }
 
@@ -2327,6 +2327,7 @@ rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char
         s->prog = NULL;
         s->options = soptions = hide_obj(rb_ary_new());
         s->redirect_fds = Qnil;
+	s->progname = Qnil;
     }
 
 #ifdef HAVE_SETPGID
@@ -3346,8 +3347,8 @@ rb_f_spawn(int argc, VALUE *argv)
     pid = rb_spawn_process(&earg, rb_exec_arg_prepare(&earg, argc, argv, TRUE), errmsg, sizeof(errmsg));
     if (pid == -1) {
 	const char *prog = errmsg;
-	if (!prog[0] && !(prog = earg.prog) && earg.argc) {
-	    prog = RSTRING_PTR(earg.argv[0]);
+	if (!prog[0]) {
+	    rb_sys_fail_str(earg.progname);
 	}
 	rb_sys_fail(prog);
     }

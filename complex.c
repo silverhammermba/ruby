@@ -1260,6 +1260,8 @@ nucomp_marshal_load(VALUE self, VALUE a)
 {
     get_dat1(self);
     Check_Type(a, T_ARRAY);
+    if (RARRAY_LEN(a) != 2)
+	rb_raise(rb_eArgError, "marshaled complex must have an array whose length is 2 but %ld", RARRAY_LEN(a));
     dat->real = RARRAY_PTR(a)[0];
     dat->imag = RARRAY_PTR(a)[1];
     rb_copy_generic_ivar(self, a);
@@ -1981,6 +1983,9 @@ Init_Complex(void)
     rb_define_method(rb_cFloat, "angle", float_arg, 0);
     rb_define_method(rb_cFloat, "phase", float_arg, 0);
 
+    /*
+     * The imaginary unit.
+     */
     rb_define_const(rb_cComplex, "I",
 		    f_complex_new_bang2(rb_cComplex, ZERO, ONE));
 }

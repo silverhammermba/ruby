@@ -547,8 +547,10 @@ rb_method_boundp(VALUE klass, ID id, int ex)
     rb_method_entry_t *me = rb_method_entry(klass, id);
 
     if (me != 0) {
-	if ((ex & ~NOEX_RESPONDS) && (me->flag & NOEX_PRIVATE)) {
-	    return FALSE;
+	if ((ex & ~NOEX_RESPONDS) &&
+	    ((me->flag & NOEX_PRIVATE) ||
+	     ((ex & NOEX_RESPONDS) && (me->flag & NOEX_PROTECTED)))) {
+	    return 0;
 	}
 	if (!me->def) return 0;
 	if (me->def->type == VM_METHOD_TYPE_NOTIMPLEMENTED) {
@@ -900,6 +902,40 @@ rb_method_definition_eq(const rb_method_definition_t *d1, const rb_method_defini
 	rb_bug("rb_method_entry_eq: unsupported method type (%d)\n", d1->type);
 	return 0;
     }
+}
+
+static st_index_t
+rb_hash_method_definition(st_index_t hash, const rb_method_definition_t *def)
+{
+    hash = rb_hash_uint(hash, def->type);
+    switch (def->type) {
+      case VM_METHOD_TYPE_ISEQ:
+	return rb_hash_uint(hash, (st_index_t)def->body.iseq);
+      case VM_METHOD_TYPE_CFUNC:
+	hash = rb_hash_uint(hash, (st_index_t)def->body.cfunc.func);
+	return rb_hash_uint(hash, def->body.cfunc.argc);
+      case VM_METHOD_TYPE_ATTRSET:
+      case VM_METHOD_TYPE_IVAR:
+	return rb_hash_uint(hash, def->body.attr.id);
+      case VM_METHOD_TYPE_BMETHOD:
+	return rb_hash_proc(hash, def->body.proc);
+      case VM_METHOD_TYPE_MISSING:
+	return rb_hash_uint(hash, def->original_id);
+      case VM_METHOD_TYPE_ZSUPER:
+      case VM_METHOD_TYPE_NOTIMPLEMENTED:
+      case VM_METHOD_TYPE_UNDEF:
+	return hash;
+      case VM_METHOD_TYPE_OPTIMIZED:
+	return rb_hash_uint(hash, def->body.optimize_type);
+      default:
+	rb_bug("rb_hash_method_definition: unsupported method type (%d)\n", def->type);
+    }
+    return hash;
+}
+
+st_index_t
+rb_hash_method_entry(st_index_t hash, const rb_method_entry_t *me) {
+    return rb_hash_method_definition(hash, me->def);
 }
 
 void
@@ -1263,11 +1299,11 @@ rb_respond_to(VALUE obj, ID id)
 
 /*
  *  call-seq:
- *     obj.respond_to?(symbol, include_private=false) -> true or false
+ *     obj.respond_to?(symbol, include_all=false) -> true or false
  *
- *  Returns +true+ if _obj_ responds to the given
- *  method. Private methods are included in the search only if the
- *  optional second parameter evaluates to +true+.
+ *  Returns +true+ if _obj_ responds to the given method.  Private and
+ *  protected methods are included in the search only if the optional
+ *  second parameter evaluates to +true+.
  *
  *  If the method is not implemented,
  *  as Process.fork on Windows, File.lchmod on GNU/Linux, etc.,
@@ -1300,7 +1336,7 @@ obj_respond_to(int argc, VALUE *argv, VALUE obj)
 
 /*
  *  call-seq:
- *     obj.respond_to_missing?(symbol, include_private) -> true or false
+ *     obj.respond_to_missing?(symbol, include_all) -> true or false
  *
  *  Hook method to return whether the _obj_ can respond to _id_ method
  *  or not.

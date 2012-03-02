@@ -287,19 +287,12 @@ AC_PROG_CXX
 AC_PROG_GCC_TRADITIONAL
 AC_SUBST(GCC)
 if test "$GCC" = yes; then
-    AC_TRY_LINK([
-      @%:@if defined __llvm__ && !defined __clang__
-      @%:@error llvm-gcc has ended
-      @%:@endif
-    ], [], [], [AC_MSG_ERROR(llvm-gcc has ended. Run configure with CC=clang)])
     linker_flag=-Wl,
     : ${optflags=-O3}
-    AS_CASE(["$target_os"], [linux*|darwin*], [: ${debugflags=-ggdb}])
     RUBY_APPEND_OPTIONS(XCFLAGS, ["-include ruby/config.h" "-include ruby/missing.h"])
 else
     linker_flag=
 fi
-test $ac_cv_prog_cc_g = yes && : ${debugflags=-g}
 
 RUBY_PROG_GNU_LD
 RUBY_CPPOUTFILE
@@ -495,6 +488,9 @@ if test "$GCC:${warnflags+set}:no" = yes::no; then
     warnflags=
 fi
 if test "$GCC" = yes; then
+    test "${debugflags+set}" || {RUBY_TRY_CFLAGS(-ggdb, [debugflags=-ggdb])}
+    test "${debugflags+set}" || {RUBY_TRY_CFLAGS(-g3, [debugflags=-g3])}
+
     # -D_FORTIFY_SOURCE
     RUBY_TRY_CFLAGS(-D_FORTIFY_SOURCE=2, [RUBY_APPEND_OPTION(XCFLAGS, -D_FORTIFY_SOURCE=2)])
 
@@ -505,6 +501,9 @@ if test "$GCC" = yes; then
     ],
     [
 	RUBY_TRY_CFLAGS(-fstack-protector, [stack_protector=yes], [stack_protector=no])
+	if test "x$stack_protector" = xyes; then
+	    RUBY_TRY_LDFLAGS(-fstack-protector, [], [stack_protector=broken])
+	fi
     ])
     if test "x$stack_protector" = xyes; then
 	RUBY_APPEND_OPTION(XCFLAGS, -fstack-protector)
@@ -515,6 +514,7 @@ if test "$GCC" = yes; then
     # suppress annoying -Wstrict-overflow warnings
     RUBY_TRY_CFLAGS(-fno-strict-overflow, [RUBY_APPEND_OPTION(XCFLAGS, -fno-strict-overflow)])
 fi
+test $ac_cv_prog_cc_g = yes && : ${debugflags=-g}
 
 if test "$GCC" = ""; then
     AS_CASE(["$target_os"],[aix*],[warnflags="-qinfo=por"])
@@ -909,6 +909,16 @@ if test "$GCC" = yes; then
 		    [rb_cv_gcc_atomic_builtins=no])])
     if test "$rb_cv_gcc_atomic_builtins" = yes; then
 	AC_DEFINE(HAVE_GCC_ATOMIC_BUILTINS)
+    fi
+
+    AC_CACHE_CHECK(for __builtin_unreachable, rb_cv_func___builtin_unreachable,
+    [AC_TRY_LINK([@%:@include <stdlib.h>],
+	[exit(0); __builtin_unreachable();],
+	[rb_cv_func___builtin_unreachable=yes],
+	[rb_cv_func___builtin_unreachable=no])
+    ])
+    if test "$rb_cv_func___builtin_unreachable" = yes; then
+	AC_DEFINE_UNQUOTED(UNREACHABLE, [__builtin_unreachable()])
     fi
 fi
 
@@ -2610,11 +2620,13 @@ AS_CASE(["$target_os"],
 	    fi
 	    EXPORT_PREFIX=' '
 	    DLDFLAGS="${DLDFLAGS}"' $(DEFFILE)'
-	    AC_LIBOBJ([win32])
+	    AC_LIBOBJ([win32/win32])
+	    AC_LIBOBJ([win32/file])
 	    COMMON_LIBS=m
 #	    COMMON_MACROS="WIN32_LEAN_AND_MEAN="
 	    COMMON_HEADERS="winsock2.h windows.h"
 	    THREAD_MODEL=win32
+	    PLATFORM_DIR=win32
 	    ])
 	LIBRUBY_ALIASES=''
 	FIRSTMAKEFILE=GNUmakefile:cygwin/GNUmakefile.in
@@ -2765,6 +2777,7 @@ AC_SUBST(EXPORT_PREFIX)
 AC_SUBST(SYMBOL_PREFIX)
 AC_SUBST(MINIOBJS)
 AC_SUBST(THREAD_MODEL)
+AC_SUBST(PLATFORM_DIR)
 
 MAKEFILES="Makefile `echo $FIRSTMAKEFILE | sed 's/:.*//'`"
 MAKEFILES="`echo $MAKEFILES`"
