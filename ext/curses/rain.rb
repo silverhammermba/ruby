@@ -5,18 +5,7 @@ require "curses"
 include Curses
 
 def ranf
-<<<<<<< HEAD
 	rand(32767).to_f / 32767
-=======
-  rand(32767).to_f / 32767
-end
-
-# main #
-for i in %w[HUP INT QUIT TERM]
-  if trap(i, "SIG_IGN") != 0 then  # 0 for SIG_IGN
-    trap(i) {|sig| onsig(sig) }
-  end
->>>>>>> upstream/trunk
 end
 
 srand

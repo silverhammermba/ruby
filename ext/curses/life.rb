@@ -35,13 +35,13 @@ Curses.init do |screen|
 		grid.each_with_index do |row, y|
 			row.each_with_index do |cell, x|
 				n = (grid[y - 1][x - 1] == 7 ? 1 : 0) +
-					(grid[y - 1][x    ] == 7 ? 1 : 0) +
-					(grid[y - 1][x + 1] == 7 ? 1 : 0) +
-					(grid[y    ][x - 1] == 7 ? 1 : 0) +
-					(grid[y    ][x + 1] == 7 ? 1 : 0) +
-					(grid[y + 1][x - 1] == 7 ? 1 : 0) +
-					(grid[y + 1][x    ] == 7 ? 1 : 0) +
-					(grid[y + 1][x + 1] == 7 ? 1 : 0)
+				    (grid[y - 1][x    ] == 7 ? 1 : 0) +
+				    (grid[y - 1][x + 1] == 7 ? 1 : 0) +
+				    (grid[y    ][x - 1] == 7 ? 1 : 0) +
+				    (grid[y    ][x + 1] == 7 ? 1 : 0) +
+				    (grid[y + 1][x - 1] == 7 ? 1 : 0) +
+				    (grid[y + 1][x    ] == 7 ? 1 : 0) +
+				    (grid[y + 1][x + 1] == 7 ? 1 : 0)
 
 				diff[y][x] = cell
 				if cell != 7
