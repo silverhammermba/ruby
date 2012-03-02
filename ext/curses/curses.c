@@ -1540,6 +1540,7 @@ window_puts(int argc, VALUE *argv, VALUE obj)
     int bx, x, z;
 	VALUE *targ;
 
+	// TODO refactor
 	if (argc == 0 || argc == 2)
 	{
 		targ = (VALUE *)calloc(argc + 1, sizeof(VALUE));
