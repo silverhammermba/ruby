@@ -80,20 +80,14 @@ rb_any_hash(VALUE a)
     VALUE hval;
     st_index_t hnum;
 
-    switch (TYPE(a)) {
-      case T_FIXNUM:
-      case T_SYMBOL:
-      case T_NIL:
-      case T_FALSE:
-      case T_TRUE:
-	hnum = rb_hash_end(rb_hash_start((unsigned int)a));
-	break;
-
-      case T_STRING:
+    if (SPECIAL_CONST_P(a)) {
+	if (a == Qundef) return 0;
+	hnum = rb_hash_end(rb_hash_start((st_index_t)a));
+    }
+    else if (BUILTIN_TYPE(a) == T_STRING) {
 	hnum = rb_str_hash(a);
-	break;
-
-      default:
+    }
+    else {
         hval = rb_hash(a);
 	hnum = FIX2LONG(hval);
     }
@@ -152,8 +146,9 @@ struct hash_foreach_arg {
 };
 
 static int
-hash_foreach_iter(st_data_t key, st_data_t value, struct hash_foreach_arg *arg)
+hash_foreach_iter(st_data_t key, st_data_t value, st_data_t argp, int err)
 {
+    struct hash_foreach_arg *arg = (struct hash_foreach_arg *)argp;
     int status;
     st_table *tbl;
 
@@ -3213,6 +3208,51 @@ env_update(VALUE env, VALUE hash)
  *      @age  = params[:age]
  *    end
  *
+ *  === Hash Keys
+ *
+ *  Two objects refer to the same hash key when their <code>hash</code> value
+ *  is identical and the two objects are <code>eql?</code> to each other.
+ *
+ *  A user-defined class may be used as a hash key if the <code>hash</code>
+ *  and <code>eql?</code> methods are overridden to provide meaningful
+ *  behavior.  By default, separate instances refer to separate hash keys.
+ *
+ *  A typical implementation of <code>hash</code> is based on the 
+ *  object's data while <code>eql?</code> is usually aliased to the overridden
+ *  <code>==</code> method:
+ *
+ *    class Book
+ *      attr_reader :author, :title
+ *
+ *      def initialize(author, title)
+ *        @author = author
+ *        @title = title
+ *      end
+ *
+ *      def ==(other)
+ *        self.class === other and
+ *          other.author == @author and 
+ *          other.title == @title
+ *      end
+ *
+ *      alias eql? ==
+ *
+ *      def hash
+ *        @author.hash ^ @title.hash # XOR
+ *      end
+ *    end
+ *
+ *    book1 = Book.new 'matz', 'Ruby in a Nutshell'
+ *    book2 = Book.new 'matz', 'Ruby in a Nutshell'
+ *
+ *    reviews = {}
+ *
+ *    reviews[book1] = 'Great reference!'
+ *    reviews[book2] = 'Nice and compact!'
+ *
+ *    reviews.length #=> 1
+ *
+ *  See also Object#hash and Object#eql?
  */
 
 void

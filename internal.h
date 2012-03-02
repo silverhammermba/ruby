@@ -93,6 +93,8 @@ void rb_call_end_proc(VALUE data);
 /* file.c */
 VALUE rb_home_dir(const char *user, VALUE result);
 VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
+void rb_file_const(const char*, VALUE);
+int rb_file_load_ok(const char *);
 void Init_File(void);
 
 /* gc.c */
@@ -150,6 +152,7 @@ int rb_is_junk_name(VALUE name);
 
 /* proc.c */
 VALUE rb_proc_location(VALUE self);
+st_index_t rb_hash_proc(st_index_t hash, VALUE proc);
 
 /* rational.c */
 VALUE rb_lcm(VALUE x, VALUE y);

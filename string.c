@@ -2147,9 +2147,9 @@ rb_str_concat(VALUE str1, VALUE str2)
  *
  *  Prepend---Prepend the given string to <i>str</i>.
  *
- *  a = "world"
- *  a.prepend("hello ") #=> "hello world"
- *  a                   #=> "hello world"
+ *     a = "world"
+ *     a.prepend("hello ") #=> "hello world"
+ *     a                   #=> "hello world"
  */
 
 static VALUE
@@ -6771,12 +6771,19 @@ rb_str_oct(VALUE str)
 
 /*
  *  call-seq:
- *     str.crypt(other_str)   -> new_str
+ *     str.crypt(salt_str)   -> new_str
  *
- *  Applies a one-way cryptographic hash to <i>str</i> by invoking the standard
- *  library function <code>crypt</code>. The argument is the salt string, which
- *  should be two characters long, each character drawn from
- *  <code>[a-zA-Z0-9./]</code>.
+ *  Applies a one-way cryptographic hash to <i>str</i> by invoking the
+ *  standard library function <code>crypt(3)</code> with the given
+ *  salt string.  While the format and the result are system and
+ *  implementation dependent, using a salt matching the regular
+ *  expression <code>\A[a-zA-Z0-9./]{2}</code> should be valid and
+ *  safe on any platform, in which only the first two characters are
+ *  significant.
+ *
+ *  This method is for use in system specific scripts, so if you want
+ *  a cross-platform hash function consider using Digest or OpenSSL
+ *  instead.
  */
 
 static VALUE

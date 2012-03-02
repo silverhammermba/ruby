@@ -16,9 +16,9 @@ headers = {
   "db3" => ["db3/db.h", "db3.h", "db.h"],
   "db4" => ["db4/db.h", "db4.h", "db.h"],
   "db5" => ["db5/db.h", "db5.h", "db.h"],
-  "gdbm_compat" => ["gdbm-ndbm.h", "ndbm.h", "gdbm/ndbm.h"], # gdbm since 1.8.1
-  "gdbm" => ["gdbm-ndbm.h", "ndbm.h", "gdbm/ndbm.h"], # gdbm until 1.8.0
-  "qdbm" => ["relic.h", "qdbm/relic.h"],
+  "gdbm_compat" => ["gdbm-ndbm.h", "gdbm/ndbm.h", "ndbm.h"], # GDBM since 1.8.1
+  "gdbm" => ["gdbm-ndbm.h", "gdbm/ndbm.h", "ndbm.h"], # GDBM until 1.8.0
+  "qdbm" => ["qdbm/relic.h", "relic.h"],
 }
 
 class << headers
@@ -86,6 +86,25 @@ SRC
   end
 end
 
+def have_empty_macro_dbm_clearerr(headers = nil, opt = "", &b)
+  checking_for checking_message('empty macro of dbm_clearerr(foobarbaz)',
+                                headers, opt) do
+    try_toplevel('dbm_clearerr(foobarbaz)', headers, opt, &b)
+  end
+end
+
+def try_toplevel(src, headers = nil, opt = "", &b)
+  if try_compile(<<"SRC", opt, &b)
+#{cpp_include(headers)}
+/*top*/
+#{src}
+SRC
+    true
+  else
+    false
+  end
+end
+
 
 def headers.db_check2(db, hdr)
   $defs.push(%{-DRUBYDBM_DBM_HEADER='"#{hdr}"'})
@@ -112,57 +131,77 @@ def headers.db_check2(db, hdr)
     return false
   end
 
-  # Skip a mismatch of Berkeley DB's ndbm.h and old gdbm library.
+  # Skip a mismatch of Berkeley DB's ndbm.h and old GDBM library.
   #
   # dbm_clearerr() should be available for any ndbm implementation.
   # It is available since the original (4.3BSD) ndbm and standardized by POSIX.
   #
   # However "can't resolve symbol 'dbm_clearerr'" problem may be caused by
-  # header/library mismatch: Berkeley DB ndbm.h and gdbm library until 1.8.3.
-  # gdbm (until 1.8.3) provides dbm_clearerr() as a empty macro in the header
+  # header/library mismatch: Berkeley DB ndbm.h and GDBM library until 1.8.3.
+  # GDBM (until 1.8.3) provides dbm_clearerr() as a empty macro in the header
   # and the library don't provide dbm_clearerr().
   # Berkeley DB provides dbm_clearerr() as a usual function.
-  # So Berkeley DB header with gdbm library causes the problem.
+  # So Berkeley DB header with GDBM library causes the problem.
   #
   if !have_func('dbm_clearerr((DBM *)0)', hdr, hsearch)
     return false
   end
 
-  # Berkeley DB's ndbm.h (since 1.85 at least) includes db.h and
-  # it defines _DB_H_.
-  have_db_header_macro = have_macro('_DB_H_', hdr, hsearch)
+  # Berkeley DB's ndbm.h (since 1.85 at least) defines DBM_SUFFIX.
+  # Note that _DB_H_ is not defined on Mac OS X because 
+  # it uses Berkeley DB 1 but ndbm.h doesn't include db.h.
+  have_db_header = have_macro('DBM_SUFFIX', hdr, hsearch)
+
+  # Old GDBM's ndbm.h, until 1.8.3, defines dbm_clearerr as a macro which
+  # expands to no tokens.
+  have_gdbm_header1 = have_empty_macro_dbm_clearerr(hdr, hsearch)
 
   # Recent GDBM's ndbm.h, since 1.9, includes gdbm.h and it defines _GDBM_H_.
   # ndbm compatibility layer of GDBM is provided by libgdbm (until 1.8.0)
   # and libgdbm_compat (since 1.8.1).
-  have_gdbm_header_macro = have_macro('_GDBM_H_', hdr, hsearch)
+  have_gdbm_header2 = have_macro('_GDBM_H_', hdr, hsearch)
 
   # 4.3BSD's ndbm.h defines _DBM_IOERR.
   # The original ndbm is provided by libc in 4.3BSD.
-  have_ndbm_header_macro = have_macro('_DBM_IOERR', hdr, hsearch)
+  have_ndbm_header = have_macro('_DBM_IOERR', hdr, hsearch)
 
-  # GDBM provides NDBM functions in libgdbm_compat since GDBM 1.8.1.
+  # GDBM provides ndbm functions in libgdbm_compat since GDBM 1.8.1.
   # GDBM's ndbm.h defines _GDBM_H_ since GDBM 1.9.
-  # So, reject 'gdbm'.  'gdbm_compat' is required.
-  if have_gdbm_header_macro && db == 'gdbm'
+  # If _GDBM_H_ is defined, 'gdbm_compat' is required and reject 'gdbm'.
+  if have_gdbm_header2 && db == 'gdbm'
     return false
   end
 
-  # ndbm.h is provided by the original (4.3BSD) dbm,
+  if have_db_header
+    $defs.push('-DRUBYDBM_DB_HEADER')
+  end
+
+  have_gdbm_header = have_gdbm_header1 | have_gdbm_header2
+  if have_gdbm_header
+    $defs.push('-DRUBYDBM_GDBM_HEADER')
+  end
+
+  # ndbm.h is provided by the original (4.3BSD) ndbm,
   # Berkeley DB 1 in libc of 4.4BSD and
-  # ndbm compatibility layer of gdbm.
+  # ndbm compatibility layer of GDBM.
   # So, try to check header/library mismatch.
   #
-  if hdr == 'ndbm.h' && db != 'libc'
-    if /\Adb\d?\z/ !~ db && have_db_header_macro
+  # Several (possibly historical) distributions provides libndbm.
+  # It may be Berkeley DB, GDBM or 4.3BSD ndbm.
+  # So mismatch check is not performed for that.
+  # Note that libndbm is searched only when --with-dbm-type=ndbm is
+  # given for configure.
+  #
+  if hdr == 'ndbm.h' && db != 'libc' && db != 'ndbm'
+    if /\Adb\d?\z/ !~ db && have_db_header
       return false
     end
 
-    if /\Agdbm/ !~ db && have_gdbm_header_macro
+    if /\Agdbm/ !~ db && have_gdbm_header
       return false
     end
     
-    if have_ndbm_header_macro
+    if have_ndbm_header
       return false
     end
   end
@@ -171,20 +210,25 @@ def headers.db_check2(db, hdr)
   have_func('db_version((int *)0, (int *)0, (int *)0)', hdr, hsearch)
 
   # GDBM
-  have_gdbm_variable = have_declared_libvar("gdbm_version", hdr, hsearch)
-  # gdbm_version is available since very old version (gdbm 1.5 at least).
-  # However it is not declared by ndbm.h until gdbm 1.8.3.
+  have_gdbm_version = have_declared_libvar("gdbm_version", hdr, hsearch)
+  # gdbm_version is available since very old version (GDBM 1.5 at least).
+  # However it is not declared by ndbm.h until GDBM 1.8.3.
   # We can't include both ndbm.h and gdbm.h because they both define datum type.
-  # ndbm.h includes gdbm.h and gdbm_version is declared since gdbm 1.9.
-  have_gdbm_variable |= have_undeclared_libvar(["gdbm_version", "char *"], hdr, hsearch)
+  # ndbm.h includes gdbm.h and gdbm_version is declared since GDBM 1.9.
+  have_gdbm_version |= have_undeclared_libvar(["gdbm_version", "char *"], hdr, hsearch)
 
   # QDBM
   have_var("dpversion", hdr, hsearch)
 
   # detect mismatch between GDBM header and other library.
   # If GDBM header is included, GDBM library should be linked.
-  if have_gdbm_header_macro && !have_gdbm_variable
+  if have_gdbm_header && !have_gdbm_version
     return false
+  end
+
+  # DBC type is required to disable error messages by Berkeley DB 2 or later.
+  if have_db_header
+    have_type("DBC", hdr, hsearch)
   end
 
   if hsearch
@@ -193,6 +237,9 @@ def headers.db_check2(db, hdr)
   end
   $defs << '-DDBM_HDR="<'+hdr+'>"'
   @found << hdr
+
+  puts "header: #{hdr}"
+  puts "library: #{db}"
 
   true
 end

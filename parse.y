@@ -3727,13 +3727,16 @@ block_param_def	: '|' opt_bv_decl '|'
 		;
 
 
-opt_bv_decl	: none
-		| ';' bv_decls
+opt_bv_decl	: opt_nl
+		    {
+		      $$ = 0;
+		    }
+		| opt_nl ';' bv_decls opt_nl
 		    {
 		    /*%%%*/
 			$$ = 0;
 		    /*%
-			$$ = $2;
+			$$ = $3;
 		    %*/
 		    }
 		;
@@ -3788,7 +3791,7 @@ lambda		:   {
 		    }
 		;
 
-f_larglist	: '(' f_args opt_bv_decl rparen
+f_larglist	: '(' f_args opt_bv_decl ')'
 		    {
 		    /*%%%*/
 			$$ = $2;
@@ -6506,7 +6509,10 @@ parser_tokadd_string(struct parser_params *parser,
 
 	      default:
 		if (c == -1) return -1;
-		if (!ISASCII(c)) goto non_ascii;
+		if (!ISASCII(c)) {
+		    if ((func & STR_FUNC_EXPAND) == 0) tokadd('\\');
+		    goto non_ascii;
+		}
 		if (func & STR_FUNC_REGEXP) {
 		    pushback(c);
 		    if ((c = tokadd_escape(&enc)) < 0)

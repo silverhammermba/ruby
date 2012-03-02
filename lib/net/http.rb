@@ -256,7 +256,7 @@ module Net   #:nodoc:
   #   uri = URI('https://secure.example.com/some_path?query=string')
   #
   #   Net::HTTP.start(uri.host, uri.port,
-  #     :use_ssl => uri.scheme == 'https').start do |http|
+  #     :use_ssl => uri.scheme == 'https') do |http|
   #     request = Net::HTTP::Get.new uri.request_uri
   #
   #     response = http.request request # Net::HTTPResponse object
@@ -788,7 +788,9 @@ module Net   #:nodoc:
 
     def connect
       D "opening connection to #{conn_address()}..."
-      s = timeout(@open_timeout) { TCPSocket.open(conn_address(), conn_port()) }
+      s = Timeout.timeout(@open_timeout, Net::OpenTimeout) {
+        TCPSocket.open(conn_address(), conn_port())
+      }
       D "opened"
       if use_ssl?
         ssl_parameters = Hash.new
@@ -824,7 +826,7 @@ module Net   #:nodoc:
           end
           # Server Name Indication (SNI) RFC 3546
           s.hostname = @address if s.respond_to? :hostname=
-          timeout(@open_timeout) { s.connect }
+          Timeout.timeout(@open_timeout, Net::OpenTimeout) { s.connect }
           if @ssl_context.verify_mode != OpenSSL::SSL::VERIFY_NONE
             s.post_connection_check(@address)
           end
@@ -1343,29 +1345,36 @@ module Net   #:nodoc:
 
     def transport_request(req)
       count = 0
-      begin_transport req
-      res = catch(:response) {
-        req.exec @socket, @curr_http_version, edit_path(req.path)
-        begin
-          res = HTTPResponse.read_new(@socket)
-        end while res.kind_of?(HTTPContinue)
-        res.reading_body(@socket, req.response_body_permitted?) {
-          yield res if block_given?
+      begin
+        begin_transport req
+        res = catch(:response) {
+          req.exec @socket, @curr_http_version, edit_path(req.path)
+          begin
+            res = HTTPResponse.read_new(@socket)
+          end while res.kind_of?(HTTPContinue)
+          res.reading_body(@socket, req.response_body_permitted?) {
+            yield res if block_given?
+          }
+          res
         }
-        res
-      }
+      rescue IOError, EOFError,
+             Errno::ECONNRESET, Errno::ECONNABORTED, Errno::EPIPE,
+             OpenSSL::SSL::SSLError, Timeout::Error => exception
+        raise if Net::OpenTimeout === exception
+
+        if count == 0 && IDEMPOTENT_METHODS_.include?(req.method)
+          count += 1
+          @socket.close if @socket and not @socket.closed?
+          D "Conn close because of error #{exception}, and retry"
+          retry
+        end
+        D "Conn close because of error #{exception}"
+        @socket.close if @socket and not @socket.closed?
+        raise
+      end
+
       end_transport req, res
       res
-    rescue EOFError, Errno::ECONNRESET => exception
-      if count == 0 && IDEMPOTENT_METHODS_.include?(req.method)
-        count += 1
-        @socket.close if @socket and not @socket.closed?
-        D "Conn close because of error #{exception}, and retry"
-        retry
-      end
-      D "Conn close because of error #{exception}"
-      @socket.close if @socket and not @socket.closed?
-      raise
     rescue => exception
       D "Conn close because of error #{exception}"
       @socket.close if @socket and not @socket.closed?

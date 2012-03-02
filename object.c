@@ -70,23 +70,30 @@ rb_eql(VALUE obj1, VALUE obj2)
  *     obj.equal?(other)   -> true or false
  *     obj.eql?(other)     -> true or false
  *
- *  Equality---At the <code>Object</code> level, <code>==</code> returns
- *  <code>true</code> only if <i>obj</i> and <i>other</i> are the
- *  same object. Typically, this method is overridden in descendant
- *  classes to provide class-specific meaning.
+ *  Equality --- At the <code>Object</code> level, <code>==</code> returns
+ *  <code>true</code> only if +obj+ and +other+ are the same object.
+ *  Typically, this method is overridden in descendant classes to provide
+ *  class-specific meaning.
  *
  *  Unlike <code>==</code>, the <code>equal?</code> method should never be
- *  overridden by subclasses: it is used to determine object identity
- *  (that is, <code>a.equal?(b)</code> iff <code>a</code> is the same
- *  object as <code>b</code>).
+ *  overridden by subclasses as it is used to determine object identity
+ *  (that is, <code>a.equal?(b)</code> if and only if <code>a</code> is the
+ *  same object as <code>b</code>):
  *
- *  The <code>eql?</code> method returns <code>true</code> if
- *  <i>obj</i> and <i>anObject</i> have the same value. Used by
- *  <code>Hash</code> to test members for equality.  For objects of
- *  class <code>Object</code>, <code>eql?</code> is synonymous with
- *  <code>==</code>. Subclasses normally continue this tradition, but
- *  there are exceptions. <code>Numeric</code> types, for example,
- *  perform type conversion across <code>==</code>, but not across
+ *    obj = "a"
+ *    other = obj.dup
+ *
+ *    a == other      #=> true
+ *    a.equal? other  #=> false
+ *    a.equal? a      #=> true
+ *
+ *  The <code>eql?</code> method returns <code>true</code> if +obj+ and
+ *  +other+ refer to the same hash key.  This is used by Hash to test members
+ *  for equality.  For objects of class <code>Object</code>, <code>eql?</code>
+ *  is synonymous with <code>==</code>.  Subclasses normally continue this
+ *  tradition by aliasing <code>eql?</code> to their overridden <code>==</code>
+ *  method, but there are exceptions.  <code>Numeric</code> types, for
+ *  example, perform type conversion across <code>==</code>, but not across
  *  <code>eql?</code>, so:
  *
  *     1 == 1.0     #=> true
@@ -101,14 +108,17 @@ rb_obj_equal(VALUE obj1, VALUE obj2)
 }
 
 /*
- * Generates a <code>Fixnum</code> hash value for this object.
- * This function must have the property that a.eql?(b) implies
- * a.hash <code>==</code> b.hash.
- * The hash value is used by class <code>Hash</code>.
- * Any hash value that exceeds the capacity of a <code>Fixnum</code> will be
- * truncated before being used.
+ * Generates a Fixnum hash value for this object.  This function must have the
+ * property that <code>a.eql?(b)<code> implies <code>a.hash == b.hash</code>.
  *
- *      "waffle".hash #=> -910576647
+ * The hash value is used along with #eql? by the Hash class to determine if
+ * two objects reference the same hash key.  Any hash value that exceeds the
+ * capacity of a Fixnum will be truncated before being used.
+ *
+ * The hash value for an object may not be identical across invocations or
+ * implementations of ruby.  If you need a stable identifier across ruby
+ * invocations and implementations you will need to generate one with a custom
+ * method.
  */
 VALUE
 rb_obj_hash(VALUE obj)

@@ -374,7 +374,7 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
 #  endif
 #endif
 
-#define rb_sys_fail_path(path) rb_sys_fail(NIL_P(path) ? 0 : RSTRING_PTR(path))
+#define rb_sys_fail_path(path) rb_sys_fail_str(path)
 
 static int io_fflush(rb_io_t *);
 
@@ -420,7 +420,9 @@ static int io_fflush(rb_io_t *);
 /*
  * Return previous translation mode.
  */
-inline static int set_binary_mode_with_seek_cur(rb_io_t *fptr) {
+static inline int
+set_binary_mode_with_seek_cur(rb_io_t *fptr)
+{
     off_t r, pos;
     ssize_t read_size;
     long i;
@@ -1241,6 +1243,8 @@ io_write(VALUE io, VALUE str, int nosync)
     io = tmp;
     if (RSTRING_LEN(str) == 0) return INT2FIX(0);
 
+    str = rb_str_new_frozen(str);
+
     GetOpenFile(io, fptr);
     rb_io_check_writable(fptr);
 
@@ -1435,6 +1439,8 @@ rb_io_seek_m(int argc, VALUE *argv, VALUE io)
  *     ios.pos = integer    -> integer
  *
  *  Seeks to the given position (in bytes) in <em>ios</em>.
+ *  It is not guranteed that seeking to the right position when <em>ios</em>
+ *  is textmode.
  *
  *     f = File.new("testfile")
  *     f.pos = 17
@@ -1642,7 +1648,7 @@ rb_io_set_sync(VALUE io, VALUE sync)
  *  Immediately writes all buffered data in <em>ios</em> to disk.
  *  Note that <code>fsync</code> differs from
  *  using <code>IO#sync=</code>. The latter ensures that data is flushed
- *  from Ruby's buffers, but doesn't not guarantee that the underlying
+ *  from Ruby's buffers, but does not guarantee that the underlying
  *  operating system actually writes it to disk.
  *
  *  <code>NotImplementedError</code> is raised
@@ -1776,31 +1782,29 @@ static VALUE
 rb_io_inspect(VALUE obj)
 {
     rb_io_t *fptr;
-    const char *cname;
-    char fd_desc[4+sizeof(int)*3];
-    const char *path;
-    const char *st = "";
+    VALUE result;
+    static const char closed[] = " (closed)";
 
     fptr = RFILE(rb_io_taint_check(obj))->fptr;
     if (!fptr) return rb_any_to_s(obj);
-    cname = rb_obj_classname(obj);
+    result = rb_str_new_cstr("#<");
+    rb_str_append(result, rb_class_name(CLASS_OF(obj)));
+    rb_str_cat2(result, ":");
     if (NIL_P(fptr->pathv)) {
         if (fptr->fd < 0) {
-            path = "";
-            st = "(closed)";
+	    rb_str_cat(result, closed+1, strlen(closed)-1);
         }
         else {
-            snprintf(fd_desc, sizeof(fd_desc), "fd %d", fptr->fd);
-            path = fd_desc;
+	    rb_str_catf(result, "fd %d", fptr->fd);
         }
     }
     else {
-        path = RSTRING_PTR(fptr->pathv);
+	rb_str_append(result, fptr->pathv);
         if (fptr->fd < 0) {
-            st = " (closed)";
+	    rb_str_cat(result, closed, strlen(closed));
         }
     }
-    return rb_sprintf("#<%s:%s%s>", cname, path, st);
+    return rb_str_cat2(result, ">");
 }
 
 /*
@@ -1870,11 +1874,14 @@ io_bufread(char *ptr, long len, rb_io_t *fptr)
     return len - n;
 }
 
+static void io_setstrbuf(VALUE *str, long len);
+
 static long
 io_fread(VALUE str, long offset, long size, rb_io_t *fptr)
 {
     long len;
 
+    io_setstrbuf(&str, offset + size);
     rb_str_locktmp(str);
     len = io_bufread(RSTRING_PTR(str) + offset, size, fptr);
     rb_str_unlocktmp(str);
@@ -2206,6 +2213,7 @@ io_getpartial(int argc, VALUE *argv, VALUE io, int nonblock)
         if (nonblock) {
             rb_io_set_nonblock(fptr);
         }
+	io_setstrbuf(&str, len);
 	rb_str_locktmp(str);
 	n = rb_read_internal(fptr->fd, RSTRING_PTR(str), len);
 	rb_str_unlocktmp(str);
@@ -4213,6 +4221,8 @@ rb_io_syswrite(VALUE io, VALUE str)
     GetOpenFile(io, fptr);
     rb_io_check_writable(fptr);
 
+    str = rb_str_new_frozen(str);
+
     if (fptr->wbuf.len) {
 	rb_warn("syswrite for buffered IO");
     }
@@ -4267,6 +4277,7 @@ rb_io_sysread(int argc, VALUE *argv, VALUE io)
     rb_thread_wait_fd(fptr->fd);
     rb_io_check_closed(fptr);
 
+    io_setstrbuf(&str, ilen);
     rb_str_locktmp(str);
     n = rb_read_internal(fptr->fd, RSTRING_PTR(str), ilen);
     rb_str_unlocktmp(str);
@@ -4817,7 +4828,7 @@ rb_io_extract_modeenc(VALUE *vmode_p, VALUE *vperm_p, VALUE opthash,
 
   vmode_handle:
     if (NIL_P(vmode)) {
-        fmode = FMODE_READABLE | DEFAULT_TEXTMODE;
+        fmode = FMODE_READABLE;
         oflags = O_RDONLY;
     }
     else if (!NIL_P(intmode = rb_check_to_integer(vmode, "to_int"))) {
@@ -4867,6 +4878,11 @@ rb_io_extract_modeenc(VALUE *vmode_p, VALUE *vperm_p, VALUE opthash,
 	    if (!has_enc)
 		rb_io_ext_int_to_encs(rb_ascii8bit_encoding(), NULL, &enc, &enc2);
 	}
+#if DEFAULT_TEXTMODE
+	else if (NIL_P(vmode)) {
+	    fmode |= DEFAULT_TEXTMODE;
+	}
+#endif
 	if (!has_vmode) {
 	    v = rb_hash_aref(opthash, sym_mode);
 	    if (!NIL_P(v)) {
@@ -4961,7 +4977,7 @@ rb_sysopen(VALUE fname, int oflags, mode_t perm)
 	    fd = rb_sysopen_internal(&data);
 	}
 	if (fd < 0) {
-	    rb_sys_fail(RSTRING_PTR(fname));
+	    rb_sys_fail_path(fname);
 	}
     }
     return fd;
@@ -5414,14 +5430,14 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     FILE *fp = 0;
     int fd = -1;
     int write_fd = -1;
-    const char *cmd = 0;
 #if !defined(HAVE_FORK)
+    const char *cmd = 0;
     int argc;
     VALUE *argv;
-#endif
 
     if (prog)
         cmd = StringValueCStr(prog);
+#endif
 
 #if !defined(HAVE_FORK)
     if (!eargp) {
@@ -5449,13 +5465,13 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     switch (fmode & (FMODE_READABLE|FMODE_WRITABLE)) {
       case FMODE_READABLE|FMODE_WRITABLE:
         if (rb_pipe(arg.write_pair) < 0)
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         if (rb_pipe(arg.pair) < 0) {
             int e = errno;
             close(arg.write_pair[0]);
             close(arg.write_pair[1]);
             errno = e;
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         }
         if (eargp) {
             rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(arg.write_pair[0]));
@@ -5464,18 +5480,18 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
 	break;
       case FMODE_READABLE:
         if (rb_pipe(arg.pair) < 0)
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         if (eargp)
             rb_exec_arg_addopt(eargp, INT2FIX(1), INT2FIX(arg.pair[1]));
 	break;
       case FMODE_WRITABLE:
         if (rb_pipe(arg.pair) < 0)
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         if (eargp)
             rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(arg.pair[0]));
 	break;
       default:
-        rb_sys_fail(cmd);
+        rb_sys_fail_str(prog);
     }
     if (eargp) {
         rb_exec_arg_fixup(arg.execp);
@@ -5504,7 +5520,7 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
 	errno = e;
         if (errmsg[0])
             rb_sys_fail(errmsg);
-	rb_sys_fail(cmd);
+	rb_sys_fail_str(prog);
     }
     if ((fmode & FMODE_READABLE) && (fmode & FMODE_WRITABLE)) {
         close(arg.pair[1]);
@@ -5537,13 +5553,13 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     switch (fmode & (FMODE_READABLE|FMODE_WRITABLE)) {
       case FMODE_READABLE|FMODE_WRITABLE:
         if (rb_pipe(write_pair) < 0)
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         if (rb_pipe(pair) < 0) {
             int e = errno;
             close(write_pair[0]);
             close(write_pair[1]);
             errno = e;
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         }
         if (eargp) {
             rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(write_pair[0]));
@@ -5552,18 +5568,18 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
 	break;
       case FMODE_READABLE:
         if (rb_pipe(pair) < 0)
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         if (eargp)
             rb_exec_arg_addopt(eargp, INT2FIX(1), INT2FIX(pair[1]));
 	break;
       case FMODE_WRITABLE:
         if (rb_pipe(pair) < 0)
-            rb_sys_fail(cmd);
+            rb_sys_fail_str(prog);
         if (eargp)
             rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(pair[0]));
 	break;
       default:
-        rb_sys_fail(cmd);
+        rb_sys_fail_str(prog);
     }
     if (eargp) {
 	rb_exec_arg_fixup(eargp);
@@ -5592,7 +5608,7 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
 		    close(write_pair[1]);
 		}
 		errno = e;
-		rb_sys_fail(cmd);
+		rb_sys_fail_str(prog);
 	    }
 	    break;
 	}
@@ -5628,7 +5644,7 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     fp = popen(cmd, modestr);
     if (eargp)
 	rb_run_exec_options(&sarg, NULL);
-    if (!fp) rb_sys_fail(RSTRING_PTR(prog));
+    if (!fp) rb_sys_fail_path(prog);
     fd = fileno(fp);
 #endif
 
@@ -7962,7 +7978,7 @@ do_io_advise(rb_io_t *fptr, VALUE advice, off_t offset, off_t len)
     if (rv) {
 	/* posix_fadvise(2) doesn't set errno. On success it returns 0; otherwise
 	   it returns the error code. */
-	rb_syserr_fail(rv, RSTRING_PTR(fptr->pathv));
+	rb_syserr_fail_str(rv, fptr->pathv);
     }
 
     return Qnil;
@@ -8969,10 +8985,11 @@ static VALUE
 rb_io_s_foreach(int argc, VALUE *argv, VALUE self)
 {
     VALUE opt;
+    int orig_argc = argc;
     struct foreach_arg arg;
 
     argc = rb_scan_args(argc, argv, "13:", NULL, NULL, NULL, NULL, &opt);
-    RETURN_ENUMERATOR(self, argc, argv);
+    RETURN_ENUMERATOR(self, orig_argc, argv);
     open_key_args(argc, argv, opt, &arg);
     if (NIL_P(arg.io)) return Qnil;
     return rb_ensure(io_s_foreach, (VALUE)&arg, rb_io_close, arg.io);
