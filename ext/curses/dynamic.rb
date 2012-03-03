@@ -43,17 +43,22 @@ Curses.init do
 	file_list = []
 	dir = Dir.new('.')
 
-	# now we create an array of Flex Windows. Each 
+	# now we create an array of Flex Windows.
 	windows = []
 
+	# each is created with a block that returns the lines,
+	# columns, top, left of the window
 	windows << (left = Flex.new do
 		# we need to use Curses.stdscr here because the stdscr object is
 		# recreated whenever the terminal is resized
 		[Curses.stdscr.lines - 1, Curses.stdscr.columns / 2, 0, 0]
 	end)
 
+	# each then defines a draw method which is called whenever
+	# the window is resized
 	left.define_draw do
-		# note how this uses a closure to give the Flex object access to file_list
+		# note how this uses a closure to give the Flex object
+		# access to file_list
 		clear
 		while file_list.length < lines and file = dir.read
 			file_list << file
@@ -63,6 +68,7 @@ Curses.init do
 		refresh
 	end
 
+	# a 1 column window for dividing the left and right halves
 	windows << (divider = Flex.new(left) do
 		# and this closure gives the divider Flex access to the left, so that it
 		# can position itself properly
