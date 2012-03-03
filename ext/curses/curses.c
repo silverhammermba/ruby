@@ -1441,7 +1441,7 @@ window_inch(VALUE obj)
  * cursor.
  */
 static VALUE
-window_aref(VALUE obj, VALUE y, VALUE x) /* TODO accept ranges */
+window_aref(VALUE obj, VALUE y, VALUE x) /* TODO accept ranges, return nil on out-of-bounds */
 {
     struct windata *winp;
     int cy, cx;
