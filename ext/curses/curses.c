@@ -1527,6 +1527,99 @@ window_print(int argc, VALUE *argv, VALUE obj)
 }
 
 /*
+ * Document-method: Curses::Window.print_center
+ * call-seq: print_center(y, str)
+ *
+ * add the string +str+ centered on line y of the window and
+ * advance cursor
+ *
+ */
+static VALUE
+window_print_center(int argc, VALUE *argv, VALUE obj)
+{
+    struct windata *winp;
+    int str, y, x, columns;
+
+    GetWINDOW(obj, winp);
+
+	getyx(winp->window, y, x);
+
+    if (argc == 1) {
+        str = 0;
+    } else if (argc == 2) {
+        str = 1;
+		y = NUM2INT(argv[0]);
+    } else {
+        rb_raise(rb_eArgError, "wrong number of arguments(%d for 1-2)", argc);
+    }
+    if (!NIL_P(argv[str])) {
+        if (TYPE(argv[str]) != T_STRING)
+            argv[str] = rb_funcall(argv[str], rb_intern("to_s"), 0); /* TODO necessary? */
+        StringValue(argv[str]);
+        argv[str] = rb_str_export_locale(argv[str]);
+#if defined(getmaxx)
+		columns = getmaxx(winp->window);
+#elif defined(getmaxyx)
+		getmaxyx(winp->window, x, columns);
+#else
+		columns = winp->window->_maxx + 1;
+#endif
+		x = (columns - NUM2INT(rb_funcall(argv[str], rb_intern("length"), 0))) / 2;
+		if (x < 0) x = 0;
+		wmove(winp->window, y, x);
+        waddstr(winp->window, StringValueCStr(argv[str]));
+    }
+    return Qnil;
+}
+
+/*
+ * Document-method: Curses::Window.print_right
+ * call-seq: print_right(y, str)
+ *
+ * add the string +str+ right-justified on line y of the window and
+ * advance cursor. If +str+ is longer than the width of the window, it
+ * will wrap to the next line.
+ *
+ */
+static VALUE
+window_print_right(int argc, VALUE *argv, VALUE obj)
+{
+    struct windata *winp;
+    int str, y, x, columns;
+
+    GetWINDOW(obj, winp);
+
+	getyx(winp->window, y, x);
+
+    if (argc == 1) {
+        str = 0;
+    } else if (argc == 2) {
+        str = 1;
+		y = NUM2INT(argv[0]);
+    } else {
+        rb_raise(rb_eArgError, "wrong number of arguments(%d for 1-2)", argc);
+    }
+    if (!NIL_P(argv[str])) {
+        if (TYPE(argv[str]) != T_STRING)
+            argv[str] = rb_funcall(argv[str], rb_intern("to_s"), 0); /* TODO necessary? */
+        StringValue(argv[str]);
+        argv[str] = rb_str_export_locale(argv[str]);
+#if defined(getmaxx)
+		columns = getmaxx(winp->window);
+#elif defined(getmaxyx)
+		getmaxyx(winp->window, x, columns);
+#else
+		columns = winp->window->_maxx + 1;
+#endif
+		x = columns - NUM2INT(rb_funcall(argv[str], rb_intern("length"), 0));
+		if (x < 0) x = 0;
+		wmove(winp->window, y, x);
+        waddstr(winp->window, StringValueCStr(argv[str]));
+    }
+    return Qnil;
+}
+
+/*
  * Document-method: Curses::Window.puts
  * call-seq: puts(y, x, str)
  *
@@ -1540,18 +1633,15 @@ window_puts(int argc, VALUE *argv, VALUE obj)
     int bx, x, z;
     VALUE *targ;
 
-    /* TODO refactor */
+    GetWINDOW(obj, winp);
+
     if (argc == 0 || argc == 2)
     {
-        targ = (VALUE *)calloc(argc + 1, sizeof(VALUE));
-        for (x = 0; x < argc; x++)
-            targ[x] = argv[x];
-        targ[argc] = rb_str_new2("");
-        window_print(argc + 1, targ, obj);
-        free(targ);
+		if (argc == 2)
+			wmove(winp->window, NUM2INT(argv[0]), NUM2INT(argv[1]));
 
-        GetWINDOW(obj, winp);
         waddstr(winp->window, "\n");
+
     } else {
         window_print(argc, argv, obj);
 
@@ -2469,6 +2559,8 @@ Init_curses(void)
     rb_define_method(cWindow, "putc", window_addch, 1);
     rb_define_method(cWindow, "insertc", window_insch, 1);
     rb_define_method(cWindow, "print", window_print, -1);
+    rb_define_method(cWindow, "print_center", window_print_center, -1);
+    rb_define_method(cWindow, "print_right", window_print_right, -1);
     rb_define_method(cWindow, "puts", window_puts, -1);
     rb_define_method(cWindow, "<<", window_addstr2, 1);
     rb_define_method(cWindow, "getc", window_getch, 0);
