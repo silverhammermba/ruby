@@ -40,8 +40,7 @@ Curses.init do
 	Curses.echo = false
 
 	# variables for storing program state
-	file_list = []
-	dir = Dir.new('.')
+	file_list = Dir.entries('.').reject { |file| file =~ /(^\.|~$)/ }.sort
 
 	# now we create an array of Flex Windows.
 	windows = []
@@ -60,9 +59,6 @@ Curses.init do
 		# note how this uses a closure to give the Flex object
 		# access to file_list
 		clear
-		while file_list.length < lines and file = dir.read
-			file_list << file
-		end
 		pos = 0, 0
 		file_list[0...lines].each { |file| puts file[0...columns] }
 		refresh
@@ -75,10 +71,10 @@ Curses.init do
 		[Curses.stdscr.lines - 1, 1, 0, left.columns]
 	end)
 
+	divider.attron(Curses::A_REVERSE)
+
 	divider.define_draw do
-		attron(Curses::A_REVERSE) do
-			print 0, 0, ' ' * lines
-		end
+		blank
 		refresh
 	end
 
@@ -89,7 +85,7 @@ Curses.init do
 
 	right.define_draw do
 		clear
-		print 0, 0, "The right window."
+		print 0, 0, "Press q to quit."
 		refresh
 	end
 
@@ -97,12 +93,11 @@ Curses.init do
 		[1, Curses.stdscr.columns, left.lines, 0]
 	end)
 
+	bottom.attron(Curses::A_REVERSE)
+
 	bottom.define_draw do
-		clear
-		attron(Curses::A_REVERSE) do
-			print 0, 0, " " * columns
-			print 0, 0, "Resize your terminal to see the magic!"
-		end
+		blank
+		print 0, 0, "Resize your terminal to see the magic!"
 		refresh
 	end
 

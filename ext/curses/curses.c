@@ -1067,6 +1067,39 @@ window_clear(VALUE obj)
 }
 
 /*
+ * Document-method: Curses::Window.blank
+ *
+ * Clear the window by printing spaces, so that attributes
+ * take effect.
+ */
+static VALUE
+window_blank(VALUE obj)
+{
+	int lines, cols, i;
+	struct windata *winp;
+
+	GetWINDOW(obj, winp);
+#if defined(getmaxy)
+    lines = getmaxy(winp->window);
+#elif defined(getmaxyx)
+    getmaxyx(winp->window, lines, cols);
+#else
+    lines = winp->window->_maxy + 1;
+#endif
+#if defined(getmaxx)
+    cols = getmaxx(winp->window);
+#elif defined(getmaxyx)
+    getmaxyx(winp->window, lines, cols);
+#else
+    cols = winp->window->_maxx + 1;
+#endif
+	wmove(winp->window, 0, 0);
+	lines = lines * cols;
+	for(i = 0; i < lines; i++)
+    waddstr(winp->window, " ");
+}
+
+/*
  * Document-method: Curses::Window.clrtoeol
  *
  * Clear the window to the end of line, that the cursor is currently on.
@@ -1250,7 +1283,7 @@ window_setx(VALUE obj, VALUE x)
 }
 
 /*
- * Document-method: Curses::Window.maxy
+ * Document-method: Curses::Window.columns
  *
  * A getter for the maximum lines for the window
  */
@@ -1274,7 +1307,7 @@ window_maxy(VALUE obj)
 }
 
 /*
- * Document-method: Curses::Window.maxx
+ * Document-method: Curses::Window.columns
  *
  * A getter for the maximum columns for the window
  */
@@ -2534,6 +2567,7 @@ Init_curses(void)
     rb_define_method(cWindow, "subwin", window_subwin, 4);
     rb_define_method(cWindow, "close", window_close, 0);
     rb_define_method(cWindow, "clear", window_clear, 0);
+    rb_define_method(cWindow, "blank", window_blank, 0);
     rb_define_method(cWindow, "clrtoeol", window_clrtoeol, 0);
     rb_define_method(cWindow, "refresh", window_refresh, 0);
     rb_define_method(cWindow, "noutrefresh", window_noutrefresh, 0);
