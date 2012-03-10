@@ -1691,7 +1691,10 @@ Init_Exception(void)
 
     rb_eScriptError = rb_define_class("ScriptError", rb_eException);
     rb_eSyntaxError = rb_define_class("SyntaxError", rb_eScriptError);
+
     rb_eLoadError   = rb_define_class("LoadError", rb_eScriptError);
+    rb_attr(rb_eLoadError, rb_intern("path"), 1, 0, Qfalse);
+
     rb_eNotImpError = rb_define_class("NotImplementedError", rb_eScriptError);
 
     rb_eNameError     = rb_define_class("NameError", rb_eStandardError);
@@ -1737,6 +1740,16 @@ rb_raise(VALUE exc, const char *fmt, ...)
     rb_exc_raise(rb_exc_new3(exc, mesg));
 }
 
+NORETURN(static void raise_loaderror(VALUE path, VALUE mesg));
+
+static void
+raise_loaderror(VALUE path, VALUE mesg)
+{
+    VALUE err = rb_exc_new3(rb_eLoadError, mesg);
+    rb_ivar_set(err, rb_intern("@path"), path);
+    rb_exc_raise(err);
+}
+
 void
 rb_loaderror(const char *fmt, ...)
 {
@@ -1746,7 +1759,19 @@ rb_loaderror(const char *fmt, ...)
     va_start(args, fmt);
     mesg = rb_enc_vsprintf(rb_locale_encoding(), fmt, args);
     va_end(args);
-    rb_exc_raise(rb_exc_new3(rb_eLoadError, mesg));
+    raise_loaderror(Qnil, mesg);
+}
+
+void
+rb_loaderror_with_path(VALUE path, const char *fmt, ...)
+{
+    va_list args;
+    VALUE mesg;
+
+    va_start(args, fmt);
+    mesg = rb_enc_vsprintf(rb_locale_encoding(), fmt, args);
+    va_end(args);
+    raise_loaderror(path, mesg);
 }
 
 void
@@ -1887,9 +1912,12 @@ rb_sys_warning(const char *fmt, ...)
 }
 
 void
-rb_load_fail(const char *path)
+rb_load_fail(VALUE path, const char *err)
 {
-    rb_loaderror("%s -- %s", strerror(errno), path);
+    VALUE mesg = rb_str_buf_new_cstr(err);
+    rb_str_cat2(mesg, " -- ");
+    rb_str_append(mesg, path);	/* should be ASCII compatible */
+    raise_loaderror(path, mesg);
 }
 
 void

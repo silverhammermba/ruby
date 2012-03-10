@@ -1,3 +1,255 @@
+Sat Mar 10 23:52:28 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* st.c: pack tables also generic keys.  patched by Sokolov Yura at
+	  https://github.com/ruby/ruby/pull/84
+
+	* st.c: add st_foreach_check for fixing iteration over packed table
+	  and st_delete_safe.  patched by Sokolov Yura at
+	  https://github.com/ruby/ruby/pull/84
+
+	* st.c: fix packed num_entries on delete_safe.  patched by Sokolov
+	  Yura at https://github.com/ruby/ruby/pull/84
+
+Fri Mar  9 14:29:32 2012  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* enumerator.c (lazy_flat_map): add Enumerable::Lazy#flat_map.
+
+Fri Mar  9 06:29:22 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych.rb (load, parse): stop parsing or loading after
+	  the first document has been parsed.
+
+	* test/psych/test_stream.rb: pertinent tests.
+
+Fri Mar  9 06:17:05 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych.rb (parse_stream, load_stream): if a block is
+	  given, documents will be yielded to the block as they are parsed.
+	  [ruby-core:42404] [Bug #5978]
+
+	* ext/psych/lib/psych/handlers/document_stream.rb: add a handler that
+	  yields documents as they are parsed
+
+	* test/psych/test_stream.rb: corresponding tests.
+
+Fri Mar  9 00:35:03 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enumerator.c (lazy_initialize, enumerable_lazy): no additional
+	  arguments.
+
+Fri Mar  9 00:30:23 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enumerator.c: add Enumerable#lazy. based on the patch by
+	  Innokenty Mikhailov at <https://github.com/ruby/ruby/pull/101>
+	  [ruby-core:37164] [Feature #4890]
+
+Fri Mar  9 00:25:59 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enumerator.c (enumerator_each, generator_each): pass arguments to
+	  the block with yielder.
+
+Fri Mar  9 00:25:02 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (rb_ary_cat): new function to concat objects into array.
+
+Thu Mar  8 16:44:02 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* .gdbinit (rb_numtable_entry): update for recent refactoring of
+	  st_table.
+
+Wed Mar  7 22:41:50 2012  CHIKANAGA Tomoyuki  <nagachika00@gmail.com>
+
+	* lib/xmlrpc/client.rb (module XMLRPC): fix typo.
+
+	* test/xmlrpc/test_client.rb (test_async_call): add test for
+	  XMLRPC::Client#call_async to check above fix.
+
+Wed Mar  7 16:30:24 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* error.c (rb_load_fail): should honor encoding.
+
+	* load.c (load_failed): ditto.
+
+Wed Mar  7 12:26:25 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* error.c (rb_load_fail): use path as a string, not char*.
+
+	* internal.h: (rb_load_fail): moved from ruby/intern.h.
+
+	* ruby.c (load_file_internal): fname cannot be NULL.
+
+Wed Mar  7 08:32:43 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* error.c (rb_loaderror_with_path): Adding the missing file as an
+	  instance variable to the LoadError exception.
+	  [ruby-core:39079]
+
+	* load.c: call rb_loaderror_with_path so that the missing path is
+	  added to the exception.
+
+	* ruby.c: call rb_loaderror rather than raising our own LoadError
+	  exception.
+
+	* include/ruby/intern.h: add declaration for rb_loaderror_with_path.
+
+	* test/ruby/test_require.rb: add supporting test for LoadError#path
+	  method.
+
+Wed Mar  7 08:28:00 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/parser.rb: support i8 types. Thanks Stas Kelvich!
+	  [ruby-core:29246] [Feature #3090]
+
+	* test/xmlrpc/test_client.rb: supporting test
+
+Wed Mar  7 07:43:29 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/client.rb: assume servers that do not send a Content-Type
+	  header are sending 'text/xml'. Thanks Nathan Leavitt!
+	  [ruby-core:41204] [Bug #5660]
+
+	* test/xmlrpc/test_client.rb: supporting test
+
+Wed Mar  7 07:39:28 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* test/xmlrpc/test_client.rb: adding a test for performing an XMLRPC
+	  call.
+	* test/xmlrpc/data/blog.xml: supporting XML document for the response.
+
+Tue Mar  6 16:24:01 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (parser_tokadd_string): escape simple regexp meta
+	  character termninators.
+
+Tue Mar  6 10:11:43 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/io/console/console.c (set_rawmode): clear ECHOE and ECHOK
+	  bits too.
+
+	* ext/io/console/console.c (echo_p): ignore ECHOE and ECHOK bits.
+	  [ruby-dev:45309] [Bug #6116]
+
+	* ext/io/console/console.c (console_raw): fix rdoc.
+
+	* ext/io/console/console.c (console_set_echo): mentioned about
+	  platform dependency.
+
+Tue Mar  6 07:18:10 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/client.rb: switch net/http post2 calls to modern
+	  `request_post` methods.
+
+Tue Mar  6 02:31:20 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych/core_ext.rb: only extend Kernel if IRB is loaded
+	  in order to stop method pollution.
+
+Tue Mar  6 01:34:19 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (block_call): rules for block_call after block_call.
+	  based on a patch by pasberth https://github.com/ruby/ruby/pull/102
+	  [ruby-dev:45308][Bug #6115]
+
+Tue Mar  6 01:24:13 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (block_command, block_call): simplified rules.
+
+Mon Mar  5 18:28:35 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/ruby/test_regexp.rb (TestRegexp#test_source): fix typo.
+	* test/ruby/test_regexp.rb (TestRegexp#test_equal): ditto.
+
+Mon Mar  5 17:11:44 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/syck/lib/syck/rubytypes.rb (Exception.yaml_new): fix bug
+	  that causes YAML serialization problem for Exception.
+	  Exception#initialize doesn't use visible instance variable for
+	  the exception message, so call the method with the message.
+	  patched by Jingwen Owen Ou <jingweno AT gmail.com>.
+	  http://github.com/ruby/ruby/pull/41
+
+Mon Mar  5 16:50:22 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/ruby/test_sleep.rb (TestSleep#test_sleep_5sec): syntax error.
+
+	* test/ruby/test_sleep.rb (TestSleep#test_sleep_5sec): call uname
+	  only on linux because it's a workaround for linux only.
+
+Mon Mar  5 12:44:12 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* st.c (unpack_entries): chain entries directly.  based on a patch
+	  by Sokolov Yura <funny.falcon AT gmail.com>.
+
+	* st.c (unpack_entries): use union instead of casted pointer.
+	  patched by Sokolov Yura <funny.falcon AT gmail.com>.
+
+	* st.c: use PACKED_ENT and FIND_ENTRY.  patched by Sokolov
+	  Yura <funny.falcon AT gmail.com>.
+
+	* st.c (unpack_entries): reallocate bins if packed array size
+	  is not same as initial bins size.  based on a patch by
+	  Sokolov Yura <funny.falcon AT gmail.com>.
+
+Mon Mar  5 11:51:48 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/bigdecimal/lib/bigdecimal/math.rb: remove description about
+	  BigMath#log. patched by Sho Hashimoto [ruby-dev:45307] [Bug #6112]
+
+	* string.c (str_byteslice): fix typo.
+
+Sun Mar  4 23:21:10 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (parser_tokadd_string): regexp engine doesn't need
+	  terminators to be escaped.  [ruby-core:40364][Bug #5484]
+
+Sat Mar  3 22:51:46 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_run_exec_options_err): chdir at last to interpret
+	  relative pathnames from the current directory of the parent process.
+
+Sat Mar  3 12:20:44 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_strftime.c: reassigned some variables.
+
+Sat Mar  3 12:12:16 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_{parse,strptime}.c: [ruby-dev:45303].
+
+Sat Mar  3 10:09:21 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/client.rb (initialize): net/http defaults to 1_2 in 1.8+,
+	  so we can safely remove the call to enable it.
+
+Sat Mar  3 08:42:25 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/client.rb (new2): use URI for uri parsing.
+	* test/xmlrpc/test_client.rb: test that query params are passed to the
+	  client constructor.
+
+Sat Mar  3 08:20:10 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/client.rb (new2): raises an ArgumentError on bad
+	  arguments.
+	* test/xmlrpc/test_client.rb: tests for bad uris
+
+Sat Mar  3 08:08:11 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* lib/xmlrpc/client.rb (new2): fix custom port specification when an
+	  SSL uri is used.
+	* test/xmlrpc/test_client.rb: tests for XMLRPC::Client.new2
+
+Sat Mar  3 08:03:29 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/syck/rubyext.c (mktime_do): use ISDIGIT().
+	  [ruby-core:43060] [Bug #6108]
+
+	* ext/syck/token.c (sycklex_yaml_utf8): cast as unsigned char.
+	  [ruby-core:43060] [Bug #6108]
+
+Sat Mar  3 06:57:14 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (ruby_pc): make configurable.  [Bug #6051]
+
 Fri Mar  2 17:49:03 2012  Hiroshi Nakamura  <nahi@ruby-lang.org>
 
 	* .travis.yml (branches): Enable TravisCI for ruby_1_9_3.
@@ -130,7 +382,7 @@ Tue Feb 28 18:47:44 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 Tue Feb 28 17:16:01 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* lib/time.rb (Time#xmlschema): use strftime specifiers instead of
-	  fractional exponential calcuation which yields undesirable
+	  fractional exponential calculation which yields undesirable
 	  result.  [ruby-core:42997][Bug #6100]
 
 Tue Feb 28 14:15:29 2012  Eric Hodel  <drbrain@segment7.net>

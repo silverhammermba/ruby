@@ -5,6 +5,14 @@ require_relative 'envutil'
 require 'tmpdir'
 
 class TestRequire < Test::Unit::TestCase
+  def test_load_error_path
+    filename = "should_not_exist"
+    error = assert_raises(LoadError) do
+      require filename
+    end
+    assert_equal filename, error.path
+  end
+
   def test_require_invalid_shared_object
     t = Tempfile.new(["test_ruby_test_require", ".so"])
     t.puts "dummy"
@@ -42,8 +50,10 @@ class TestRequire < Test::Unit::TestCase
 
   def test_require_nonascii
     bug3758 = '[ruby-core:31915]'
-    e = assert_raise(LoadError, bug3758) {require "\u{221e}"}
-    assert_match(/\u{221e}\z/, e.message, bug3758)
+    ["\u{221e}", "\x82\xa0".force_encoding("cp932")].each do |path|
+      e = assert_raise(LoadError, bug3758) {require path}
+      assert_match(/#{path}\z/, e.message, bug3758)
+    end
   end
 
   def test_require_path_home_1

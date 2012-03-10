@@ -1,21 +1,24 @@
 require 'test/unit'
 
 class TestSyntax < Test::Unit::TestCase
-  def valid_syntax?(code, fname)
+  def assert_valid_syntax(code, fname, mesg = fname)
     code = code.dup.force_encoding("ascii-8bit")
     code.sub!(/\A(?:\xef\xbb\xbf)?(\s*\#.*$)*(\n)?/n) {
       "#$&#{"\n" if $1 && !$2}BEGIN{throw tag, :ok}\n"
     }
     code.force_encoding("us-ascii")
-    catch {|tag| eval(code, binding, fname, 0)}
-  rescue SyntaxError
-    false
+    verbose, $VERBOSE = $VERBOSE, nil
+    assert_nothing_raised(SyntaxError, mesg) do
+      assert_equal(:ok, catch {|tag| eval(code, binding, fname, 0)}, mesg)
+    end
+  ensure
+    $VERBOSE = verbose
   end
 
   def test_syntax
     assert_nothing_raised(Exception) do
       for script in Dir[File.expand_path("../../../{lib,sample,ext,test}/**/*.rb", __FILE__)].sort
-        assert(valid_syntax?(IO::read(script), script), script)
+        assert_valid_syntax(IO::read(script), script)
       end
     end
   end
@@ -56,9 +59,21 @@ class TestSyntax < Test::Unit::TestCase
     bug = '[ruby-dev:45292]'
     ["", "a", "a, b"].product(["", ";x", [";", "x"]]) do |params|
       params = ["|", *params, "|"].join("\n")
-      assert_nothing_raised(SyntaxError, NameError, "#{bug} #{params.inspect}") do
-        eval("1.times{#{params}}")
-      end
+      assert_valid_syntax("1.times{#{params}}", __FILE__, "#{bug} #{params.inspect}")
+    end
+  end
+
+  tap do |_,
+    bug6115 = '[ruby-dev:45308]',
+    blockcall = '["elem"].each_with_object [] do end',
+    methods = [['map', 'no'], ['inject([])', 'with']],
+    blocks = [['do end', 'do'], ['{}', 'brace']],
+    *|
+    [%w'. dot', %w':: colon'].product(methods, blocks) do |(c, n1), (m, n2), (b, n3)|
+      m = m.tr_s('()', ' ').strip if n2 == 'do'
+      name = "test_#{n3}_block_after_blockcall_#{n1}_#{n2}_arg"
+      code = "#{blockcall}#{c}#{m} #{b}"
+      define_method(name) {assert_valid_syntax(code, bug6115)}
     end
   end
 

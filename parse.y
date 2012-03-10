@@ -1326,21 +1326,12 @@ command_call	: command
 		;
 
 block_command	: block_call
-		| block_call '.' operation2 command_args
+		| block_call dot_or_colon operation2 command_args
 		    {
 		    /*%%%*/
 			$$ = NEW_CALL($1, $3, $4);
 		    /*%
-			$$ = dispatch3(call, $1, ripper_id2sym('.'), $3);
-			$$ = method_arg($$, $4);
-		    %*/
-		    }
-		| block_call tCOLON2 operation2 command_args
-		    {
-		    /*%%%*/
-			$$ = NEW_CALL($1, $3, $4);
-		    /*%
-			$$ = dispatch3(call, $1, ripper_intern("::"), $3);
+			$$ = dispatch3(call, $1, $2, $3);
 			$$ = method_arg($$, $4);
 		    %*/
 		    }
@@ -3856,22 +3847,37 @@ block_call	: command do_block
 			$$ = method_add_block($1, $2);
 		    %*/
 		    }
-		| block_call '.' operation2 opt_paren_args
+		| block_call dot_or_colon operation2 opt_paren_args
 		    {
 		    /*%%%*/
 			$$ = NEW_CALL($1, $3, $4);
 		    /*%
-			$$ = dispatch3(call, $1, ripper_id2sym('.'), $3);
+			$$ = dispatch3(call, $1, $2, $3);
 			$$ = method_optarg($$, $4);
 		    %*/
 		    }
-		| block_call tCOLON2 operation2 opt_paren_args
+		| block_call dot_or_colon operation2 opt_paren_args brace_block
 		    {
 		    /*%%%*/
-			$$ = NEW_CALL($1, $3, $4);
+			block_dup_check($4, $5);
+			$5->nd_iter = NEW_CALL($1, $3, $4);
+			$$ = $5;
+			fixpos($$, $1);
 		    /*%
-			$$ = dispatch3(call, $1, ripper_intern("::"), $3);
-			$$ = method_optarg($$, $4);
+			$$ = dispatch4(command_call, $1, $2, $3, $4);
+			$$ = method_add_block($$, $5);
+		    %*/
+		    }
+		| block_call dot_or_colon operation2 command_args do_block
+		    {
+		    /*%%%*/
+			block_dup_check($4, $5);
+			$5->nd_iter = NEW_CALL($1, $3, $4);
+			$$ = $5;
+			fixpos($$, $1);
+		    /*%
+			$$ = dispatch4(command_call, $1, $2, $3, $4);
+			$$ = method_add_block($$, $5);
 		    %*/
 		    }
 		;
@@ -6434,6 +6440,18 @@ parser_tokadd_mbchar(struct parser_params *parser, int c)
 
 #define tokadd_mbchar(c) parser_tokadd_mbchar(parser, (c))
 
+static inline int
+simple_re_meta(int c)
+{
+    switch (c) {
+      case '$': case '*': case '+': case '.':
+      case '?': case '^': case '|':
+	return TRUE;
+      default:
+	return FALSE;
+    }
+}
+
 static int
 parser_tokadd_string(struct parser_params *parser,
 		     int func, int term, int paren, long *nest,
@@ -6514,6 +6532,10 @@ parser_tokadd_string(struct parser_params *parser,
 		    goto non_ascii;
 		}
 		if (func & STR_FUNC_REGEXP) {
+		    if (c == term && !simple_re_meta(c)) {
+			tokadd(c);
+			continue;
+		    }
 		    pushback(c);
 		    if ((c = tokadd_escape(&enc)) < 0)
 			return -1;

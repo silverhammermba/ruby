@@ -495,7 +495,7 @@ rb_f_require_relative(VALUE obj, VALUE fname)
 {
     VALUE base = rb_current_realfilepath();
     if (NIL_P(base)) {
-	rb_raise(rb_eLoadError, "cannot infer basepath");
+	rb_loaderror("cannot infer basepath");
     }
     base = rb_file_dirname(base);
     return rb_require_safe(rb_file_absolute_path(fname, base), rb_safe_level());
@@ -591,9 +591,7 @@ search_required(VALUE fname, volatile VALUE *path, int safe_level)
 static void
 load_failed(VALUE fname)
 {
-    VALUE mesg = rb_str_buf_new_cstr("cannot load such file -- ");
-    rb_str_append(mesg, fname);	/* should be ASCII compatible */
-    rb_exc_raise(rb_exc_new3(rb_eLoadError, mesg));
+    rb_load_fail(fname, "cannot load such file");
 }
 
 static VALUE
