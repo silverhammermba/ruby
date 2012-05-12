@@ -1530,7 +1530,8 @@ window_insch(VALUE obj, VALUE ch)
  * call-seq: print(y, x, str)
  *
  * move to coordinates +y+, +x+ and add a string of characters +str+, to the
- * window and advance cursor
+ * window and advance cursor. Uses current cursor position if +y+ and +x+ are
+ * not supplied.
  *
  */
 static VALUE
@@ -1567,6 +1568,7 @@ window_print(int argc, VALUE *argv, VALUE obj)
  * advance cursor
  *
  */
+// TODO text should still center if wrapped
 static VALUE
 window_print_center(int argc, VALUE *argv, VALUE obj)
 {
@@ -1614,6 +1616,7 @@ window_print_center(int argc, VALUE *argv, VALUE obj)
  * will wrap to the next line.
  *
  */
+// TODO if wrapping, should still right-justify
 static VALUE
 window_print_right(int argc, VALUE *argv, VALUE obj)
 {
@@ -1657,7 +1660,10 @@ window_print_right(int argc, VALUE *argv, VALUE obj)
  * call-seq: puts(y, x, str)
  *
  * add a string of characters +str+ to the window at +y+, +x+ and advance the
- * cursor to the next line, if necessary. Just prints a newline if called without +str+.
+ * cursor to the next line, if necessary. Just prints a newline if called
+ * without +str+. Prints at the current cursor position if +y+ and +x+ are not
+ * supplied.
+ *
  */
 static VALUE
 window_puts(int argc, VALUE *argv, VALUE obj)
@@ -1703,6 +1709,7 @@ window_puts(int argc, VALUE *argv, VALUE obj)
  *
  * See also Curses::Window.addstr
  */
+// TODO shitty documentation
 static VALUE
 window_addstr2(VALUE obj, VALUE str)
 {
@@ -1731,6 +1738,7 @@ wgetch_func(void *_arg)
  * See Curses::Key to all the function KEY_* available
  *
  */
+// TODO shitty documentation
 static VALUE
 window_getch(VALUE obj)
 {
@@ -1774,7 +1782,7 @@ wgetstr_func(void *_arg)
 /*
  * Document-method: Curses::Window.gets
  *
- * This is equivalent to a series f Curses::Window.getc calls
+ * This is equivalent to a series of Curses::Window.getc calls
  *
  */
 static VALUE
