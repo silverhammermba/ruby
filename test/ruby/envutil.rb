@@ -94,9 +94,9 @@ module EnvUtil
     end
     stderr, $stderr, verbose, $VERBOSE = $stderr, stderr, $VERBOSE, true
     yield stderr
+    return $stderr
   ensure
     stderr, $stderr, $VERBOSE = $stderr, stderr, verbose
-    return stderr
   end
   module_function :verbose_warning
 
@@ -179,9 +179,15 @@ module Test
         assert(status.success?, m)
       end
 
-      def assert_warn(msg)
+      def assert_warn(pat, message = nil)
         stderr = EnvUtil.verbose_warning { yield }
-        assert(msg === stderr, "warning message #{stderr.inspect} is expected to match #{msg.inspect}")
+        message = ' "' + message + '"' if message
+        msg = proc {"warning message #{stderr.inspect} is expected to match #{pat.inspect}#{message}"}
+        assert(pat === stderr, msg)
+      end
+
+      def assert_warning(*args)
+        assert_warn(*args) {$VERBOSE = false; yield}
       end
 
       def assert_no_memory_leak(args, prepare, code, message=nil, limit: 1.5)
@@ -200,11 +206,15 @@ module Test
           'STDERR.puts('"#{token_dump}"'"START=#{$initial_size = Memory::Status.new.size}")',
           code,
         ].join("\n")
-        out, err, status = EnvUtil.invoke_ruby(args, cmd, true, true)
+        _, err, status = EnvUtil.invoke_ruby(args, cmd, true, true)
         before = err.sub!(/^#{token_re}START=(\d+)\n/, '') && $1.to_i
         after = err.sub!(/^#{token_re}FINAL=(\d+)\n/, '') && $1.to_i
         assert_equal([true, ""], [status.success?, err], message)
         assert_operator(after.fdiv(before), :<, limit, message)
+      end
+
+      def assert_is_minus_zero(f)
+        assert(1.0/f == -Float::INFINITY, "#{f} is not -0.0")
       end
     end
   end

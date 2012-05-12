@@ -887,7 +887,7 @@ nucomp_expt(VALUE self, VALUE other)
 		    if (r)
 			break;
 
-		    x = f_complex_new2(CLASS_OF(self),
+		    x = nucomp_s_new_internal(CLASS_OF(self),
 				       f_sub(f_mul(dat->real, dat->real),
 					     f_mul(dat->imag, dat->imag)),
 				       f_mul(f_mul(TWO, dat->real), dat->imag));

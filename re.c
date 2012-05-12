@@ -1665,6 +1665,8 @@ name_to_backref_number(struct re_registers *regs, VALUE regexp, const char* name
 	rb_raise(rb_eIndexError, "undefined group name reference: %s",
 				 StringValuePtr(s));
     }
+
+    UNREACHABLE;
 }
 
 /*
@@ -2580,7 +2582,7 @@ reg_hash(VALUE re)
  *
  *     /abc/  == /abc/x   #=> false
  *     /abc/  == /abc/i   #=> false
- *     /abc/  == /abc/n   #=> false
+ *     /abc/  == /abc/u   #=> false
  *     /abc/u == /abc/n   #=> false
  */
 
@@ -2904,9 +2906,7 @@ rb_reg_initialize_m(int argc, VALUE *argv, VALUE self)
     const char *ptr;
     long len;
 
-    if (argc == 0 || argc > 3) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..3)", argc);
-    }
+    rb_check_arity(argc, 1, 3);
     if (TYPE(argv[0]) == T_REGEXP) {
 	VALUE re = argv[0];
 

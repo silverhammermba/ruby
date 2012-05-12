@@ -130,6 +130,15 @@ remove_packed_entry(st_table *table, st_index_t i)
     }
 }
 
+static inline void
+remove_safe_packed_entry(st_table *table, st_index_t i, st_data_t never)
+{
+    table->num_entries--;
+    PKEY_SET(table, i, never);
+    PVAL_SET(table, i, never);
+    PHASH_SET(table, i, 0);
+}
+
 /*
  * MINSIZE is the minimum size of a dictionary.
  */
@@ -722,7 +731,7 @@ st_delete(register st_table *table, register st_data_t *key, st_data_t *value)
 
     if (table->entries_packed) {
 	st_index_t i = find_packed_index(table, hash_val, *key);
-	if (i < table->num_entries) {
+	if (i < table->real_entries) {
 	    if (value != 0) *value = PVAL(table, i);
 	    *key = PKEY(table, i);
 	    remove_packed_entry(table, i);
@@ -761,10 +770,7 @@ st_delete_safe(register st_table *table, register st_data_t *key, st_data_t *val
 	if (i < table->real_entries) {
 	    if (value != 0) *value = PVAL(table, i);
 	    *key = PKEY(table, i);
-	    PKEY_SET(table, i, never);
-	    PVAL_SET(table, i, never);
-	    PHASH_SET(table, i, 0);
-	    table->num_entries--;
+	    remove_safe_packed_entry(table, i, never);
 	    return 1;
 	}
 	if (value != 0) *value = 0;
@@ -825,12 +831,12 @@ st_cleanup_safe(st_table *table, st_data_t never)
 }
 
 int
-st_update(st_table *table, st_data_t key, int (*func)(st_data_t key, st_data_t *value, st_data_t arg), st_data_t arg)
+st_update(st_table *table, st_data_t key, st_update_callback_func *func, st_data_t arg)
 {
     st_index_t hash_val, bin_pos;
     register st_table_entry *ptr, **last, *tmp;
-    st_data_t value;
-    int retval;
+    st_data_t value = 0;
+    int retval, existing = 0;
 
     hash_val = do_hash(key, table);
 
@@ -838,38 +844,49 @@ st_update(st_table *table, st_data_t key, int (*func)(st_data_t key, st_data_t *
 	st_index_t i = find_packed_index(table, hash_val, key);
 	if (i < table->real_entries) {
 	    value = PVAL(table, i);
-	    retval = (*func)(key, &value, arg);
+	    existing = 1;
+	}
+	{
+	    retval = (*func)(&key, &value, arg, existing);
 	    if (!table->entries_packed) {
 		FIND_ENTRY(table, ptr, hash_val, bin_pos);
-		if (ptr == 0) return 0;
 		goto unpacked;
 	    }
 	    switch (retval) {
 	      case ST_CONTINUE:
+		if (!existing) {
+		    add_packed_direct(table, key, value, hash_val);
+		    break;
+		}
 		PVAL_SET(table, i, value);
 		break;
 	      case ST_DELETE:
+		if (!existing) break;
 		remove_packed_entry(table, i);
 	    }
-	    return 1;
 	}
-	return 0;
+	return existing;
     }
 
     FIND_ENTRY(table, ptr, hash_val, bin_pos);
 
-    if (ptr == 0) {
-	return 0;
-    }
-    else {
+    if (ptr != 0) {
 	value = ptr->record;
-	retval = (*func)(ptr->key, &value, arg);
+	existing = 1;
+    }
+    {
+	retval = (*func)(&key, &value, arg, existing);
       unpacked:
 	switch (retval) {
 	  case ST_CONTINUE:
+	    if (!existing) {
+		add_direct(table, key, value, hash_val, hash_val % table->num_bins);
+		break;
+	    }
 	    ptr->record = value;
 	    break;
 	  case ST_DELETE:
+	    if (!existing) break;
 	    last = &table->bins[bin_pos];
 	    for (; (tmp = *last) != 0; last = &tmp->next) {
 		if (ptr == tmp) {
@@ -882,7 +899,7 @@ st_update(st_table *table, st_data_t key, int (*func)(st_data_t key, st_data_t *
 	    }
 	    break;
 	}
-	return 1;
+	return existing;
     }
 }
 
@@ -925,8 +942,7 @@ st_foreach_check(st_table *table, int (*func)(ANYARGS), st_data_t arg, st_data_t
 	      case ST_STOP:
 		return 0;
 	      case ST_DELETE:
-		remove_packed_entry(table, i);
-		i--;
+		remove_safe_packed_entry(table, i, never);
 		break;
 	    }
 	}
@@ -965,10 +981,9 @@ st_foreach_check(st_table *table, int (*func)(ANYARGS), st_data_t arg, st_data_t
 		for (; (tmp = *last) != 0; last = &tmp->next) {
 		    if (ptr == tmp) {
 			tmp = ptr->fore;
-			*last = ptr->next;
 			remove_entry(table, ptr);
-			st_free_entry(ptr);
-			if (ptr == tmp) return 0;
+			ptr->key = ptr->record = never;
+			ptr->hash = 0;
 			ptr = tmp;
 			break;
 		    }
@@ -1036,7 +1051,6 @@ st_foreach(st_table *table, int (*func)(ANYARGS), st_data_t arg)
 			*last = ptr->next;
 			remove_entry(table, ptr);
 			st_free_entry(ptr);
-			if (ptr == tmp) return 0;
 			ptr = tmp;
 			break;
 		    }

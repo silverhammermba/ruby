@@ -2209,7 +2209,42 @@ window_keypad(VALUE obj, VALUE val)
 #define window_keypad rb_f_notimplement
 #endif
 
+<<<<<<< HEAD
 #if defined(HAVE_WTIMEOUT) || defined(HAVE_NODELAY)
+=======
+#ifdef HAVE_NODELAY
+/*
+ * Document-method: Curses::Window.nodelay
+ * call-seq:
+ *   window.nodelay = bool
+ *
+ * When in no-delay mode Curses::Window#getch is a non-blocking call.  If no
+ * input is ready #getch returns ERR.
+ *
+ * When in delay mode (+bool+ is +false+ which is the default),
+ * Curses::Window#getch blocks until a key is pressed.
+ *
+ */
+static VALUE
+window_nodelay(VALUE obj, VALUE val)
+{
+    struct windata *winp;
+    GetWINDOW(obj,winp);
+
+    /* nodelay() of NetBSD's libcurses returns no value */
+#if defined(__NetBSD__) && !defined(NCURSES_VERSION)
+    nodelay(winp->window, RTEST(val) ? TRUE : FALSE);
+    return Qnil;
+#else
+    return nodelay(winp->window,RTEST(val) ? TRUE : FALSE) == OK ? Qtrue : Qfalse;
+#endif
+}
+#else
+#define window_nodelay rb_f_notimplement
+#endif
+
+#ifdef HAVE_WTIMEOUT
+>>>>>>> trunk
 /*
  * Document-method: Curses::Window.timeout=
  * call-seq: timeout=(delay)

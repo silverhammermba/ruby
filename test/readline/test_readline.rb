@@ -1,34 +1,5 @@
 begin
   require "readline"
-=begin
-  class << Readline
-    [
-     "line_buffer",
-     "point",
-     "set_screen_size",
-     "get_screen_size",
-     "vi_editing_mode",
-     "emacs_editing_mode",
-     "completion_append_character=",
-     "completion_append_character",
-     "basic_word_break_characters=",
-     "basic_word_break_characters",
-     "completer_word_break_characters=",
-     "completer_word_break_characters",
-     "basic_quote_characters=",
-     "basic_quote_characters",
-     "completer_quote_characters=",
-     "completer_quote_characters",
-     "filename_quote_characters=",
-     "filename_quote_characters",
-     "refresh_line",
-    ].each do |method_name|
-      define_method(method_name.to_sym) do |*args|
-        raise NotImplementedError
-      end
-    end
-  end
-=end
 rescue LoadError
 else
   require "test/unit"
@@ -36,7 +7,14 @@ else
 end
 
 class TestReadline < Test::Unit::TestCase
+  INPUTRC = "INPUTRC"
+
+  def setup
+    @inputrc, ENV[INPUTRC] = ENV[INPUTRC], IO::NULL
+  end
+
   def teardown
+    ENV[INPUTRC] = @inputrc
     Readline.instance_variable_set("@completion_proc", nil)
   end
 
@@ -70,6 +48,12 @@ class TestReadline < Test::Unit::TestCase
        ["point"],
        ["set_screen_size", 1, 1],
        ["get_screen_size"],
+       ["pre_input_hook=", proc {}],
+       ["pre_input_hook"],
+       ["insert_text", ""],
+       ["redisplay"],
+       ["special_prefixes=", "$"],
+       ["special_prefixes"],
       ]
     method_args.each do |method_name, *args|
       assert_raise(SecurityError, NotImplementedError,
@@ -222,7 +206,7 @@ class TestReadline < Test::Unit::TestCase
       rescue NotimplementedError
       end
     end
-  end
+  end if !/EditLine/n.match(Readline::VERSION)
 
   def test_get_screen_size
     begin
@@ -320,13 +304,14 @@ class TestReadline < Test::Unit::TestCase
   ensure
     Readline.completion_case_fold = completion_case_fold
     Readline.completion_append_character = append_character
-  end
+  end if !/EditLine/n.match(Readline::VERSION)
 
   # basic_word_break_characters
   # completer_word_break_characters
   # basic_quote_characters
   # completer_quote_characters
   # filename_quote_characters
+  # special_prefixes
   def test_some_characters_methods
     method_names = [
                     "basic_word_break_characters",
@@ -334,6 +319,7 @@ class TestReadline < Test::Unit::TestCase
                     "basic_quote_characters",
                     "completer_quote_characters",
                     "filename_quote_characters",
+                    "special_prefixes",
                    ]
     method_names.each do |method_name|
       begin
@@ -365,6 +351,53 @@ class TestReadline < Test::Unit::TestCase
     end
   end
 
+  def test_pre_input_hook
+    begin
+      pr = proc {}
+      assert_equal(Readline.pre_input_hook = pr, pr)
+      assert_equal(Readline.pre_input_hook, pr)
+      assert_nil(Readline.pre_input_hook = nil)
+    rescue NotImplementedError
+    end
+  end
+
+  def test_insert_text
+    begin
+      str = "test_insert_text"
+      assert_equal(Readline.insert_text(str), Readline)
+      assert_equal(Readline.line_buffer, str)
+      assert_equal(Readline.line_buffer.encoding,
+                   get_default_internal_encoding)
+    rescue NotImplementedError
+    end
+  end if !/EditLine/n.match(Readline::VERSION)
+
+  def test_modify_text_in_pre_input_hook
+    begin
+      stdin = Tempfile.new("readline_redisplay_stdin")
+      stdout = Tempfile.new("readline_redisplay_stdout")
+      stdin.write("world\n")
+      stdin.close
+      Readline.pre_input_hook = proc do
+        assert_equal("", Readline.line_buffer)
+        Readline.insert_text("hello ")
+        Readline.redisplay
+      end
+      replace_stdio(stdin.path, stdout.path) do
+        line = Readline.readline("> ")
+        assert_equal("hello world", line)
+      end
+      assert_equal("> hello world\n", stdout.read)
+      stdout.close
+    rescue NotImplementedError
+    ensure
+      begin
+        Readline.pre_input_hook = nil
+      rescue NotImplementedError
+      end
+    end
+  end if !/EditLine/n.match(Readline::VERSION)
+
   private
 
   def replace_stdio(stdin_path, stdout_path)
@@ -372,13 +405,16 @@ class TestReadline < Test::Unit::TestCase
       open(stdout_path, "w"){|stdout|
         orig_stdin = STDIN.dup
         orig_stdout = STDOUT.dup
+        orig_stderr = STDERR.dup
         STDIN.reopen(stdin)
         STDOUT.reopen(stdout)
+        STDERR.reopen(stdout)
         begin
           Readline.input = STDIN
           Readline.output = STDOUT
           yield
         ensure
+          STDERR.reopen(orig_stderr)
           STDIN.reopen(orig_stdin)
           STDOUT.reopen(orig_stdout)
           orig_stdin.close
@@ -398,13 +434,20 @@ class TestReadline < Test::Unit::TestCase
   end
 
   def with_pipe
+    stderr = nil
     IO.pipe do |r, w|
       yield(r, w)
       Readline.input = r
       Readline.output = w.reopen(IO::NULL)
+      stderr = STDERR.dup
+      STDERR.reopen(w)
       Readline.readline
     end
   ensure
+    if stderr
+      STDERR.reopen(stderr)
+      stderr.close
+    end
     Readline.input = STDIN
     Readline.output = STDOUT
   end

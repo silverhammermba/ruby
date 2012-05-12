@@ -322,7 +322,6 @@ int_pair_to_real_inclusive(unsigned int a, unsigned int b)
 }
 
 VALUE rb_cRandom;
-static VALUE rb_Random_DEFAULT;
 #define id_minus '-'
 #define id_plus  '+'
 static ID id_rand, id_bytes;
@@ -449,8 +448,7 @@ rand_init(struct MT *mt, VALUE vseed)
 
 /*
  * call-seq:
- *   Random.new()     -> prng
- *   Random.new(seed) -> prng
+ *   Random.new(seed = Random.new_seed) -> prng
  *
  * Creates a new PRNG using +seed+ to set the initial state. If +seed+ is
  * omitted, the generator is initialized with Random.new_seed.
@@ -763,7 +761,7 @@ random_load(VALUE obj, VALUE dump)
 
 /*
  * call-seq:
- *   srand(number=0)    -> old_seed
+ *   srand(number = Random.new_seed) -> old_seed
  *
  * Seeds the system pseudo-random number generator, Random::DEFAULT, with
  * +number+.  The previous seed value is returned.
@@ -1124,6 +1122,8 @@ rand_range(struct MT* mt, VALUE range)
     return v;
 }
 
+static VALUE rand_random(int argc, VALUE *argv, rb_random_t *rnd);
+
 /*
  * call-seq:
  *   prng.rand -> float
@@ -1156,14 +1156,19 @@ rand_range(struct MT* mt, VALUE range)
 static VALUE
 random_rand(int argc, VALUE *argv, VALUE obj)
 {
-    rb_random_t *rnd = get_rnd(obj);
+    return rand_random(argc, argv, get_rnd(obj));
+}
+
+static VALUE
+rand_random(int argc, VALUE *argv, rb_random_t *rnd)
+{
     VALUE vmax, v;
 
     if (argc == 0) {
 	return rb_float_new(genrand_real(&rnd->mt));
     }
-    else if (argc != 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..1)", argc);
+    else {
+	rb_check_arity(argc, 0, 1);
     }
     vmax = argv[0];
     if (NIL_P(vmax)) {
@@ -1293,7 +1298,7 @@ rb_f_rand(int argc, VALUE *argv, VALUE obj)
 static VALUE
 random_s_rand(int argc, VALUE *argv, VALUE obj)
 {
-    return random_rand(argc, argv, rb_Random_DEFAULT);
+    return rand_random(argc, argv, rand_start(&default_rand));
 }
 
 static st_index_t hashseed;
@@ -1403,9 +1408,11 @@ Init_Random(void)
     rb_define_private_method(rb_cRandom, "left", random_left, 0);
     rb_define_method(rb_cRandom, "==", random_equal, 1);
 
-    rb_Random_DEFAULT = TypedData_Wrap_Struct(rb_cRandom, &random_data_type, &default_rand);
-    rb_global_variable(&rb_Random_DEFAULT);
-    rb_define_const(rb_cRandom, "DEFAULT", rb_Random_DEFAULT);
+    {
+	VALUE rand_default = TypedData_Wrap_Struct(rb_cRandom, &random_data_type, &default_rand);
+	rb_gc_register_mark_object(rand_default);
+	rb_define_const(rb_cRandom, "DEFAULT", rand_default);
+    }
 
     rb_define_singleton_method(rb_cRandom, "srand", rb_f_srand, -1);
     rb_define_singleton_method(rb_cRandom, "rand", random_s_rand, -1);

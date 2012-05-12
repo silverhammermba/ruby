@@ -72,7 +72,7 @@
 
 #define TO_SOCKET(x)	_get_osfhandle(x)
 
-static struct ChildRecord *CreateChild(const WCHAR *, const WCHAR *, SECURITY_ATTRIBUTES *, HANDLE, HANDLE, HANDLE);
+static struct ChildRecord *CreateChild(const WCHAR *, const WCHAR *, SECURITY_ATTRIBUTES *, HANDLE, HANDLE, HANDLE, DWORD);
 static int has_redirection(const char *);
 int rb_w32_wait_events(HANDLE *events, int num, DWORD timeout);
 static int rb_w32_open_osfhandle(intptr_t osfhandle, int flags);
@@ -598,7 +598,7 @@ init_func(void)
 
 static void init_stdhandle(void);
 
-#if RT_VER >= 80
+#if RUBY_MSVCRT_VERSION >= 80
 /* License: Ruby's */
 static void
 invalid_parameter(const wchar_t *expr, const wchar_t *func, const wchar_t *file, unsigned int line, uintptr_t dummy)
@@ -630,6 +630,7 @@ static CRITICAL_SECTION select_mutex;
 static int NtSocketsInitialized = 0;
 static st_table *socklist = NULL;
 static char *envarea;
+static char *uenvarea;
 
 /* License: Ruby's */
 static void
@@ -647,6 +648,10 @@ exit_handler(void)
     if (envarea) {
 	FreeEnvironmentStrings(envarea);
 	envarea = NULL;
+    }
+    if (uenvarea) {
+	free(uenvarea);
+	uenvarea = NULL;
     }
 }
 
@@ -727,7 +732,7 @@ socklist_delete(SOCKET *sockp, int *flagp)
 void
 rb_w32_sysinit(int *argc, char ***argv)
 {
-#if RT_VER >= 80
+#if RUBY_MSVCRT_VERSION >= 80
     static void set_pioinfo_extra(void);
 
     _CrtSetReportMode(_CRT_ASSERT, 0);
@@ -839,62 +844,62 @@ FindFreeChildSlot(void)
    98cmd ntcmd
  */
 static const char *const szInternalCmds[] = {
-    "\2" "assoc" + 1,
-    "\3" "break" + 1,
-    "\3" "call" + 1,
-    "\3" "cd" + 1,
-    "\1" "chcp" + 1,
-    "\3" "chdir" + 1,
-    "\3" "cls" + 1,
-    "\2" "color" + 1,
-    "\3" "copy" + 1,
-    "\1" "ctty" + 1,
-    "\3" "date" + 1,
-    "\3" "del" + 1,
-    "\3" "dir" + 1,
-    "\3" "echo" + 1,
-    "\2" "endlocal" + 1,
-    "\3" "erase" + 1,
-    "\3" "exit" + 1,
-    "\3" "for" + 1,
-    "\2" "ftype" + 1,
-    "\3" "goto" + 1,
-    "\3" "if" + 1,
-    "\1" "lfnfor" + 1,
-    "\1" "lh" + 1,
-    "\1" "lock" + 1,
-    "\3" "md" + 1,
-    "\3" "mkdir" + 1,
-    "\2" "move" + 1,
-    "\3" "path" + 1,
-    "\3" "pause" + 1,
-    "\2" "popd" + 1,
-    "\3" "prompt" + 1,
-    "\2" "pushd" + 1,
-    "\3" "rd" + 1,
-    "\3" "rem" + 1,
-    "\3" "ren" + 1,
-    "\3" "rename" + 1,
-    "\3" "rmdir" + 1,
-    "\3" "set" + 1,
-    "\2" "setlocal" + 1,
-    "\3" "shift" + 1,
-    "\2" "start" + 1,
-    "\3" "time" + 1,
-    "\2" "title" + 1,
-    "\1" "truename" + 1,
-    "\3" "type" + 1,
-    "\1" "unlock" + 1,
-    "\3" "ver" + 1,
-    "\3" "verify" + 1,
-    "\3" "vol" + 1,
+    "\2" "assoc",
+    "\3" "break",
+    "\3" "call",
+    "\3" "cd",
+    "\1" "chcp",
+    "\3" "chdir",
+    "\3" "cls",
+    "\2" "color",
+    "\3" "copy",
+    "\1" "ctty",
+    "\3" "date",
+    "\3" "del",
+    "\3" "dir",
+    "\3" "echo",
+    "\2" "endlocal",
+    "\3" "erase",
+    "\3" "exit",
+    "\3" "for",
+    "\2" "ftype",
+    "\3" "goto",
+    "\3" "if",
+    "\1" "lfnfor",
+    "\1" "lh",
+    "\1" "lock",
+    "\3" "md",
+    "\3" "mkdir",
+    "\2" "move",
+    "\3" "path",
+    "\3" "pause",
+    "\2" "popd",
+    "\3" "prompt",
+    "\2" "pushd",
+    "\3" "rd",
+    "\3" "rem",
+    "\3" "ren",
+    "\3" "rename",
+    "\3" "rmdir",
+    "\3" "set",
+    "\2" "setlocal",
+    "\3" "shift",
+    "\2" "start",
+    "\3" "time",
+    "\2" "title",
+    "\1" "truename",
+    "\3" "type",
+    "\1" "unlock",
+    "\3" "ver",
+    "\3" "verify",
+    "\3" "vol",
 };
 
 /* License: Ruby's */
 static int
 internal_match(const void *key, const void *elem)
 {
-    return strcmp(key, *(const char *const *)elem);
+    return strcmp(key, (*(const char *const *)elem) + 1);
 }
 
 /* License: Ruby's */
@@ -951,7 +956,7 @@ internal_cmd_match(const char *cmdname, int nt)
 		 sizeof(szInternalCmds) / sizeof(*szInternalCmds),
 		 sizeof(*szInternalCmds),
 		 internal_match);
-    if (!nm || !(nm[0][-1] & (nt ? 2 : 1)))
+    if (!nm || !(nm[0][0] & (nt ? 2 : 1)))
 	return 0;
     return 1;
 }
@@ -1066,26 +1071,21 @@ child_result(struct ChildRecord *child, int mode)
 	return -1;
     }
 
-    switch (mode) {
-      case P_NOWAIT:
-	return child->pid;
-      case P_OVERLAY:
+    if (mode == P_OVERLAY) {
 	WaitForSingleObject(child->hProcess, INFINITE);
 	GetExitCodeProcess(child->hProcess, &exitcode);
 	CloseChildHandle(child);
 	_exit(exitcode);
-      default:
-	return -1;	/* not reached */
     }
+    return child->pid;
 }
 
 /* License: Ruby's */
 static struct ChildRecord *
 CreateChild(const WCHAR *cmd, const WCHAR *prog, SECURITY_ATTRIBUTES *psa,
-	    HANDLE hInput, HANDLE hOutput, HANDLE hError)
+	    HANDLE hInput, HANDLE hOutput, HANDLE hError, DWORD dwCreationFlags)
 {
     BOOL fRet;
-    DWORD  dwCreationFlags;
     STARTUPINFOW aStartupInfo;
     PROCESS_INFORMATION aProcessInformation;
     SECURITY_ATTRIBUTES sa;
@@ -1132,7 +1132,7 @@ CreateChild(const WCHAR *cmd, const WCHAR *prog, SECURITY_ATTRIBUTES *psa,
 	aStartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     }
 
-    dwCreationFlags = (CREATE_NEW_PROCESS_GROUP | NORMAL_PRIORITY_CLASS);
+    dwCreationFlags |= NORMAL_PRIORITY_CLASS;
 
     if (lstrlenW(cmd) > 32767) {
 	child->pid = 0;		/* release the slot */
@@ -1285,7 +1285,7 @@ rb_w32_spawn(int mode, const char *cmd, const char *prog)
     wshell = shell ? acp_to_wstr(shell, NULL) : NULL;
     if (v2) ALLOCV_END(v2);
 
-    ret = child_result(CreateChild(wcmd, wshell, NULL, NULL, NULL, NULL), mode);
+    ret = child_result(CreateChild(wcmd, wshell, NULL, NULL, NULL, NULL, 0), mode);
     free(wshell);
     free(wcmd);
     return ret;
@@ -1293,7 +1293,7 @@ rb_w32_spawn(int mode, const char *cmd, const char *prog)
 
 /* License: Artistic or GPL */
 rb_pid_t
-rb_w32_aspawn(int mode, const char *prog, char *const *argv)
+rb_w32_aspawn_flags(int mode, const char *prog, char *const *argv, DWORD flags)
 {
     int c_switch = 0;
     size_t len;
@@ -1352,10 +1352,16 @@ rb_w32_aspawn(int mode, const char *prog, char *const *argv)
     if (v) ALLOCV_END(v);
     wprog = prog ? acp_to_wstr(prog, NULL) : NULL;
 
-    ret = child_result(CreateChild(wcmd, wprog, NULL, NULL, NULL, NULL), mode);
+    ret = child_result(CreateChild(wcmd, wprog, NULL, NULL, NULL, NULL, flags), mode);
     free(wprog);
     free(wcmd);
     return ret;
+}
+
+rb_pid_t
+rb_w32_aspawn(int mode, const char *prog, char *const *argv)
+{
+    return rb_w32_aspawn_flags(mode, prog, argv, 0);
 }
 
 /* License: Artistic or GPL */
@@ -2126,7 +2132,7 @@ typedef struct	{
     int lockinitflag;
     CRITICAL_SECTION lock;
 #endif
-#if RT_VER >= 80
+#if RUBY_MSVCRT_VERSION >= 80
     char textmode;
     char pipech2[2];
 #endif
@@ -2147,7 +2153,7 @@ static inline ioinfo* _pioinfo(int);
 #define _osfile(i)  (_pioinfo(i)->osfile)
 #define _pipech(i)  (_pioinfo(i)->pipech)
 
-#if RT_VER >= 80
+#if RUBY_MSVCRT_VERSION >= 80
 static size_t pioinfo_extra = 0;	/* workaround for VC++8 SP1 */
 
 /* License: Ruby's */
@@ -2446,25 +2452,10 @@ ioctl(int i, int u, ...)
     return -1;
 }
 
-#undef FD_SET
-
 void
 rb_w32_fdset(int fd, fd_set *set)
 {
-    unsigned int i;
-    SOCKET s = TO_SOCKET(fd);
-
-    for (i = 0; i < set->fd_count; i++) {
-        if (set->fd_array[i] == s) {
-            return;
-        }
-    }
-    if (i == set->fd_count) {
-        if (set->fd_count < FD_SETSIZE) {
-            set->fd_array[i] = s;
-            set->fd_count++;
-        }
-    }
+    FD_SET(fd, set);
 }
 
 #undef FD_CLR
@@ -2862,14 +2853,19 @@ rb_w32_select_with_thread(int nfds, fd_set *rd, fd_set *wr, fd_set *ex,
 		fd_set orig_rd;
 		fd_set orig_wr;
 		fd_set orig_ex;
-		if (rd) orig_rd = *rd;
-		if (wr) orig_wr = *wr;
-		if (ex) orig_ex = *ex;
+
+		FD_ZERO(&orig_rd);
+		FD_ZERO(&orig_wr);
+		FD_ZERO(&orig_ex);
+
+		if (rd) copy_fd(&orig_rd, rd);
+		if (wr) copy_fd(&orig_wr, wr);
+		if (ex) copy_fd(&orig_ex, ex);
 		r = do_select(nfds, rd, wr, ex, &zero);	// polling
 		if (r != 0) break; // signaled or error
-		if (rd) *rd = orig_rd;
-		if (wr) *wr = orig_wr;
-		if (ex) *ex = orig_ex;
+		if (rd) copy_fd(rd, &orig_rd);
+		if (wr) copy_fd(wr, &orig_wr);
+		if (ex) copy_fd(ex, &orig_ex);
 
 		if (timeout) {
 		    struct timeval now;
@@ -3915,6 +3911,7 @@ waitpid(rb_pid_t pid, int *stat_loc, int options)
 	int count = 0;
 	int ret;
 	HANDLE events[MAXCHILDNUM];
+	struct ChildRecord* cause;
 
 	FOREACH_CHILD(child) {
 	    if (!child->pid || child->pid < 0) continue;
@@ -3936,7 +3933,12 @@ waitpid(rb_pid_t pid, int *stat_loc, int options)
 	    return -1;
 	}
 
-	return poll_child_status(FindChildSlotByHandle(events[ret]), stat_loc);
+	cause = FindChildSlotByHandle(events[ret]);
+	if (!cause) {
+	    errno = ECHILD;
+	    return -1;
+	}
+	return poll_child_status(cause, stat_loc);
     }
     else {
 	struct ChildRecord* child = FindChildSlot(pid);
@@ -4236,13 +4238,58 @@ wait(int *status)
 
 /* License: Ruby's */
 char *
+rb_w32_ugetenv(const char *name)
+{
+    WCHAR *wenvarea, *wenv;
+    int len = strlen(name);
+    char *env;
+    int wlen;
+
+    if (len == 0) return NULL;
+
+    if (uenvarea) {
+	free(uenvarea);
+	uenvarea = NULL;
+    }
+    if (envarea) {
+	FreeEnvironmentStrings(envarea);
+	envarea = NULL;
+    }
+    wenvarea = GetEnvironmentStringsW();
+    if (!wenvarea) {
+	map_errno(GetLastError());
+	return NULL;
+    }
+    for (wenv = wenvarea, wlen = 1; *wenv; wenv += lstrlenW(wenv) + 1)
+	wlen += lstrlenW(wenv) + 1;
+    uenvarea = wstr_to_mbstr(CP_UTF8, wenvarea, wlen, NULL);
+    FreeEnvironmentStringsW(wenvarea);
+    if (!uenvarea)
+	return NULL;
+
+    for (env = uenvarea; *env; env += strlen(env) + 1)
+	if (strncasecmp(env, name, len) == 0 && *(env + len) == '=')
+	    return env + len + 1;
+
+    return NULL;
+}
+
+/* License: Ruby's */
+char *
 rb_w32_getenv(const char *name)
 {
     int len = strlen(name);
     char *env;
 
     if (len == 0) return NULL;
-    if (envarea) FreeEnvironmentStrings(envarea);
+    if (uenvarea) {
+	free(uenvarea);
+	uenvarea = NULL;
+    }
+    if (envarea) {
+	FreeEnvironmentStrings(envarea);
+	envarea = NULL;
+    }
     envarea = GetEnvironmentStrings();
     if (!envarea) {
 	map_errno(GetLastError());
@@ -4352,8 +4399,11 @@ static int
 isUNCRoot(const WCHAR *path)
 {
     if (path[0] == L'\\' && path[1] == L'\\') {
-	const WCHAR *p;
-	for (p = path + 2; *p; p++) {
+	const WCHAR *p = path + 2;
+	if (p[0] == L'?' && p[1] == L'\\') {
+	    p += 2;
+	}
+	for (; *p; p++) {
 	    if (*p == L'\\')
 		break;
 	}
@@ -4383,7 +4433,8 @@ isUNCRoot(const WCHAR *path)
 	(dest).st_ctime = (src).st_ctime;	\
     } while (0)
 
-#ifdef __BORLANDC__
+static time_t filetime_to_unixtime(const FILETIME *ft);
+
 #undef fstat
 /* License: Ruby's */
 int
@@ -4393,10 +4444,18 @@ rb_w32_fstat(int fd, struct stat *st)
     int ret = fstat(fd, st);
 
     if (ret) return ret;
+#ifdef __BORLANDC__
     st->st_mode &= ~(S_IWGRP | S_IWOTH);
-    if (GetFileInformationByHandle((HANDLE)_get_osfhandle(fd), &info) &&
-	!(info.dwFileAttributes & FILE_ATTRIBUTE_READONLY)) {
-	st->st_mode |= S_IWUSR;
+#endif
+    if (GetFileInformationByHandle((HANDLE)_get_osfhandle(fd), &info)) {
+#ifdef __BORLANDC__
+	if (!(info.dwFileAttributes & FILE_ATTRIBUTE_READONLY)) {
+	    st->st_mode |= S_IWUSR;
+	}
+#endif
+	st->st_atime = filetime_to_unixtime(&info.ftLastAccessTime);
+	st->st_mtime = filetime_to_unixtime(&info.ftLastWriteTime);
+	st->st_ctime = filetime_to_unixtime(&info.ftCreationTime);
     }
     return ret;
 }
@@ -4410,17 +4469,23 @@ rb_w32_fstati64(int fd, struct stati64 *st)
     int ret = fstat(fd, &tmp);
 
     if (ret) return ret;
+#ifdef __BORLANDC__
     tmp.st_mode &= ~(S_IWGRP | S_IWOTH);
+#endif
     COPY_STAT(tmp, *st, +);
     if (GetFileInformationByHandle((HANDLE)_get_osfhandle(fd), &info)) {
+#ifdef __BORLANDC__
 	if (!(info.dwFileAttributes & FILE_ATTRIBUTE_READONLY)) {
 	    st->st_mode |= S_IWUSR;
 	}
+#endif
 	st->st_size = ((__int64)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+	st->st_atime = filetime_to_unixtime(&info.ftLastAccessTime);
+	st->st_mtime = filetime_to_unixtime(&info.ftLastWriteTime);
+	st->st_ctime = filetime_to_unixtime(&info.ftCreationTime);
     }
     return ret;
 }
-#endif
 
 /* License: Ruby's */
 static time_t
@@ -4507,11 +4572,13 @@ winnt_stat(const WCHAR *path, struct stati64 *st)
 {
     HANDLE h;
     WIN32_FIND_DATAW wfd;
+    const WCHAR *p = path;
 
     memset(st, 0, sizeof(*st));
     st->st_nlink = 1;
 
-    if (wcspbrk(path, L"?*")) {
+    if (wcsncmp(p, L"\\\\?\\", 4) == 0) p += 4;
+    if (wcspbrk(p, L"?*")) {
 	errno = ENOENT;
 	return -1;
     }
@@ -5011,7 +5078,7 @@ rb_w32_asynchronize(asynchronous_func_t func, uintptr_t self,
 char **
 rb_w32_get_environ(void)
 {
-    char *envtop, *env;
+    WCHAR *envtop, *env;
     char **myenvtop, **myenv;
     int num;
 
@@ -5022,23 +5089,24 @@ rb_w32_get_environ(void)
      * CygWin deals these values by changing first `=' to '!'. But we don't
      * use such trick and follow cmd.exe's way that just doesn't show these
      * values.
-     * (U.N. 2001-11-15)
+     *
+     * This function returns UTF-8 strings.
      */
-    envtop = GetEnvironmentStrings();
-    for (env = envtop, num = 0; *env; env += strlen(env) + 1)
+    envtop = GetEnvironmentStringsW();
+    for (env = envtop, num = 0; *env; env += lstrlenW(env) + 1)
 	if (*env != '=') num++;
 
     myenvtop = (char **)malloc(sizeof(char *) * (num + 1));
-    for (env = envtop, myenv = myenvtop; *env; env += strlen(env) + 1) {
+    for (env = envtop, myenv = myenvtop; *env; env += lstrlenW(env) + 1) {
 	if (*env != '=') {
-	    if (!(*myenv = strdup(env))) {
+	    if (!(*myenv = wstr_to_utf8(env, NULL))) {
 		break;
 	    }
 	    myenv++;
 	}
     }
     *myenv = NULL;
-    FreeEnvironmentStrings(envtop);
+    FreeEnvironmentStringsW(envtop);
 
     return myenvtop;
 }
@@ -5119,6 +5187,34 @@ rb_w32_uopen(const char *file, int oflag, ...)
 }
 
 /* License: Ruby's */
+static int
+check_if_wdir(const WCHAR *wfile)
+{
+    DWORD attr = GetFileAttributesW(wfile);
+    if (attr == (DWORD)-1L ||
+	!(attr & FILE_ATTRIBUTE_DIRECTORY) ||
+	check_valid_dir(wfile)) {
+	return FALSE;
+    }
+    errno = EISDIR;
+    return TRUE;
+}
+
+/* License: Ruby's */
+static int
+check_if_dir(const char *file)
+{
+    WCHAR *wfile;
+    int ret;
+
+    if (!(wfile = filecp_to_wstr(file, NULL)))
+	return FALSE;
+    ret = check_if_wdir(wfile);
+    free(wfile);
+    return ret;
+}
+
+/* License: Ruby's */
 int
 rb_w32_open(const char *file, int oflag, ...)
 {
@@ -5131,8 +5227,11 @@ rb_w32_open(const char *file, int oflag, ...)
     pmode = va_arg(arg, int);
     va_end(arg);
 
-    if ((oflag & O_TEXT) || !(oflag & O_BINARY))
-	return _open(file, oflag, pmode);
+    if ((oflag & O_TEXT) || !(oflag & O_BINARY)) {
+	ret = _open(file, oflag, pmode);
+	if (ret == -1 && errno == EACCES) check_if_dir(file);
+	return ret;
+    }
 
     if (!(wfile = filecp_to_wstr(file, NULL)))
 	return -1;
@@ -5158,7 +5257,9 @@ rb_w32_wopen(const WCHAR *file, int oflag, ...)
 	va_start(arg, oflag);
 	pmode = va_arg(arg, int);
 	va_end(arg);
-	return _wopen(file, oflag, pmode);
+	fd = _wopen(file, oflag, pmode);
+	if (fd == -1 && errno == EACCES) check_if_wdir(file);
+	return fd;
     }
 
     sec.nLength = sizeof(sec);
@@ -5274,7 +5375,9 @@ rb_w32_wopen(const WCHAR *file, int oflag, ...)
 	h = CreateFileW(file, access, FILE_SHARE_READ | FILE_SHARE_WRITE, &sec,
 			create, attr, NULL);
 	if (h == INVALID_HANDLE_VALUE) {
-	    errno = map_errno(GetLastError());
+	    DWORD e = GetLastError();
+	    if (e != ERROR_ACCESS_DENIED || !check_if_wdir(file))
+		errno = map_errno(e);
 	    MTHREAD_ONLY(LeaveCriticalSection(&_pioinfo(fd)->lock));
 	    fd = -1;
 	    goto quit;
@@ -5766,27 +5869,11 @@ rb_w32_write_console(uintptr_t strarg, int fd)
 static int
 unixtime_to_filetime(time_t time, FILETIME *ft)
 {
-    struct tm *tm;
-    SYSTEMTIME st;
-    FILETIME lt;
+    ULARGE_INTEGER tmp;
 
-    tm = localtime(&time);
-    if (!tm) {
-	return -1;
-    }
-    st.wYear = tm->tm_year + 1900;
-    st.wMonth = tm->tm_mon + 1;
-    st.wDayOfWeek = tm->tm_wday;
-    st.wDay = tm->tm_mday;
-    st.wHour = tm->tm_hour;
-    st.wMinute = tm->tm_min;
-    st.wSecond = tm->tm_sec;
-    st.wMilliseconds = 0;
-    if (!SystemTimeToFileTime(&st, &lt) ||
-	!LocalFileTimeToFileTime(&lt, ft)) {
-	errno = map_errno(GetLastError());
-	return -1;
-    }
+    tmp.QuadPart = ((LONG_LONG)time + (LONG_LONG)((1970-1601)*365.2425) * 24 * 60 * 60) * 10 * 1000 * 1000;
+    ft->dwLowDateTime = tmp.LowPart;
+    ft->dwHighDateTime = tmp.HighPart;
     return 0;
 }
 
@@ -6117,7 +6204,7 @@ rb_w32_fsopen(const char *path, const char *mode, int shflags)
 }
 #endif
 
-#if defined(_MSC_VER) && RT_VER <= 60
+#if defined(_MSC_VER) && RUBY_MSVCRT_VERSION <= 60
 extern long _ftol(double);
 /* License: Ruby's */
 long
@@ -6165,4 +6252,109 @@ rb_w32_inet_ntop(int af, const void *addr, char *numaddr, size_t numaddr_len)
 char
 rb_w32_fd_is_text(int fd) {
     return _osfile(fd) & FTEXT;
+}
+
+#if RUBY_MSVCRT_VERSION < 80
+static int
+unixtime_to_systemtime(const time_t t, SYSTEMTIME *st)
+{
+    FILETIME ft;
+    if (unixtime_to_filetime(t, &ft)) return -1;
+    if (!FileTimeToSystemTime(&ft, st)) return -1;
+    return 0;
+}
+
+static void
+systemtime_to_tm(const SYSTEMTIME *st, struct tm *t)
+{
+    int y = st->wYear, m = st->wMonth, d = st->wDay;
+    t->tm_sec  = st->wSecond;
+    t->tm_min  = st->wMinute;
+    t->tm_hour = st->wHour;
+    t->tm_mday = st->wDay;
+    t->tm_mon  = st->wMonth - 1;
+    t->tm_year = y - 1900;
+    t->tm_wday = st->wDayOfWeek;
+    switch (m) {
+      case 1:
+	break;
+      case 2:
+	d += 31;
+	break;
+      default:
+	d += 31 + 28 + (!(y % 4) && ((y % 100) || !(y % 400)));
+	d += ((m - 3) * 153 + 2) / 5;
+	break;
+    }
+    t->tm_yday = d - 1;
+}
+
+static int
+systemtime_to_localtime(TIME_ZONE_INFORMATION *tz, SYSTEMTIME *gst, SYSTEMTIME *lst)
+{
+    TIME_ZONE_INFORMATION stdtz;
+    SYSTEMTIME sst;
+
+    if (!SystemTimeToTzSpecificLocalTime(tz, gst, lst)) return -1;
+    if (!tz) {
+	GetTimeZoneInformation(&stdtz);
+	tz = &stdtz;
+    }
+    if (tz->StandardBias == tz->DaylightBias) return 0;
+    if (!tz->StandardDate.wMonth) return 0;
+    if (!tz->DaylightDate.wMonth) return 0;
+    if (tz != &stdtz) stdtz = *tz;
+
+    stdtz.StandardDate.wMonth = stdtz.DaylightDate.wMonth = 0;
+    if (!SystemTimeToTzSpecificLocalTime(&stdtz, gst, &sst)) return 0;
+    if (lst->wMinute == sst.wMinute && lst->wHour == sst.wHour)
+	return 0;
+    return 1;
+}
+#endif
+
+struct tm *
+gmtime_r(const time_t *tp, struct tm *rp)
+{
+    int e = EINVAL;
+    if (!tp || !rp) {
+      error:
+	errno = e;
+	return NULL;
+    }
+#if RUBY_MSVCRT_VERSION >= 80
+    e = gmtime_s(rp, tp);
+    if (e != 0) goto error;
+#else
+    {
+	SYSTEMTIME st;
+	if (unixtime_to_systemtime(*tp, &st)) goto error;
+	rp->tm_isdst = 0;
+	systemtime_to_tm(&st, rp);
+    }
+#endif
+    return rp;
+}
+
+struct tm *
+localtime_r(const time_t *tp, struct tm *rp)
+{
+    int e = EINVAL;
+    if (!tp || !rp) {
+      error:
+	errno = e;
+	return NULL;
+    }
+#if RUBY_MSVCRT_VERSION >= 80
+    e = localtime_s(rp, tp);
+    if (e) goto error;
+#else
+    {
+	SYSTEMTIME gst, lst;
+	if (unixtime_to_systemtime(*tp, &gst)) goto error;
+	rp->tm_isdst = systemtime_to_localtime(NULL, &gst, &lst);
+	systemtime_to_tm(&lst, rp);
+    }
+#endif
+    return rp;
 }

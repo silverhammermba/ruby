@@ -1093,20 +1093,19 @@ return_fiber(void)
 {
     rb_fiber_t *fib;
     VALUE curr = rb_fiber_current();
+    VALUE prev;
     GetFiberPtr(curr, fib);
 
-    if (fib->prev == Qnil) {
-	rb_thread_t *th = GET_THREAD();
+    prev = fib->prev;
+    if (NIL_P(prev)) {
+	const VALUE root_fiber = GET_THREAD()->root_fiber;
 
-	if (th->root_fiber != curr) {
-	    return th->root_fiber;
-	}
-	else {
+	if (root_fiber == curr) {
 	    rb_raise(rb_eFiberError, "can't yield from root fiber");
 	}
+	return root_fiber;
     }
     else {
-	VALUE prev = fib->prev;
 	fib->prev = Qnil;
 	return prev;
     }
@@ -1426,6 +1425,33 @@ rb_fiber_m_resume(int argc, VALUE *argv, VALUE fib)
  *  You cannot resume a fiber that transferred control to another one.
  *  This will cause a double resume error. You need to transfer control
  *  back to this fiber before it can yield and resume.
+ *
+ *  Example:
+ *
+ *    fiber1 = Fiber.new do
+ *      puts "In Fiber 1"
+ *      Fiber.yield
+ *    end
+ *
+ *    fiber2 = Fiber.new do
+ *      puts "In Fiber 2"
+ *      fiber1.transfer
+ *      puts "Never see this message"
+ *    end
+ *
+ *    fiber3 = Fiber.new do
+ *      puts "In Fiber 3"
+ *    end
+ *
+ *    fiber2.resume
+ *    fiber3.resume
+ *
+ *    <em>produces</em>
+ *
+ *    In fiber 2
+ *    In fiber 1
+ *    In fiber 3
+ *
  */
 static VALUE
 rb_fiber_m_transfer(int argc, VALUE *argv, VALUE fibval)

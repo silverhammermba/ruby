@@ -668,6 +668,10 @@ class TestBigDecimal < Test::Unit::TestCase
     assert_equal(400000000000000000000000000000, x.div(3, 1))
     assert_equal(420000000000000000000000000000, x.div(3, 2))
     assert_equal(423000000000000000000000000000, x.div(3, 3))
+    BigDecimal.save_exception_mode do
+      BigDecimal.mode(BigDecimal::EXCEPTION_INFINITY, false)
+      assert_equal(0, BigDecimal("0").div(BigDecimal("Infinity")))
+    end
   end
 
   def test_abs_bigdecimal
@@ -1093,28 +1097,29 @@ class TestBigDecimal < Test::Unit::TestCase
 
   def test_split_under_gc_stress
     bug3258 = '[ruby-dev:41213]'
-    stress, GC.stress = GC.stress, true
+    expect = 10.upto(20).map{|i|[1, "1", 10, i+1].inspect}
+    assert_in_out_err(%w[-rbigdecimal --disable-gems], <<-EOS, expect, [], bug3258)
+    GC.stress = true
     10.upto(20) do |i|
-      b = BigDecimal.new("1"+"0"*i)
-      assert_equal([1, "1", 10, i+1], b.split, bug3258)
+      p BigDecimal.new("1"+"0"*i).split
     end
-  ensure
-    GC.stress = stress
+    EOS
   end
 
   def test_coerce_under_gc_stress
-    expect = ":too_long_to_embed_as_string can't be coerced into BigDecimal"
-    under_gc_stress do
+    assert_in_out_err(%w[-rbigdecimal --disable-gems], <<-EOS, [], [])
+      expect = ":too_long_to_embed_as_string can't be coerced into BigDecimal"
       b = BigDecimal.new("1")
+      GC.stress = true
       10.times do
         begin
           b.coerce(:too_long_to_embed_as_string)
         rescue => e
-          assert_instance_of TypeError, e
-          assert_equal expect, e.message
+          raise unless e.is_a?(TypeError)
+          raise "'\#{expect}' is expected, but '\#{e.message}'" unless e.message == expect
         end
       end
-    end
+    EOS
   end
 
   def test_INFINITY
@@ -1178,17 +1183,17 @@ class TestBigDecimal < Test::Unit::TestCase
   end
 
   def test_BigMath_exp_under_gc_stress
-    expect = ":too_long_to_embed_as_string can't be coerced into BigDecimal"
-    under_gc_stress do
+    assert_in_out_err(%w[-rbigdecimal --disable-gems], <<-EOS, [], [])
+      expect = ":too_long_to_embed_as_string can't be coerced into BigDecimal"
       10.times do
         begin
           BigMath.exp(:too_long_to_embed_as_string, 6)
         rescue => e
-          assert_instance_of ArgumentError, e
-          assert_equal expect, e.message
+          raise unless e.is_a?(ArgumentError)
+          raise "'\#{expect}' is expected, but '\#{e.message}'" unless e.message == expect
         end
       end
-    end
+    EOS
   end
 
   def test_BigMath_log_with_nil
@@ -1277,17 +1282,17 @@ class TestBigDecimal < Test::Unit::TestCase
   end
 
   def test_BigMath_log_under_gc_stress
-    expect = ":too_long_to_embed_as_string can't be coerced into BigDecimal"
-    under_gc_stress do
+    assert_in_out_err(%w[-rbigdecimal --disable-gems], <<-EOS, [], [])
+      expect = ":too_long_to_embed_as_string can't be coerced into BigDecimal"
       10.times do
         begin
           BigMath.log(:too_long_to_embed_as_string, 6)
         rescue => e
-          assert_instance_of ArgumentError, e
-          assert_equal expect, e.message
+          raise unless e.is_a?(ArgumentError)
+          raise "'\#{expect}' is expected, but '\#{e.message}'" unless e.message == expect
         end
       end
-    end
+    EOS
   end
 
   def test_dup
@@ -1309,5 +1314,11 @@ class TestBigDecimal < Test::Unit::TestCase
     bug6093 = '[ruby-core:42969]'
     code = "exit(BigDecimal.new('10.0') == 10.0.to_d)"
     assert_ruby_status(%w[-rbigdecimal -rbigdecimal/util -rmathn -], code, bug6093)
+  end
+
+  def test_bug6406
+    assert_in_out_err(%w[-rbigdecimal --disable-gems], <<-EOS, [], [])
+    Thread.current.keys.to_s
+    EOS
   end
 end

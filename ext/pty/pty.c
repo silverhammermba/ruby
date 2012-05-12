@@ -630,6 +630,7 @@ pty_getpty(int argc, VALUE *argv, VALUE self)
     return res;
 }
 
+NORETURN(static void raise_from_check(pid_t pid, int status));
 static void
 raise_from_check(pid_t pid, int status)
 {
@@ -687,7 +688,8 @@ pty_check(int argc, VALUE *argv, VALUE self)
 
     if (!RTEST(exc)) return rb_last_status_get();
     raise_from_check(cpid, status);
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE cPTY;

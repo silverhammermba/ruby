@@ -1,5 +1,5 @@
 require 'test/unit'
-require 'stringio'
+require_relative 'envutil'
 
 class TestM17N < Test::Unit::TestCase
   def assert_encoding(encname, actual, message=nil)
@@ -21,17 +21,6 @@ class TestM17N < Test::Unit::TestCase
     enc = Encoding.find(enc) if String === enc
     assert_equal(enc, actual.encoding, message)
     assert_equal(a(bytes), a(actual), message)
-  end
-
-  def assert_warning(pat, mesg=nil)
-    begin
-      org_stderr = $stderr
-      $stderr = StringIO.new(warn = '')
-      yield
-    ensure
-      $stderr = org_stderr
-    end
-    assert_match(pat, warn, mesg)
   end
 
   def assert_regexp_generic_encoding(r)
@@ -1268,8 +1257,8 @@ class TestM17N < Test::Unit::TestCase
   def test_env
     locale_encoding = Encoding.find("locale")
     ENV.each {|k, v|
-      assert_equal(locale_encoding, k.encoding)
-      assert_equal(locale_encoding, v.encoding)
+      assert_equal(locale_encoding, k.encoding, k)
+      assert_equal(locale_encoding, v.encoding, v)
     }
   end
 
@@ -1421,6 +1410,14 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(true, s.valid_encoding?)
     s << "\xff".force_encoding("utf-16be")
     assert_equal(false, s.valid_encoding?, bug4018)
+
+    bug6190 = '[ruby-core:43557]'
+    s = "\xe9"
+    s = s.encode("utf-8", "utf-8")
+    assert_equal(false, s.valid_encoding?, bug6190)
+    s = "\xe9"
+    s.encode!("utf-8", "utf-8")
+    assert_equal(false, s.valid_encoding?, bug6190)
   end
 
   def test_getbyte

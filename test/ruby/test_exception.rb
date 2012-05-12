@@ -82,16 +82,16 @@ class TestException < Test::Unit::TestCase
     assert(!$bad)
 
     assert(catch(:foo) {
-         loop do
-           loop do
-    	 throw :foo, true
-    	 break
-           end
-           break
-           assert(false)			# should no reach here
-         end
-         false
-       })
+             loop do
+               loop do
+                 throw :foo, true
+                 break
+               end
+               break
+               assert(false)			# should no reach here
+             end
+             false
+           })
 
   end
 
@@ -245,7 +245,7 @@ class TestException < Test::Unit::TestCase
   end
 
   def test_thread_signal_location
-    stdout, stderr, status = EnvUtil.invoke_ruby("-d", <<-RUBY, false, true)
+    _, stderr, _ = EnvUtil.invoke_ruby("-d", <<-RUBY, false, true)
 Thread.start do
   begin
     Process.kill(:INT, $$)
@@ -367,15 +367,17 @@ end.join
 
   def test_exception_in_name_error_to_str
     bug5575 = '[ruby-core:41612]'
-    t = Tempfile.new(["test_exception_in_name_error_to_str", ".rb"])
-    t.puts <<-EOC
+    t = nil
+    Tempfile.open(["test_exception_in_name_error_to_str", ".rb"]) do |f|
+      t = f
+      t.puts <<-EOC
       begin
         BasicObject.new.inspect
       rescue
         $!.inspect
       end
     EOC
-    t.close
+    end
     assert_nothing_raised(NameError, bug5575) do
       load(t.path)
     end
@@ -391,14 +393,16 @@ end.join
 
   def test_exception_in_exception_equal
     bug5865 = '[ruby-core:41979]'
-    t = Tempfile.new(["test_exception_in_exception_equal", ".rb"])
-    t.puts <<-EOC
+    t = nil
+    Tempfile.open(["test_exception_in_exception_equal", ".rb"]) do |f|
+      t = f
+      t.puts <<-EOC
       o = Object.new
       def o.exception(arg)
       end
-      RuntimeError.new("a") == o
+      _ = RuntimeError.new("a") == o
     EOC
-    t.close
+    end
     assert_nothing_raised(ArgumentError, bug5865) do
       load(t.path)
     end

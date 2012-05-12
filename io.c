@@ -377,6 +377,7 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
 #define rb_sys_fail_path(path) rb_sys_fail_str(path)
 
 static int io_fflush(rb_io_t *);
+static rb_io_t *flush_before_seek(rb_io_t *fptr);
 
 #define NEED_NEWLINE_DECORATOR_ON_READ(fptr) ((fptr)->mode & FMODE_TEXTMODE)
 #define NEED_NEWLINE_DECORATOR_ON_WRITE(fptr) ((fptr)->mode & FMODE_TEXTMODE)
@@ -412,16 +413,12 @@ static int io_fflush(rb_io_t *);
 	(ecflags) |= ECONV_UNIVERSAL_NEWLINE_DECORATOR;\
     }\
 } while(0)
+
 /*
- * We use io_seek to back cursor position when changing mode from text to binary,
- * but stdin and pipe cannot seek back. Stdin and pipe read should use encoding
- * conversion for working properly with mode change.
+ * IO unread with taking care of removed '\r' in text mode.
  */
-/*
- * Return previous translation mode.
- */
-static inline int
-set_binary_mode_with_seek_cur(rb_io_t *fptr)
+static void
+io_unread(rb_io_t *fptr)
 {
     off_t r, pos;
     ssize_t read_size;
@@ -429,31 +426,50 @@ set_binary_mode_with_seek_cur(rb_io_t *fptr)
     long newlines = 0;
     long extra_max;
     char *p;
+    char *buf;
 
-    if (!rb_w32_fd_is_text(fptr->fd)) return O_BINARY;
-
+    rb_io_check_closed(fptr);
     if (fptr->rbuf.len == 0 || fptr->mode & FMODE_DUPLEX) {
-	return setmode(fptr->fd, O_BINARY);
+	return;
     }
 
-    if (io_fflush(fptr) < 0) {
-	rb_sys_fail(0);
-    }
     errno = 0;
+    if (!rb_w32_fd_is_text(fptr->fd)) {
+	r = lseek(fptr->fd, -fptr->rbuf.len, SEEK_CUR);
+	if (r < 0 && errno) {
+	    if (errno == ESPIPE)
+		fptr->mode |= FMODE_DUPLEX;
+	    return;
+	}
+
+	fptr->rbuf.off = 0;
+	fptr->rbuf.len = 0;
+	return;
+    }
+
     pos = lseek(fptr->fd, 0, SEEK_CUR);
     if (pos < 0 && errno) {
 	if (errno == ESPIPE)
 	    fptr->mode |= FMODE_DUPLEX;
-	return setmode(fptr->fd, O_BINARY);
+	return;
     }
+
     /* add extra offset for removed '\r' in rbuf */
-    extra_max = pos - fptr->rbuf.len;
+    extra_max = (long)(pos - fptr->rbuf.len);
     p = fptr->rbuf.ptr + fptr->rbuf.off;
+
+    /* if the end of rbuf is '\r', rbuf doesn't have '\r' within rbuf.len */
+    if (*(fptr->rbuf.ptr + fptr->rbuf.capa - 1) == '\r') {
+	newlines++;
+    }
+
     for (i = 0; i < fptr->rbuf.len; i++) {
 	if (*p == '\n') newlines++;
 	if (extra_max == newlines) break;
 	p++;
     }
+
+    buf = ALLOC_N(char, fptr->rbuf.len + newlines);
     while (newlines >= 0) {
 	r = lseek(fptr->fd, pos - fptr->rbuf.len - newlines, SEEK_SET);
 	if (newlines == 0) break;
@@ -461,8 +477,9 @@ set_binary_mode_with_seek_cur(rb_io_t *fptr)
 	    newlines--;
 	    continue;
 	}
-	read_size = _read(fptr->fd, fptr->rbuf.ptr, fptr->rbuf.len + newlines);
+	read_size = _read(fptr->fd, buf, fptr->rbuf.len + newlines);
 	if (read_size < 0) {
+	    free(buf);
 	    rb_sys_fail_path(fptr->pathv);
 	}
 	if (read_size == fptr->rbuf.len) {
@@ -473,8 +490,28 @@ set_binary_mode_with_seek_cur(rb_io_t *fptr)
 	    newlines--;
 	}
     }
+    free(buf);
     fptr->rbuf.off = 0;
     fptr->rbuf.len = 0;
+    return;
+}
+
+/*
+ * We use io_seek to back cursor position when changing mode from text to binary,
+ * but stdin and pipe cannot seek back. Stdin and pipe read should use encoding
+ * conversion for working properly with mode change.
+ *
+ * Return previous translation mode.
+ */
+static inline int
+set_binary_mode_with_seek_cur(rb_io_t *fptr)
+{
+    if (!rb_w32_fd_is_text(fptr->fd)) return O_BINARY;
+
+    if (fptr->rbuf.len == 0 || fptr->mode & FMODE_DUPLEX) {
+	return setmode(fptr->fd, O_BINARY);
+    }
+    flush_before_seek(fptr);
     return setmode(fptr->fd, O_BINARY);
 }
 #define SET_BINARY_MODE_WITH_SEEK_CUR(fptr) set_binary_mode_with_seek_cur(fptr)
@@ -605,6 +642,7 @@ rb_io_s_try_convert(VALUE dummy, VALUE io)
     return rb_io_check_io(io);
 }
 
+#if !(defined(RUBY_TEST_CRLF_ENVIRONMENT) || defined(_WIN32))
 static void
 io_unread(rb_io_t *fptr)
 {
@@ -624,6 +662,7 @@ io_unread(rb_io_t *fptr)
     fptr->rbuf.len = 0;
     return;
 }
+#endif
 
 static rb_encoding *io_input_encoding(rb_io_t *fptr);
 
@@ -1581,6 +1620,11 @@ rb_io_eof(VALUE io)
     if (READ_CHAR_PENDING(fptr)) return Qfalse;
     if (READ_DATA_PENDING(fptr)) return Qfalse;
     READ_CHECK(fptr);
+#if defined(RUBY_TEST_CRLF_ENVIRONMENT) || defined(_WIN32)
+    if (!NEED_READCONV(fptr) && NEED_NEWLINE_DECORATOR_ON_READ(fptr)) {
+	return eof(fptr->fd) ? Qtrue : Qfalse;
+    }
+#endif
     if (io_fillbuf(fptr) < 0) {
 	return Qtrue;
     }
@@ -2243,6 +2287,8 @@ io_getpartial(int argc, VALUE *argv, VALUE io, int nonblock)
  *  It doesn't block if some data available.
  *  If the optional <i>outbuf</i> argument is present,
  *  it must reference a String, which will receive the data.
+ *  The <i>outbuf</i> will contain only the received data after the method call
+ *  even if it is not empty at the beginning.
  *  It raises <code>EOFError</code> on end of file.
  *
  *  readpartial is designed for streams such as pipe, socket, tty, etc.
@@ -2298,8 +2344,7 @@ io_readpartial(int argc, VALUE *argv, VALUE io)
     ret = io_getpartial(argc, argv, io, 0);
     if (NIL_P(ret))
         rb_eof_error();
-    else
-        return ret;
+    return ret;
 }
 
 /*
@@ -2313,6 +2358,8 @@ io_readpartial(int argc, VALUE *argv, VALUE io)
  *
  *  If the optional <i>outbuf</i> argument is present,
  *  it must reference a String, which will receive the data.
+ *  The <i>outbuf</i> will contain only the received data after the method call
+ *  even if it is not empty at the beginning.
  *
  *  read_nonblock just calls the read(2) system call.
  *  It causes all errors the read(2) system call causes: Errno::EWOULDBLOCK, Errno::EINTR, etc.
@@ -2359,8 +2406,7 @@ io_read_nonblock(int argc, VALUE *argv, VALUE io)
     ret = io_getpartial(argc, argv, io, 1);
     if (NIL_P(ret))
         rb_eof_error();
-    else
-        return ret;
+    return ret;
 }
 
 /*
@@ -2447,7 +2493,7 @@ rb_io_write_nonblock(VALUE io, VALUE str)
 
 /*
  *  call-seq:
- *     ios.read([length [, buffer]])    -> string, buffer, or nil
+ *     ios.read([length [, outbuf]])    -> string, outbuf, or nil
  *
  *  Reads <i>length</i> bytes from the I/O stream.
  *
@@ -2467,8 +2513,10 @@ rb_io_write_nonblock(VALUE io, VALUE str)
  *
  *  If <i>length</i> is zero, it returns <code>""</code>.
  *
- *  If the optional <i>buffer</i> argument is present, it must reference
+ *  If the optional <i>outbuf</i> argument is present, it must reference
  *  a String, which will receive the data.
+ *  The <i>outbuf</i> will contain only the received data after the method call
+ *  even if it is not empty at the beginning.
  *
  *  At end of file, it returns <code>nil</code> or <code>""</code>
  *  depend on <i>length</i>.
@@ -4246,6 +4294,8 @@ rb_io_syswrite(VALUE io, VALUE str)
  *  that read from <em>ios</em> or you may get unpredictable results.
  *  If the optional <i>outbuf</i> argument is present, it must reference
  *  a String, which will receive the data.
+ *  The <i>outbuf</i> will contain only the received data after the method call
+ *  even if it is not empty at the beginning.
  *  Raises <code>SystemCallError</code> on error and
  *  <code>EOFError</code> at end of file.
  *
@@ -4395,6 +4445,8 @@ rb_io_fmode_modestr(int fmode)
 	return MODE_BTMODE("a", "ab", "at");
     }
     switch (fmode & FMODE_READWRITE) {
+      default:
+	rb_raise(rb_eArgError, "invalid access fmode 0x%x", fmode);
       case FMODE_READABLE:
 	return MODE_BTMODE("r", "rb", "rt");
       case FMODE_WRITABLE:
@@ -4405,8 +4457,6 @@ rb_io_fmode_modestr(int fmode)
 	}
 	return MODE_BTMODE("r+", "rb+", "rt+");
     }
-    rb_raise(rb_eArgError, "invalid access fmode 0x%x", fmode);
-    return NULL;		/* not reached */
 }
 
 static int
@@ -4564,6 +4614,8 @@ rb_io_oflags_modestr(int oflags)
 	}
     }
     switch (oflags & (O_RDONLY|O_WRONLY|O_RDWR)) {
+      default:
+	rb_raise(rb_eArgError, "invalid access oflags 0x%x", oflags);
       case O_RDONLY:
 	return MODE_BINARY("r", "rb");
       case O_WRONLY:
@@ -4571,8 +4623,6 @@ rb_io_oflags_modestr(int oflags)
       case O_RDWR:
 	return MODE_BINARY("r+", "rb+");
     }
-    rb_raise(rb_eArgError, "invalid access oflags 0x%x", oflags);
-    return NULL;		/* not reached */
 }
 
 /*
@@ -4601,6 +4651,12 @@ rb_io_ext_int_to_encs(rb_encoding *ext, rb_encoding *intern, rb_encoding **enc, 
 	*enc = intern;
 	*enc2 = ext;
     }
+}
+
+static void
+unsupported_encoding(const char *name)
+{
+    rb_warn("Unsupported encoding %s ignored", name);
 }
 
 static void
@@ -4647,7 +4703,7 @@ parse_mode_enc(const char *estr, rb_encoding **enc_p, rb_encoding **enc2_p, int 
 	ext_enc = rb_enc_from_index(idx);
     else {
 	if (idx != -2)
-	    rb_warn("Unsupported encoding %s ignored", estr);
+	    unsupported_encoding(estr);
 	ext_enc = NULL;
     }
 
@@ -4660,9 +4716,8 @@ parse_mode_enc(const char *estr, rb_encoding **enc_p, rb_encoding **enc2_p, int 
 	else {
 	    idx2 = rb_enc_find_index(p);
 	    if (idx2 < 0)
-		rb_warn("Unsupported encoding %s ignored", p);
+		unsupported_encoding(p);
 	    else if (idx2 == idx) {
-		rb_warn("Ignoring internal encoding %s: it is identical to external encoding %s", p, estr);
 		int_enc = (rb_encoding *)Qnil;
 	    }
 	    else
@@ -8709,6 +8764,14 @@ io_new_instance(VALUE args)
     return rb_class_new_instance(2, (VALUE*)args+1, *(VALUE*)args);
 }
 
+static rb_encoding *
+find_encoding(VALUE v)
+{
+    rb_encoding *enc = rb_find_encoding(v);
+    if (!enc) unsupported_encoding(StringValueCStr(v));
+    return enc;
+}
+
 static void
 io_encoding_set(rb_io_t *fptr, VALUE v1, VALUE v2, VALUE opt)
 {
@@ -8717,7 +8780,7 @@ io_encoding_set(rb_io_t *fptr, VALUE v1, VALUE v2, VALUE opt)
     VALUE ecopts, tmp;
 
     if (!NIL_P(v2)) {
-	enc2 = rb_to_encoding(v1);
+	enc2 = find_encoding(v1);
 	tmp = rb_check_string_type(v2);
 	if (!NIL_P(tmp)) {
 	    if (RSTRING_LEN(tmp) == 1 && RSTRING_PTR(tmp)[0] == '-') {
@@ -8726,14 +8789,19 @@ io_encoding_set(rb_io_t *fptr, VALUE v1, VALUE v2, VALUE opt)
 		enc2 = NULL;
 	    }
 	    else
-		enc = rb_to_encoding(v2);
+		enc = find_encoding(v2);
 	    if (enc == enc2) {
 		/* Special case - "-" => no transcoding */
 		enc2 = NULL;
 	    }
 	}
-	else
-	    enc = rb_to_encoding(v2);
+	else {
+	    enc = find_encoding(v2);
+	    if (enc == enc2) {
+		/* Special case - "-" => no transcoding */
+		enc2 = NULL;
+	    }
+	}
 	SET_UNIVERSAL_NEWLINE_DECORATOR_IF_ENC2(enc2, ecflags);
 	ecflags = rb_econv_prepare_options(opt, &ecopts, ecflags);
     }
@@ -8752,7 +8820,7 @@ io_encoding_set(rb_io_t *fptr, VALUE v1, VALUE v2, VALUE opt)
                 ecflags = rb_econv_prepare_options(opt, &ecopts, ecflags);
 	    }
 	    else {
-		rb_io_ext_int_to_encs(rb_to_encoding(v1), NULL, &enc, &enc2);
+		rb_io_ext_int_to_encs(find_encoding(v1), NULL, &enc, &enc2);
 		SET_UNIVERSAL_NEWLINE_DECORATOR_IF_ENC2(enc2, ecflags);
                 ecopts = Qnil;
 	    }
@@ -9246,18 +9314,11 @@ rb_io_s_write(int argc, VALUE *argv, VALUE io)
 /*
  *  call-seq:
  *     IO.binwrite(name, string, [offset] )   => fixnum
+ *     IO.binwrite(name, string, [offset], open_args )   => fixnum
  *
- *  Opens the file, optionally seeks to the given <i>offset</i>, writes
- *  <i>string</i> then returns the length written.
- *  <code>binwrite</code> ensures the file is closed before returning.
- *  The open mode would be "wb:ASCII-8BIT".
- *  If <i>offset</i> is not given, the file is truncated.  Otherwise,
- *  it is not truncated.
+ *  Same as <code>IO.write</code> except opening the file in binary mode
+ *  and ASCII-8BIT encoding ("wb:ASCII-8BIT").
  *
- *     IO.binwrite("testfile", "0123456789", 20) # => 10
- *     # File could contain:  "This is line one\nThi0123456789two\nThis is line three\nAnd so on...\n"
- *     IO.binwrite("testfile", "0123456789")      #=> 10
- *     # File would now read: "0123456789"
  */
 
 static VALUE
@@ -10279,7 +10340,7 @@ argf_eof(VALUE argf)
 
 /*
  *  call-seq:
- *     ARGF.read([length [, buffer]])    -> string, buffer, or nil
+ *     ARGF.read([length [, outbuf]])    -> string, outbuf, or nil
  *
  *  Reads _length_ bytes from ARGF. The files named on the command line
  *  are concatenated and treated as a single file by this method, so when
@@ -10296,8 +10357,10 @@ argf_eof(VALUE argf)
  *
  *  If _length_ is zero, it returns _""_.
  *
- *  If the optional _buffer_ argument is present, it must reference a String,
+ *  If the optional _outbuf_ argument is present, it must reference a String,
  *  which will receive the data.
+ *  The <i>outbuf</i> will contain only the received data after the method call
+ *  even if it is not empty at the beginning.
  *
  * For example:
  *
@@ -10383,7 +10446,10 @@ static VALUE argf_getpartial(int argc, VALUE *argv, VALUE argf, int nonblock);
  *  Reads at most _maxlen_ bytes from the ARGF stream. It blocks only if
  *  +ARGF+ has no data immediately available. If the optional _outbuf_
  *  argument is present, it must reference a String, which will receive the
- *  data. It raises <code>EOFError</code> on end of file.
+ *  data.
+ *  The <i>outbuf</i> will contain only the received data after the method call
+ *  even if it is not empty at the beginning.
+ *  It raises <code>EOFError</code> on end of file.
  *
  *  +readpartial+ is designed for streams such as pipes, sockets, and ttys. It
  *  blocks only when no data is immediately available. This means that it

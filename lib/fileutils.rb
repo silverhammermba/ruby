@@ -199,7 +199,7 @@ public
   #   FileUtils.cd('/') do  # chdir
   #     [...]               # do something
   #   end                   # return to original directory
-  #   
+  #
   def cd(dir, options = {}, &block) # :yield: dir
     fu_check_options options, OPT_TABLE['cd']
     fu_output_message "cd #{dir}" if options[:verbose]
@@ -495,7 +495,7 @@ public
   #   # If you want to copy all contents of a directory instead of the
   #   # directory itself, c.f. src/x -> dest/x, src/y -> dest/y,
   #   # use following code.
-  #   FileUtils.cp_r 'src/.', 'dest'     # cp_r('src', 'dest') makes src/dest,
+  #   FileUtils.cp_r 'src/.', 'dest'     # cp_r('src', 'dest') makes dest/src,
   #                                      # but this doesn't.
   #
   def cp_r(src, dest, options = {})
@@ -606,7 +606,7 @@ public
   alias move mv
 
   define_command('mv', :force, :noop, :verbose, :secure)
-  define_command('move', :force, :noop, :verbose, :secure)  
+  define_command('move', :force, :noop, :verbose, :secure)
 
 private
 
@@ -816,7 +816,7 @@ private
     File.symlink nil, nil
   rescue NotImplementedError
     return false
-  rescue
+  rescue TypeError
     return true
   end
 
@@ -1444,14 +1444,37 @@ private
 
     def copy_metadata(path)
       st = lstat()
-      File.utime st.atime, st.mtime, path
+      if !st.symlink?
+        File.utime st.atime, st.mtime, path
+      end
       begin
-        File.chown st.uid, st.gid, path
+        if st.symlink?
+          begin
+            File.lchown st.uid, st.gid, path
+          rescue NotImplementedError
+          end
+        else
+          File.chown st.uid, st.gid, path
+        end
       rescue Errno::EPERM
         # clear setuid/setgid
-        File.chmod st.mode & 01777, path
+        if st.symlink?
+          begin
+            File.lchmod st.mode & 01777, path
+          rescue NotImplementedError
+          end
+        else
+          File.chmod st.mode & 01777, path
+        end
       else
-        File.chmod st.mode, path
+        if st.symlink?
+          begin
+            File.lchmod st.mode, path
+          rescue NotImplementedError
+          end
+        else
+          File.chmod st.mode, path
+        end
       end
     end
 

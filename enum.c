@@ -17,15 +17,6 @@
 
 #define STATIC_ASSERT(name, expr) typedef int static_assert_##name##_check[1 - 2*!(expr)]
 
-#define NEW_MEMO(a, b, c) rb_node_newnode(NODE_MEMO, (a), (b), (c))
-
-#define roomof(x, y) ((sizeof(x) + sizeof(y) - 1) / sizeof(y))
-#define MEMO_FOR(type, value) ((type *)RARRAY_PTR(value))
-#define NEW_MEMO_FOR(type, value) \
-    (rb_ary_set_len(((value) = rb_ary_tmp_new(roomof(type, VALUE))), \
-		    roomof(type, VALUE)), \
-     MEMO_FOR(type, value))
-
 VALUE rb_mEnumerable;
 static ID id_next;
 #define id_each idEach
@@ -33,8 +24,8 @@ static ID id_next;
 #define id_cmp  idCmp
 #define id_lshift idLTLT
 
-static VALUE
-enum_values_pack(int argc, VALUE *argv)
+VALUE
+rb_enum_values_pack(int argc, VALUE *argv)
 {
     if (argc == 0) return Qnil;
     if (argc == 1) return argv[0];
@@ -42,7 +33,7 @@ enum_values_pack(int argc, VALUE *argv)
 }
 
 #define ENUM_WANT_SVALUE() do { \
-    i = enum_values_pack(argc, argv); \
+    i = rb_enum_values_pack(argc, argv); \
 } while (0)
 
 #define enum_yield rb_yield_values2
@@ -395,7 +386,7 @@ static VALUE
 collect_all(VALUE i, VALUE ary, int argc, VALUE *argv)
 {
     rb_thread_check_ints();
-    rb_ary_push(ary, enum_values_pack(argc, argv));
+    rb_ary_push(ary, rb_enum_values_pack(argc, argv));
 
     return Qnil;
 }
@@ -709,25 +700,11 @@ first_i(VALUE i, VALUE params, int argc, VALUE *argv)
 
     memo->u1.value = i;
     rb_iter_break();
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
-static VALUE
-first_ary_i(VALUE i, VALUE params, int argc, VALUE *argv)
-{
-    NODE *memo = RNODE(params);
-    long n = memo->u3.cnt;
-
-    ENUM_WANT_SVALUE();
-
-    rb_ary_push(memo->u1.value, i);
-    n--;
-    if (n <= 0) {
-	rb_iter_break();
-    }
-    memo->u3.cnt = n;
-    return Qnil;
-}
+static VALUE enum_take(VALUE obj, VALUE n);
 
 /*
  *  call-seq:
@@ -749,21 +726,9 @@ static VALUE
 enum_first(int argc, VALUE *argv, VALUE obj)
 {
     NODE *memo;
+    rb_check_arity(argc, 0, 1);
     if (argc > 0) {
-	VALUE ary = Qnil;
-	VALUE n;
-	long len = 0;
-
-	rb_scan_args(argc, argv, "01", &n);
-	len = NUM2LONG(n);
-	if (len == 0) return rb_ary_new2(0);
-	if (len < 0) {
-	    rb_raise(rb_eArgError, "negative length");
-	}
-	ary = rb_ary_new2(len);
-	memo = NEW_MEMO(ary, 0, len);
-	rb_block_call(obj, id_each, 0, 0, first_ary_i, (VALUE)memo);
-	return ary;
+	return enum_take(obj, argv[0]);
     }
     else {
 	memo = NEW_MEMO(Qnil, 0, 0);
@@ -976,7 +941,7 @@ static VALUE enum_##name##_func(VALUE result, NODE *memo); \
 static VALUE \
 name##_i(VALUE i, VALUE memo, int argc, VALUE *argv) \
 { \
-    return enum_##name##_func(enum_values_pack(argc, argv), RNODE(memo)); \
+    return enum_##name##_func(rb_enum_values_pack(argc, argv), RNODE(memo)); \
 } \
 \
 static VALUE \
@@ -1631,7 +1596,7 @@ member_i(VALUE iter, VALUE args, int argc, VALUE *argv)
 {
     NODE *memo = RNODE(args);
 
-    if (rb_equal(enum_values_pack(argc, argv), memo->u1.value)) {
+    if (rb_equal(rb_enum_values_pack(argc, argv), memo->u1.value)) {
 	memo->u2.value = Qtrue;
 	rb_iter_break();
     }
@@ -1665,7 +1630,7 @@ each_with_index_i(VALUE i, VALUE memo, int argc, VALUE *argv)
 {
     long n = RNODE(memo)->u3.cnt++;
 
-    return rb_yield_values(2, enum_values_pack(argc, argv), INT2NUM(n));
+    return rb_yield_values(2, rb_enum_values_pack(argc, argv), INT2NUM(n));
 }
 
 /*
@@ -1929,7 +1894,7 @@ zip_ary(VALUE val, NODE *memo, int argc, VALUE *argv)
     int i;
 
     tmp = rb_ary_new2(RARRAY_LEN(args) + 1);
-    rb_ary_store(tmp, 0, enum_values_pack(argc, argv));
+    rb_ary_store(tmp, 0, rb_enum_values_pack(argc, argv));
     for (i=0; i<RARRAY_LEN(args); i++) {
 	VALUE e = RARRAY_PTR(args)[i];
 
@@ -1970,7 +1935,7 @@ zip_i(VALUE val, NODE *memo, int argc, VALUE *argv)
     int i;
 
     tmp = rb_ary_new2(RARRAY_LEN(args) + 1);
-    rb_ary_store(tmp, 0, enum_values_pack(argc, argv));
+    rb_ary_store(tmp, 0, rb_enum_values_pack(argc, argv));
     for (i=0; i<RARRAY_LEN(args); i++) {
 	if (NIL_P(RARRAY_PTR(args)[i])) {
 	    rb_ary_push(tmp, Qnil);
@@ -1979,7 +1944,7 @@ zip_i(VALUE val, NODE *memo, int argc, VALUE *argv)
 	    VALUE v[2];
 
 	    v[1] = RARRAY_PTR(args)[i];
-	    rb_rescue2(call_next, (VALUE)v, call_stop, (VALUE)v, rb_eStopIteration, 0);
+	    rb_rescue2(call_next, (VALUE)v, call_stop, (VALUE)v, rb_eStopIteration, (VALUE)0);
 	    if (v[0] == Qundef) {
 		RARRAY_PTR(args)[i] = Qnil;
 		v[0] = Qnil;
@@ -2058,7 +2023,7 @@ static VALUE
 take_i(VALUE i, VALUE args, int argc, VALUE *argv)
 {
     NODE *memo = RNODE(args);
-    rb_ary_push(memo->u1.value, enum_values_pack(argc, argv));
+    rb_ary_push(memo->u1.value, rb_enum_values_pack(argc, argv));
     if (--memo->u3.cnt == 0) rb_iter_break();
     return Qnil;
 }
@@ -2086,7 +2051,7 @@ enum_take(VALUE obj, VALUE n)
     }
 
     if (len == 0) return rb_ary_new2(0);
-    result = rb_ary_new();
+    result = rb_ary_new2(len);
     memo = NEW_MEMO(result, 0, len);
     rb_block_call(obj, id_each, 0, 0, take_i, (VALUE)memo);
     return result;
@@ -2097,7 +2062,7 @@ static VALUE
 take_while_i(VALUE i, VALUE ary, int argc, VALUE *argv)
 {
     if (!RTEST(enum_yield(argc, argv))) rb_iter_break();
-    rb_ary_push(ary, enum_values_pack(argc, argv));
+    rb_ary_push(ary, rb_enum_values_pack(argc, argv));
     return Qnil;
 }
 
@@ -2132,7 +2097,7 @@ drop_i(VALUE i, VALUE args, int argc, VALUE *argv)
 {
     NODE *memo = RNODE(args);
     if (memo->u3.cnt == 0) {
-	rb_ary_push(memo->u1.value, enum_values_pack(argc, argv));
+	rb_ary_push(memo->u1.value, rb_enum_values_pack(argc, argv));
     }
     else {
 	memo->u3.cnt--;

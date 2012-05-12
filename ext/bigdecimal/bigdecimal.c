@@ -61,7 +61,7 @@ static ID id_eq;
 
 /* MACRO's to guard objects from GC by keeping them in stack */
 #define ENTER(n) volatile VALUE vStack[n];int iStack=0
-#define PUSH(x)  vStack[iStack++] = (unsigned long)(x);
+#define PUSH(x)  vStack[iStack++] = (VALUE)(x);
 #define SAVE(p)  PUSH(p->obj);
 #define GUARD_OBJ(p,y) {p=y;SAVE(p);}
 
@@ -971,6 +971,8 @@ BigDecimalCmp(VALUE self, VALUE r,char op)
     }
 
     rb_bug("Undefined operation in BigDecimalCmp()");
+
+    UNREACHABLE;
 }
 
 /* Returns True if the value is zero. */
@@ -2856,6 +2858,10 @@ Init_bigdecimal(void)
 {
     VALUE arg;
 
+    id_BigDecimal_exception_mode = rb_intern_const("BigDecimal.exception_mode");
+    id_BigDecimal_rounding_mode = rb_intern_const("BigDecimal.rounding_mode");
+    id_BigDecimal_precision_limit = rb_intern_const("BigDecimal.precision_limit");
+
     /* Initialize VP routines */
     VpInit(0UL);
 
@@ -3050,10 +3056,6 @@ Init_bigdecimal(void)
     rb_mBigMath = rb_define_module("BigMath");
     rb_define_singleton_method(rb_mBigMath, "exp", BigMath_s_exp, 2);
     rb_define_singleton_method(rb_mBigMath, "log", BigMath_s_log, 2);
-
-    id_BigDecimal_exception_mode = rb_intern_const("BigDecimal.exception_mode");
-    id_BigDecimal_rounding_mode = rb_intern_const("BigDecimal.rounding_mode");
-    id_BigDecimal_precision_limit = rb_intern_const("BigDecimal.precision_limit");
 
     id_up = rb_intern_const("up");
     id_down = rb_intern_const("down");

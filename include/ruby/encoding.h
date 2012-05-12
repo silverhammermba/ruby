@@ -89,6 +89,7 @@ void rb_enc_set_index(VALUE obj, int encindex);
 int rb_enc_find_index(const char *name);
 int rb_to_encoding_index(VALUE);
 rb_encoding* rb_to_encoding(VALUE);
+rb_encoding* rb_find_encoding(VALUE);
 rb_encoding* rb_enc_get(VALUE);
 rb_encoding* rb_enc_compatible(VALUE,VALUE);
 rb_encoding* rb_enc_check(VALUE,VALUE);
@@ -110,6 +111,8 @@ VALUE rb_external_str_new_with_enc(const char *ptr, long len, rb_encoding *);
 VALUE rb_str_export_to_enc(VALUE, rb_encoding *);
 VALUE rb_str_conv_enc(VALUE str, rb_encoding *from, rb_encoding *to);
 VALUE rb_str_conv_enc_opts(VALUE str, rb_encoding *from, rb_encoding *to, int ecflags, VALUE ecopts);
+
+PRINTF_ARGS(NORETURN(void rb_enc_raise(rb_encoding *, VALUE, const char*, ...)), 3, 4);
 
 /* index -> rb_encoding */
 rb_encoding* rb_enc_from_index(int idx);
@@ -217,6 +220,7 @@ char *rb_enc_path_last_separator(const char *,const char *,rb_encoding*);
 char *rb_enc_path_end(const char *,const char *,rb_encoding*);
 const char *ruby_enc_find_basename(const char *name, long *baselen, long *alllen, rb_encoding *enc);
 const char *ruby_enc_find_extname(const char *name, long *len, rb_encoding *enc);
+ID rb_check_id_cstr(const char *ptr, long len, rb_encoding *enc);
 
 RUBY_EXTERN VALUE rb_cEncoding;
 #define ENC_DUMMY_FLAG (1<<24)

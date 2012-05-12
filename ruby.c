@@ -1527,7 +1527,17 @@ load_file_internal(VALUE arg)
 	    rb_load_fail(fname_v, strerror(errno));
 	}
         rb_update_max_fd(fd);
-
+#if !defined DOSISH && !defined __CYGWIN__
+	{
+	    struct stat st;
+	    if (fstat(fd, &st) != 0)
+		rb_load_fail(fname_v, strerror(errno));
+	    if (S_ISDIR(st.st_mode)) {
+		errno = EISDIR;
+		rb_load_fail(fname_v, strerror(EISDIR));
+	    }
+	}
+#endif
 	f = rb_io_fdopen(fd, mode, fname);
     }
 
@@ -1746,8 +1756,9 @@ opt_W_getter(ID id, void *data)
 	return INT2FIX(1);
       case Qtrue:
 	return INT2FIX(2);
+      default:
+	return Qnil;
     }
-    return Qnil;		/* not reached */
 }
 
 void

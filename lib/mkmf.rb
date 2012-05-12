@@ -482,7 +482,7 @@ MSG
       end
     else
       try_do(src, cmd, *opts, &b)
-    end
+    end and File.executable?("conftest#{$EXEEXT}")
   end
 
   # Returns whether or not the +src+ can be compiled as a C source and linked
@@ -511,7 +511,8 @@ MSG
   # [+src+] a String which contains a C source
   # [+opt+] a String which contains compiler options
   def try_compile(src, opt="", *opts, &b)
-    with_werror(opt, *opts) {|_opt, *_opts| try_do(src, cc_command(_opt), *_opts, &b)}
+    with_werror(opt, *opts) {|_opt, *_opts| try_do(src, cc_command(_opt), *_opts, &b)} and
+      File.file?("conftest.#{$OBJEXT}")
   ensure
     MakeMakefile.rm_f "conftest*"
   end
@@ -526,7 +527,8 @@ MSG
   # [+src+] a String which contains a C source
   # [+opt+] a String which contains preprocessor options
   def try_cpp(src, opt="", *opts, &b)
-    try_do(src, cpp_command(CPPOUTFILE, opt), *opts, &b)
+    try_do(src, cpp_command(CPPOUTFILE, opt), *opts, &b) and
+      File.file?("conftest.i")
   ensure
     MakeMakefile.rm_f "conftest*"
   end
@@ -631,10 +633,14 @@ SRC
 int conftest_const = (int)(#{const});
 int main() {printf("%d\\n", conftest_const); return 0;}
 }
-      if try_link0(src, opt, &b)
-        xpopen("./conftest") do |f|
-          return Integer(f.gets)
-        end
+      begin
+	if try_link0(src, opt, &b)
+	  xpopen("./conftest") do |f|
+	    return Integer(f.gets)
+	  end
+	end
+      ensure
+	MakeMakefile.rm_f "conftest*"
       end
     end
     nil
@@ -1649,9 +1655,8 @@ SRC
       # default to package specific config command, as a last resort.
       get = proc {|opt| `#{pkgconfig} --#{opt}`.chomp}
     end
-    if get
+    if get and try_ldflags(ldflags = get['libs'])
       cflags = get['cflags']
-      ldflags = get['libs']
       libs = get['libs-only-l']
       ldflags = (Shellwords.shellwords(ldflags) - Shellwords.shellwords(libs)).quote.join(" ")
       $CFLAGS += " " << cflags
@@ -2238,6 +2243,7 @@ site-install-rb: install-rb
     $DLDFLAGS = with_config("dldflags", arg_config("DLDFLAGS", config["DLDFLAGS"])).dup
     $LIBEXT = config['LIBEXT'].dup
     $OBJEXT = config["OBJEXT"].dup
+    $EXEEXT = config["EXEEXT"].dup
     $LIBS = "#{config['LIBS']} #{config['DLDLIBS']}"
     $LIBRUBYARG = ""
     $LIBRUBYARG_STATIC = config['LIBRUBYARG_STATIC']
@@ -2345,7 +2351,7 @@ MESSAGE
   COMPILE_C = config_string('COMPILE_C') || '$(CC) $(INCFLAGS) $(CPPFLAGS) $(CFLAGS) $(COUTFLAG)$@ -c $<'
   COMPILE_CXX = config_string('COMPILE_CXX') || '$(CXX) $(INCFLAGS) $(CPPFLAGS) $(CXXFLAGS) $(COUTFLAG)$@ -c $<'
   TRY_LINK = config_string('TRY_LINK') ||
-    "$(CC) #{OUTFLAG}conftest $(INCFLAGS) $(CPPFLAGS) " \
+    "$(CC) #{OUTFLAG}conftest#{$EXEEXT} $(INCFLAGS) $(CPPFLAGS) " \
     "$(CFLAGS) $(src) $(LIBPATH) $(LDFLAGS) $(ARCH_FLAG) $(LOCAL_LIBS) $(LIBS)"
   LINK_SO = config_string('LINK_SO') ||
     if CONFIG["DLEXT"] == $OBJEXT

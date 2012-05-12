@@ -3584,6 +3584,15 @@ date_s_nth_kday(int argc, VALUE *argv, VALUE klass)
 
 #if !defined(HAVE_GMTIME_R)
 static struct tm*
+gmtime_r(const time_t *t, struct tm *tm)
+{
+    auto struct tm *tmp = gmtime(t);
+    if (tmp)
+	*tm = *tmp;
+    return tmp;
+}
+
+static struct tm*
 localtime_r(const time_t *t, struct tm *tm)
 {
     auto struct tm *tmp = localtime(t);
@@ -3623,6 +3632,7 @@ date_s_today(int argc, VALUE *argv, VALUE klass)
 
     if (time(&t) == -1)
 	rb_sys_fail("time");
+    tzset();
     if (!localtime_r(&t, &tm))
 	rb_sys_fail("localtime");
 
@@ -4195,8 +4205,9 @@ date_s__strptime_internal(int argc, VALUE *argv, VALUE klass,
  *    Date._strptime(string[, format='%F'])  ->  hash
  *
  * Parses the given representation of date and time with the given
- * template, and returns a hash of parsed elements.
- *
+ * template, and returns a hash of parsed elements.  _strptime does
+ * not support specification of flags and width unlike strftime.
+ * 
  * For example:
  *
  *    Date._strptime('2001-02-03', '%Y-%m-%d')
@@ -4215,7 +4226,8 @@ date_s__strptime(int argc, VALUE *argv, VALUE klass)
  *    Date.strptime([string='-4712-01-01'[, format='%F'[, start=ITALY]]])  ->  date
  *
  * Parses the given representation of date and time with the given
- * template, and creates a date object.
+ * template, and creates a date object.  strptime does not support
+ * specification of flags and width unlike strftime.
  *
  * For example:
  *
@@ -7838,6 +7850,7 @@ datetime_s_now(int argc, VALUE *argv, VALUE klass)
 	rb_sys_fail("gettimeofday");
     sec = tv.tv_sec;
 #endif
+    tzset();
     if (!localtime_r(&sec, &tm))
 	rb_sys_fail("localtime");
 
@@ -7851,8 +7864,37 @@ datetime_s_now(int argc, VALUE *argv, VALUE klass)
 	s = 59;
 #ifdef HAVE_STRUCT_TM_TM_GMTOFF
     of = tm.tm_gmtoff;
+#elif defined(HAVE_VAR_TIMEZONE)
+#ifdef HAVE_VAR_ALTZONE
+    of = (long)((tm.tm_isdst > 0) ? altzone : timezone);
 #else
-    of = -timezone;
+    of = (long)-timezone;
+    if (tm.tm_isdst) {
+	time_t sec2;
+
+	tm.tm_isdst = 0;
+	sec2 = mktime(&tm);
+	of += (long)difftime(sec2, sec);
+    }
+#endif
+#elif defined(HAVE_TIMEGM)
+    {
+	time_t sec2;
+
+	sec2 = timegm(&tm);
+	of = (long)difftime(sec2, sec);
+    }
+#else
+    {
+	struct tm tm2;
+	time_t sec2;
+
+	if (!gmtime_r(&sec, &tm2))
+	    rb_sys_fail("gmtime");
+	tm2.tm_isdst = tm.tm_isdst;
+	sec2 = mktime(&tm2);
+	of = (long)difftime(sec, sec2);
+    }
 #endif
 #ifdef HAVE_CLOCK_GETTIME
     sf = ts.tv_nsec;
@@ -7973,7 +8015,8 @@ dt_new_by_frags(VALUE klass, VALUE hash, VALUE sg)
  *    DateTime._strptime(string[, format='%FT%T%z'])  ->  hash
  *
  * Parses the given representation of date and time with the given
- * template, and returns a hash of parsed elements.
+ * template, and returns a hash of parsed elements.  _strptime does
+ * not support specification of flags and width unlike strftime.
  *
  *  See also strptime(3) and strftime.
  */
@@ -7988,7 +8031,8 @@ datetime_s__strptime(int argc, VALUE *argv, VALUE klass)
  *    DateTime.strptime([string='-4712-01-01T00:00:00+00:00'[, format='%FT%T%z'[ ,start=ITALY]]])  ->  datetime
  *
  * Parses the given representation of date and time with the given
- * template, and creates a date object.
+ * template, and creates a date object.  strptime does not support
+ * specification of flags and width unlike strftime.
  *
  * For example:
  *

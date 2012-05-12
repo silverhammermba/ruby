@@ -376,7 +376,7 @@ typedef struct RNode {
 #define NEW_RESBODY(a,ex,n) NEW_NODE(NODE_RESBODY,n,ex,a)
 #define NEW_ENSURE(b,en) NEW_NODE(NODE_ENSURE,b,0,en)
 #define NEW_RETURN(s) NEW_NODE(NODE_RETURN,s,0,0)
-#define NEW_YIELD(a,s) NEW_NODE(NODE_YIELD,a,0,s)
+#define NEW_YIELD(a) NEW_NODE(NODE_YIELD,a,0,0)
 #define NEW_LIST(a)  NEW_ARRAY(a)
 #define NEW_ARRAY(a) NEW_NODE(NODE_ARRAY,a,1,0)
 #define NEW_ZARRAY() NEW_NODE(NODE_ZARRAY,0,0,0)
@@ -451,6 +451,14 @@ typedef struct RNode {
 #define NEW_ATTRASGN(r,m,a) NEW_NODE(NODE_ATTRASGN,r,m,a)
 #define NEW_PRELUDE(p,b) NEW_NODE(NODE_PRELUDE,p,b,0)
 #define NEW_OPTBLOCK(a) NEW_NODE(NODE_OPTBLOCK,a,0,0)
+#define NEW_MEMO(a,b,c) NEW_NODE(NODE_MEMO,a,b,c)
+
+#define roomof(x, y) ((sizeof(x) + sizeof(y) - 1) / sizeof(y))
+#define MEMO_FOR(type, value) ((type *)RARRAY_PTR(value))
+#define NEW_MEMO_FOR(type, value) \
+    (rb_ary_set_len(((value) = rb_ary_tmp_new(roomof(type, VALUE))), \
+		    roomof(type, VALUE)), \
+     MEMO_FOR(type, value))
 
 #if defined __GNUC__ && __GNUC__ >= 4
 #pragma GCC visibility push(default)

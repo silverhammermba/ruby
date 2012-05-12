@@ -21,9 +21,9 @@
 
 require 'net/protocol'
 require 'uri'
-autoload :OpenSSL, 'openssl'
 
 module Net   #:nodoc:
+  autoload :OpenSSL, 'openssl'
 
   # :stopdoc:
   class HTTPBadResponse < StandardError; end
@@ -624,13 +624,13 @@ module Net   #:nodoc:
     # Number of seconds to wait for the connection to open. Any number
     # may be used, including Floats for fractional seconds. If the HTTP
     # object cannot open a connection in this many seconds, it raises a
-    # TimeoutError exception.
+    # Net::OpenTimeout exception.
     attr_accessor :open_timeout
 
     # Number of seconds to wait for one block to be read (via one read(2)
     # call). Any number may be used, including Floats for fractional
     # seconds. If the HTTP object cannot read data in this many seconds,
-    # it raises a TimeoutError exception.
+    # it raises a Net::ReadTimeout exception.
     attr_reader :read_timeout
 
     # Setter for the read_timeout attribute.
@@ -1357,11 +1357,11 @@ module Net   #:nodoc:
           }
           res
         }
-      rescue IOError, EOFError,
+      rescue Net::OpenTimeout
+        raise
+      rescue Net::ReadTimeout, IOError, EOFError,
              Errno::ECONNRESET, Errno::ECONNABORTED, Errno::EPIPE,
              OpenSSL::SSL::SSLError, Timeout::Error => exception
-        raise if Net::OpenTimeout === exception
-
         if count == 0 && IDEMPOTENT_METHODS_.include?(req.method)
           count += 1
           @socket.close if @socket and not @socket.closed?
@@ -1987,6 +1987,25 @@ module Net   #:nodoc:
 
     private
 
+    class Chunker #:nodoc:
+      def initialize(sock)
+        @sock = sock
+        @prev = nil
+      end
+
+      def write(buf)
+        # avoid memcpy() of buf, buf can huge and eat memory bandwidth
+        @sock.write("#{buf.bytesize.to_s(16)}\r\n")
+        rv = @sock.write(buf)
+        @sock.write("\r\n")
+        rv
+      end
+
+      def finish
+        @sock.write("0\r\n\r\n")
+      end
+    end
+
     def send_request_with_body(sock, ver, path, body)
       self.content_length = body.bytesize
       delete 'Transfer-Encoding'
@@ -2005,14 +2024,13 @@ module Net   #:nodoc:
       write_header sock, ver, path
       wait_for_continue sock, ver if sock.continue_timeout
       if chunked?
-        while s = f.read(1024)
-          sock.write(sprintf("%x\r\n", s.length) << s << "\r\n")
-        end
-        sock.write "0\r\n\r\n"
+        chunker = Chunker.new(sock)
+        IO.copy_stream(f, chunker)
+        chunker.finish
       else
-        while s = f.read(1024)
-          sock.write s
-        end
+        # copy_stream can sendfile() to sock.io unless we use SSL.
+        # If sock.io is an SSLSocket, copy_stream will hit SSL_write()
+        IO.copy_stream(f, sock.io)
       end
     end
 

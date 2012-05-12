@@ -319,7 +319,8 @@ rb_load_internal(VALUE fname, int wrap)
     th->top_self = self;
     th->top_wrapper = wrapper;
 
-    if (!loaded) {
+    if (!loaded && !FIXNUM_P(GET_THREAD()->errinfo)) {
+	/* an error on loading don't include INT2FIX(TAG_FATAL) see r35625 */
 	rb_exc_raise(GET_THREAD()->errinfo);
     }
     if (state) {
@@ -417,14 +418,15 @@ load_lock(const char *ftptr)
 }
 
 static int
-release_barrier(st_data_t key, st_data_t *value, st_data_t done)
+release_barrier(st_data_t *key, st_data_t *value, st_data_t done, int existing)
 {
     VALUE barrier = (VALUE)*value;
+    if (!existing) return ST_STOP;
     if (done ? rb_barrier_destroy(barrier) : rb_barrier_release(barrier)) {
 	/* still in-use */
 	return ST_CONTINUE;
     }
-    xfree((char *)key);
+    xfree((char *)*key);
     return ST_DELETE;
 }
 
@@ -681,11 +683,12 @@ init_ext_call(VALUE arg)
 RUBY_FUNC_EXPORTED void
 ruby_init_ext(const char *name, void (*init)(void))
 {
-    if (load_lock(name)) {
+    char* const lock_key = load_lock(name);
+    if (lock_key) {
 	rb_vm_call_cfunc(rb_vm_top_self(), init_ext_call, (VALUE)init,
 			 0, rb_str_new2(name));
 	rb_provide(name);
-	load_unlock(name, 1);
+	load_unlock(lock_key, 1);
     }
 }
 

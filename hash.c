@@ -131,7 +131,7 @@ st_foreach_safe(st_table *table, int (*func)(ANYARGS), st_data_t a)
     arg.tbl = table;
     arg.func = (st_foreach_func *)func;
     arg.arg = a;
-    if (st_foreach_check(table, foreach_safe_i, (st_data_t)&arg, Qundef)) {
+    if (st_foreach_check(table, foreach_safe_i, (st_data_t)&arg, 0)) {
 	rb_raise(rb_eRuntimeError, "hash modified during iteration");
     }
 }
@@ -145,22 +145,21 @@ struct hash_foreach_arg {
 };
 
 static int
-hash_foreach_iter(st_data_t key, st_data_t value, st_data_t argp, int err)
+hash_foreach_iter(st_data_t key, st_data_t value, st_data_t argp)
 {
     struct hash_foreach_arg *arg = (struct hash_foreach_arg *)argp;
     int status;
     st_table *tbl;
 
     tbl = RHASH(arg->hash)->ntbl;
-    if ((VALUE)key == Qundef) return ST_CONTINUE;
     status = (*arg->func)((VALUE)key, (VALUE)value, arg->arg);
     if (RHASH(arg->hash)->ntbl != tbl) {
 	rb_raise(rb_eRuntimeError, "rehash occurred during iteration");
     }
     switch (status) {
       case ST_DELETE:
-	st_delete_safe(tbl, &key, 0, Qundef);
 	FL_SET(arg->hash, HASH_DELETED);
+	return ST_DELETE;
       case ST_CONTINUE:
 	break;
       case ST_STOP:
@@ -172,11 +171,9 @@ hash_foreach_iter(st_data_t key, st_data_t value, st_data_t argp, int err)
 static VALUE
 hash_foreach_ensure(VALUE hash)
 {
-    RHASH(hash)->iter_lev--;
-
-    if (RHASH(hash)->iter_lev == 0) {
+    if (--RHASH_ITER_LEV(hash) == 0) {
 	if (FL_TEST(hash, HASH_DELETED)) {
-	    st_cleanup_safe(RHASH(hash)->ntbl, Qundef);
+	    st_cleanup_safe(RHASH(hash)->ntbl, (st_data_t)Qundef);
 	    FL_UNSET(hash, HASH_DELETED);
 	}
     }
@@ -184,9 +181,10 @@ hash_foreach_ensure(VALUE hash)
 }
 
 static VALUE
-hash_foreach_call(struct hash_foreach_arg *arg)
+hash_foreach_call(VALUE arg)
 {
-    if (st_foreach_check(RHASH(arg->hash)->ntbl, hash_foreach_iter, (st_data_t)arg, Qundef)) {
+    VALUE hash = ((struct hash_foreach_arg *)arg)->hash;
+    if (st_foreach_check(RHASH(hash)->ntbl, hash_foreach_iter, (st_data_t)arg, (st_data_t)Qundef)) {
 	rb_raise(rb_eRuntimeError, "hash modified during iteration");
     }
     return Qnil;
@@ -199,7 +197,7 @@ rb_hash_foreach(VALUE hash, int (*func)(ANYARGS), VALUE farg)
 
     if (!RHASH(hash)->ntbl)
         return;
-    RHASH(hash)->iter_lev++;
+    RHASH_ITER_LEV(hash)++;
     arg.hash = hash;
     arg.func = (rb_foreach_func *)func;
     arg.arg  = farg;
@@ -262,13 +260,29 @@ rb_hash_modify(VALUE hash)
     rb_hash_tbl(hash);
 }
 
+NORETURN(static void no_new_key(void));
 static void
-hash_update(VALUE hash, VALUE key)
+no_new_key(void)
 {
-    if (RHASH(hash)->iter_lev > 0 && !st_lookup(RHASH(hash)->ntbl, key, 0)) {
-	rb_raise(rb_eRuntimeError, "can't add a new key into hash during iteration");
-    }
+    rb_raise(rb_eRuntimeError, "can't add a new key into hash during iteration");
 }
+
+#define NOINSERT_UPDATE_CALLBACK(func) \
+int \
+func##_noinsert(st_data_t *key, st_data_t *val, st_data_t arg, int existing) \
+{ \
+    if (!existing) no_new_key(); \
+    return func(key, val, arg, existing); \
+}
+
+#define UPDATE_CALLBACK(iter_lev, func) ((iter_lev) > 0 ? func##_noinsert : func)
+
+#define RHASH_UPDATE_ITER(hash, iter_lev, key, func, arg) \
+    st_update(RHASH(hash)->ntbl, (st_data_t)(key),	  \
+	      UPDATE_CALLBACK((iter_lev), func),	  \
+	      (st_data_t)(arg))
+#define RHASH_UPDATE(hash, key, func, arg) \
+    RHASH_UPDATE_ITER(hash, RHASH_ITER_LEV(hash), key, func, arg)
 
 static void
 default_proc_arity_check(VALUE proc)
@@ -323,9 +337,7 @@ rb_hash_initialize(int argc, VALUE *argv, VALUE hash)
 
     rb_hash_modify(hash);
     if (rb_block_given_p()) {
-	if (argc > 0) {
-	    rb_raise(rb_eArgError, "wrong number of arguments");
-	}
+	rb_check_arity(argc, 0, 0);
 	ifnone = rb_block_proc();
 	default_proc_arity_check(ifnone);
 	RHASH_IFNONE(hash) = ifnone;
@@ -439,7 +451,7 @@ rb_hash_rehash_i(VALUE key, VALUE value, VALUE arg)
 {
     st_table *tbl = (st_table *)arg;
 
-    if (key != Qundef) st_insert(tbl, key, value);
+    st_insert(tbl, (st_data_t)key, (st_data_t)value);
     return ST_CONTINUE;
 }
 
@@ -468,7 +480,7 @@ rb_hash_rehash(VALUE hash)
 {
     st_table *tbl;
 
-    if (RHASH(hash)->iter_lev > 0) {
+    if (RHASH_ITER_LEV(hash) > 0) {
 	rb_raise(rb_eRuntimeError, "rehash during iteration");
     }
     rb_hash_modify_check(hash);
@@ -480,6 +492,20 @@ rb_hash_rehash(VALUE hash)
     RHASH(hash)->ntbl = tbl;
 
     return hash;
+}
+
+static VALUE
+hash_default_value(VALUE hash, VALUE key)
+{
+    if (rb_method_basic_definition_p(CLASS_OF(hash), id_default)) {
+	VALUE ifnone = RHASH_IFNONE(hash);
+	if (!FL_TEST(hash, HASH_PROC_DEFAULT)) return ifnone;
+	if (key == Qundef) return Qnil;
+	return rb_funcall(ifnone, id_yield, 2, hash, key);
+    }
+    else {
+	return rb_funcall(hash, id_default, 1, key);
+    }
 }
 
 /*
@@ -502,13 +528,7 @@ rb_hash_aref(VALUE hash, VALUE key)
     st_data_t val;
 
     if (!RHASH(hash)->ntbl || !st_lookup(RHASH(hash)->ntbl, key, &val)) {
-	if (!FL_TEST(hash, HASH_PROC_DEFAULT) &&
-	    rb_method_basic_definition_p(CLASS_OF(hash), id_default)) {
-	    return RHASH_IFNONE(hash);
-	}
-	else {
-	    return rb_funcall(hash, id_default, 1, key);
-	}
+	return hash_default_value(hash, key);
     }
     return (VALUE)val;
 }
@@ -651,7 +671,7 @@ rb_hash_default(int argc, VALUE *argv, VALUE hash)
 static VALUE
 rb_hash_set_default(VALUE hash, VALUE ifnone)
 {
-    rb_hash_modify(hash);
+    rb_hash_modify_check(hash);
     RHASH_IFNONE(hash) = ifnone;
     FL_UNSET(hash, HASH_PROC_DEFAULT);
     return ifnone;
@@ -683,9 +703,9 @@ rb_hash_default_proc(VALUE hash)
 
 /*
  *  call-seq:
- *     hsh.default_proc = proc_obj     -> proc_obj
+ *     hsh.default_proc = proc_obj or nil
  *
- *  Sets the default proc to be executed on each key lookup.
+ *  Sets the default proc to be executed on each failed key lookup.
  *
  *     h.default_proc = proc do |hash, key|
  *       hash[key] = key + key
@@ -699,7 +719,12 @@ rb_hash_set_default_proc(VALUE hash, VALUE proc)
 {
     VALUE b;
 
-    rb_hash_modify(hash);
+    rb_hash_modify_check(hash);
+    if (NIL_P(proc)) {
+	FL_UNSET(hash, HASH_PROC_DEFAULT);
+	RHASH_IFNONE(hash) = proc;
+	return proc;
+    }
     b = rb_check_convert_type(proc, T_DATA, "Proc", "to_proc");
     if (NIL_P(b) || !rb_obj_is_proc(b)) {
 	rb_raise(rb_eTypeError,
@@ -767,8 +792,8 @@ rb_hash_delete_key(VALUE hash, VALUE key)
 
     if (!RHASH(hash)->ntbl)
         return Qundef;
-    if (RHASH(hash)->iter_lev > 0) {
-	if (st_delete_safe(RHASH(hash)->ntbl, &ktmp, &val, Qundef)) {
+    if (RHASH_ITER_LEV(hash) > 0) {
+	if (st_delete_safe(RHASH(hash)->ntbl, &ktmp, &val, (st_data_t)Qundef)) {
 	    FL_SET(hash, HASH_DELETED);
 	    return (VALUE)val;
 	}
@@ -801,7 +826,7 @@ rb_hash_delete(VALUE hash, VALUE key)
 {
     VALUE val;
 
-    rb_hash_modify(hash);
+    rb_hash_modify_check(hash);
     val = rb_hash_delete_key(hash, key);
     if (val != Qundef) return val;
     if (rb_block_given_p()) {
@@ -820,7 +845,6 @@ shift_i(VALUE key, VALUE value, VALUE arg)
 {
     struct shift_var *var = (struct shift_var *)arg;
 
-    if (key == Qundef) return ST_CONTINUE;
     if (var->key != Qundef) return ST_STOP;
     var->key = key;
     var->val = value;
@@ -832,7 +856,6 @@ shift_i_safe(VALUE key, VALUE value, VALUE arg)
 {
     struct shift_var *var = (struct shift_var *)arg;
 
-    if (key == Qundef) return ST_CONTINUE;
     var->key = key;
     var->val = value;
     return ST_STOP;
@@ -856,29 +879,25 @@ rb_hash_shift(VALUE hash)
 {
     struct shift_var var;
 
-    rb_hash_modify(hash);
-    var.key = Qundef;
-    rb_hash_foreach(hash, RHASH(hash)->iter_lev > 0 ? shift_i_safe : shift_i,
-		    (VALUE)&var);
+    rb_hash_modify_check(hash);
+    if (RHASH(hash)->ntbl) {
+	var.key = Qundef;
+	rb_hash_foreach(hash, RHASH_ITER_LEV(hash) > 0 ? shift_i_safe : shift_i,
+			(VALUE)&var);
 
-    if (var.key != Qundef) {
-	if (RHASH(hash)->iter_lev > 0) {
-	    rb_hash_delete_key(hash, var.key);
+	if (var.key != Qundef) {
+	    if (RHASH_ITER_LEV(hash) > 0) {
+		rb_hash_delete_key(hash, var.key);
+	    }
+	    return rb_assoc_new(var.key, var.val);
 	}
-	return rb_assoc_new(var.key, var.val);
     }
-    else if (FL_TEST(hash, HASH_PROC_DEFAULT)) {
-	return rb_funcall(RHASH_IFNONE(hash), id_yield, 2, hash, Qnil);
-    }
-    else {
-	return RHASH_IFNONE(hash);
-    }
+    return hash_default_value(hash, Qnil);
 }
 
 static int
 delete_if_i(VALUE key, VALUE value, VALUE hash)
 {
-    if (key == Qundef) return ST_CONTINUE;
     if (RTEST(rb_yield_values(2, key, value))) {
 	rb_hash_delete_key(hash, key);
     }
@@ -904,8 +923,9 @@ VALUE
 rb_hash_delete_if(VALUE hash)
 {
     RETURN_ENUMERATOR(hash, 0, 0);
-    rb_hash_modify(hash);
-    rb_hash_foreach(hash, delete_if_i, hash);
+    rb_hash_modify_check(hash);
+    if (RHASH(hash)->ntbl)
+	rb_hash_foreach(hash, delete_if_i, hash);
     return hash;
 }
 
@@ -976,7 +996,6 @@ rb_hash_values_at(int argc, VALUE *argv, VALUE hash)
 static int
 select_i(VALUE key, VALUE value, VALUE result)
 {
-    if (key == Qundef) return ST_CONTINUE;
     if (RTEST(rb_yield_values(2, key, value)))
 	rb_hash_aset(result, key, value);
     return ST_CONTINUE;
@@ -1010,7 +1029,6 @@ rb_hash_select(VALUE hash)
 static int
 keep_if_i(VALUE key, VALUE value, VALUE hash)
 {
-    if (key == Qundef) return ST_CONTINUE;
     if (!RTEST(rb_yield_values(2, key, value))) {
 	return ST_DELETE;
     }
@@ -1032,7 +1050,7 @@ rb_hash_select_bang(VALUE hash)
     st_index_t n;
 
     RETURN_ENUMERATOR(hash, 0, 0);
-    rb_hash_modify(hash);
+    rb_hash_modify_check(hash);
     if (!RHASH(hash)->ntbl)
         return Qnil;
     n = RHASH(hash)->ntbl->num_entries;
@@ -1057,8 +1075,9 @@ VALUE
 rb_hash_keep_if(VALUE hash)
 {
     RETURN_ENUMERATOR(hash, 0, 0);
-    rb_hash_modify(hash);
-    rb_hash_foreach(hash, keep_if_i, hash);
+    rb_hash_modify_check(hash);
+    if (RHASH(hash)->ntbl)
+	rb_hash_foreach(hash, keep_if_i, hash);
     return hash;
 }
 
@@ -1086,7 +1105,7 @@ rb_hash_clear(VALUE hash)
     if (!RHASH(hash)->ntbl)
         return hash;
     if (RHASH(hash)->ntbl->num_entries > 0) {
-	if (RHASH(hash)->iter_lev > 0)
+	if (RHASH_ITER_LEV(hash) > 0)
 	    rb_hash_foreach(hash, clear_i, 0);
 	else
 	    st_clear(RHASH(hash)->ntbl);
@@ -1095,11 +1114,22 @@ rb_hash_clear(VALUE hash)
     return hash;
 }
 
-static st_data_t
-copy_str_key(st_data_t str)
+static int
+hash_aset(st_data_t *key, st_data_t *val, st_data_t arg, int existing)
 {
-    return (st_data_t)rb_str_new4((VALUE)str);
+    *val = arg;
+    return ST_CONTINUE;
 }
+
+static int
+hash_aset_str(st_data_t *key, st_data_t *val, st_data_t arg, int existing)
+{
+    *key = (st_data_t)rb_str_new_frozen((VALUE)*key);
+    return hash_aset(key, val, arg, existing);
+}
+
+static NOINSERT_UPDATE_CALLBACK(hash_aset)
+static NOINSERT_UPDATE_CALLBACK(hash_aset_str)
 
 /*
  *  call-seq:
@@ -1122,13 +1152,19 @@ copy_str_key(st_data_t str)
 VALUE
 rb_hash_aset(VALUE hash, VALUE key, VALUE val)
 {
+    int iter_lev = RHASH_ITER_LEV(hash);
+    st_table *tbl = RHASH(hash)->ntbl;
+
     rb_hash_modify(hash);
-    hash_update(hash, key);
-    if (RHASH(hash)->ntbl->type == &identhash || rb_obj_class(key) != rb_cString) {
-	st_insert(RHASH(hash)->ntbl, key, val);
+    if (!tbl) {
+	if (iter_lev > 0) no_new_key();
+	tbl = RHASH_TBL(hash);
+    }
+    if (tbl->type == &identhash || rb_obj_class(key) != rb_cString) {
+	RHASH_UPDATE_ITER(hash, iter_lev, key, hash_aset, val);
     }
     else {
-	st_insert2(RHASH(hash)->ntbl, key, val, copy_str_key);
+	RHASH_UPDATE_ITER(hash, iter_lev, key, hash_aset_str, val);
     }
     return val;
 }
@@ -1136,9 +1172,7 @@ rb_hash_aset(VALUE hash, VALUE key, VALUE val)
 static int
 replace_i(VALUE key, VALUE val, VALUE hash)
 {
-    if (key != Qundef) {
-	rb_hash_aset(hash, key, val);
-    }
+    rb_hash_aset(hash, key, val);
 
     return ST_CONTINUE;
 }
@@ -1219,7 +1253,6 @@ rb_hash_empty_p(VALUE hash)
 static int
 each_value_i(VALUE key, VALUE value)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_yield(value);
     return ST_CONTINUE;
 }
@@ -1254,7 +1287,6 @@ rb_hash_each_value(VALUE hash)
 static int
 each_key_i(VALUE key, VALUE value)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_yield(key);
     return ST_CONTINUE;
 }
@@ -1288,7 +1320,6 @@ rb_hash_each_key(VALUE hash)
 static int
 each_pair_i(VALUE key, VALUE value)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_yield(rb_assoc_new(key, value));
     return ST_CONTINUE;
 }
@@ -1326,7 +1357,6 @@ rb_hash_each_pair(VALUE hash)
 static int
 to_a_i(VALUE key, VALUE value, VALUE ary)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_ary_push(ary, rb_assoc_new(key, value));
     return ST_CONTINUE;
 }
@@ -1359,17 +1389,16 @@ inspect_i(VALUE key, VALUE value, VALUE str)
 {
     VALUE str2;
 
-    if (key == Qundef) return ST_CONTINUE;
     str2 = rb_inspect(key);
     if (RSTRING_LEN(str) > 1) {
-	rb_str_cat2(str, ", ");
+	rb_str_buf_cat_ascii(str, ", ");
     }
     else {
 	rb_enc_copy(str, str2);
     }
     rb_str_buf_append(str, str2);
     OBJ_INFECT(str, str2);
-    rb_str_buf_cat2(str, "=>");
+    rb_str_buf_cat_ascii(str, "=>");
     str2 = rb_inspect(value);
     rb_str_buf_append(str, str2);
     OBJ_INFECT(str, str2);
@@ -1423,10 +1452,33 @@ rb_hash_to_hash(VALUE hash)
     return hash;
 }
 
+/*
+ *  call-seq:
+ *     hsh.to_h     -> hsh or new_hash
+ *
+ *  Returns +self+. If called on a subclass of Hash, converts
+ *  the receiver to a Hash object.
+ */
+
+static VALUE
+rb_hash_to_h(VALUE hash)
+{
+    if (rb_obj_class(hash) != rb_cHash) {
+	VALUE ret = rb_hash_new();
+	if (!RHASH_EMPTY_P(hash))
+	    RHASH(ret)->ntbl = st_copy(RHASH(hash)->ntbl);
+	if (FL_TEST(hash, HASH_PROC_DEFAULT)) {
+	    FL_SET(ret, HASH_PROC_DEFAULT);
+	}
+	RHASH_IFNONE(ret) = RHASH_IFNONE(hash);
+	return ret;
+    }
+    return hash;
+}
+
 static int
 keys_i(VALUE key, VALUE value, VALUE ary)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_ary_push(ary, key);
     return ST_CONTINUE;
 }
@@ -1457,7 +1509,6 @@ rb_hash_keys(VALUE hash)
 static int
 values_i(VALUE key, VALUE value, VALUE ary)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_ary_push(ary, value);
     return ST_CONTINUE;
 }
@@ -1516,7 +1567,6 @@ rb_hash_search_value(VALUE key, VALUE value, VALUE arg)
 {
     VALUE *data = (VALUE *)arg;
 
-    if (key == Qundef) return ST_CONTINUE;
     if (rb_equal(value, data[1])) {
 	data[0] = Qtrue;
 	return ST_STOP;
@@ -1560,7 +1610,6 @@ eql_i(VALUE key, VALUE val1, VALUE arg)
     struct equal_data *data = (struct equal_data *)arg;
     st_data_t val2;
 
-    if (key == Qundef) return ST_CONTINUE;
     if (!st_lookup(data->tbl, key, &val2)) {
 	data->result = Qfalse;
 	return ST_STOP;
@@ -1662,7 +1711,6 @@ hash_i(VALUE key, VALUE val, VALUE arg)
     st_index_t *hval = (st_index_t *)arg;
     st_index_t hdata[2];
 
-    if (key == Qundef) return ST_CONTINUE;
     hdata[0] = rb_hash(key);
     hdata[1] = rb_hash(val);
     *hval ^= st_hash(hdata, sizeof(hdata), 0);
@@ -1703,7 +1751,6 @@ rb_hash_hash(VALUE hash)
 static int
 rb_hash_invert_i(VALUE key, VALUE value, VALUE hash)
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_hash_aset(hash, value, key);
     return ST_CONTINUE;
 }
@@ -1730,23 +1777,38 @@ rb_hash_invert(VALUE hash)
 }
 
 static int
+rb_hash_update_callback(st_data_t *key, st_data_t *value, st_data_t arg, int existing)
+{
+    *value = arg;
+    return ST_CONTINUE;
+}
+
+static NOINSERT_UPDATE_CALLBACK(rb_hash_update_callback)
+
+static int
 rb_hash_update_i(VALUE key, VALUE value, VALUE hash)
 {
-    if (key == Qundef) return ST_CONTINUE;
-    hash_update(hash, key);
-    st_insert(RHASH(hash)->ntbl, key, value);
+    RHASH_UPDATE(hash, key, rb_hash_update_callback, value);
     return ST_CONTINUE;
 }
 
 static int
+rb_hash_update_block_callback(st_data_t *key, st_data_t *value, st_data_t arg, int existing)
+{
+    VALUE newvalue = (VALUE)arg;
+    if (existing) {
+	newvalue = rb_yield_values(3, (VALUE)*key, (VALUE)*value, newvalue);
+    }
+    *value = (st_data_t)newvalue;
+    return ST_CONTINUE;
+}
+
+static NOINSERT_UPDATE_CALLBACK(rb_hash_update_block_callback)
+
+static int
 rb_hash_update_block_i(VALUE key, VALUE value, VALUE hash)
 {
-    if (key == Qundef) return ST_CONTINUE;
-    if (rb_hash_has_key(hash, key)) {
-	value = rb_yield_values(3, key, rb_hash_aref(hash, key), value);
-    }
-    hash_update(hash, key);
-    st_insert(RHASH(hash)->ntbl, key, value);
+    RHASH_UPDATE(hash, key, rb_hash_update_block_callback, value);
     return ST_CONTINUE;
 }
 
@@ -1789,8 +1851,23 @@ rb_hash_update(VALUE hash1, VALUE hash2)
 
 struct update_arg {
     VALUE hash;
+    VALUE value;
     rb_hash_update_func *func;
 };
+
+static int
+rb_hash_update_func_callback(st_data_t *key, st_data_t *value, st_data_t arg0, int existing)
+{
+    struct update_arg *arg = (struct update_arg *)arg0;
+    VALUE newvalue = arg->value;
+    if (existing) {
+	newvalue = (*arg->func)((VALUE)*key, (VALUE)*value, newvalue);
+    }
+    *value = (st_data_t)newvalue;
+    return ST_CONTINUE;
+}
+
+static NOINSERT_UPDATE_CALLBACK(rb_hash_update_func_callback)
 
 static int
 rb_hash_update_func_i(VALUE key, VALUE value, VALUE arg0)
@@ -1798,12 +1875,8 @@ rb_hash_update_func_i(VALUE key, VALUE value, VALUE arg0)
     struct update_arg *arg = (struct update_arg *)arg0;
     VALUE hash = arg->hash;
 
-    if (key == Qundef) return ST_CONTINUE;
-    if (rb_hash_has_key(hash, key)) {
-	value = (*arg->func)(key, rb_hash_aref(hash, key), value);
-    }
-    hash_update(hash, key);
-    st_insert(RHASH(hash)->ntbl, key, value);
+    arg->value = value;
+    RHASH_UPDATE(hash, key, rb_hash_update_func_callback, arg);
     return ST_CONTINUE;
 }
 
@@ -1855,7 +1928,6 @@ assoc_i(VALUE key, VALUE val, VALUE arg)
 {
     VALUE *args = (VALUE *)arg;
 
-    if (key == Qundef) return ST_CONTINUE;
     if (RTEST(rb_equal(args[0], key))) {
 	args[1] = rb_assoc_new(key, val);
 	return ST_STOP;
@@ -1893,7 +1965,6 @@ rassoc_i(VALUE key, VALUE val, VALUE arg)
 {
     VALUE *args = (VALUE *)arg;
 
-    if (key == Qundef) return ST_CONTINUE;
     if (RTEST(rb_equal(args[0], val))) {
 	args[1] = rb_assoc_new(key, val);
 	return ST_STOP;
@@ -2010,6 +2081,8 @@ static char **origenviron;
 static char **my_environ;
 #undef environ
 #define environ my_environ
+#undef getenv
+#define getenv(n) rb_w32_ugetenv(n)
 #elif defined(__APPLE__)
 #undef environ
 #define environ (*_NSGetEnviron())
@@ -2031,7 +2104,11 @@ extern char **environ;
 static VALUE
 env_str_new(const char *ptr, long len)
 {
+#ifdef _WIN32
+    VALUE str = rb_str_conv_enc(rb_str_new(ptr, len), rb_utf8_encoding(), rb_locale_encoding());
+#else
     VALUE str = rb_locale_str_new(ptr, len);
+#endif
 
     rb_obj_freeze(str);
     return str;
@@ -2110,7 +2187,11 @@ rb_f_getenv(VALUE obj, VALUE name)
     env = getenv(nam);
     if (env) {
 	if (ENVMATCH(nam, PATH_ENV) && !env_path_tainted(env)) {
+#ifdef _WIN32
+	    VALUE str = rb_str_conv_enc(rb_str_new(env, strlen(env)), rb_utf8_encoding(), rb_filesystem_encoding());
+#else
 	    VALUE str = rb_filesystem_str_new_cstr(env);
+#endif
 
 	    rb_obj_freeze(str);
 	    return str;
@@ -2161,7 +2242,11 @@ env_fetch(int argc, VALUE *argv)
 	return if_none;
     }
     if (ENVMATCH(nam, PATH_ENV) && !env_path_tainted(env))
+#ifdef _WIN32
+	return rb_str_conv_enc(rb_str_new(env, strlen(env)), rb_utf8_encoding(), rb_filesystem_encoding());
+#else
 	return rb_filesystem_str_new_cstr(env);
+#endif
     return env_str_new2(env);
 }
 
@@ -2993,7 +3078,8 @@ env_index(VALUE dmy, VALUE value)
 
 /*
  * call-seq:
- *   ENV.to_hash -> Hash
+ *   ENV.to_hash -> hash
+ *   ENV.to_h    -> hash
  *
  * Creates a hash with a copy of the environment variables.
  *
@@ -3076,11 +3162,9 @@ env_invert(void)
 static int
 env_replace_i(VALUE key, VALUE val, VALUE keys)
 {
-    if (key != Qundef) {
-	env_aset(Qnil, key, val);
-	if (rb_ary_includes(keys, key)) {
-	    rb_ary_delete(keys, key);
-	}
+    env_aset(Qnil, key, val);
+    if (rb_ary_includes(keys, key)) {
+	rb_ary_delete(keys, key);
     }
     return ST_CONTINUE;
 }
@@ -3112,12 +3196,10 @@ env_replace(VALUE env, VALUE hash)
 static int
 env_update_i(VALUE key, VALUE val)
 {
-    if (key != Qundef) {
-	if (rb_block_given_p()) {
-	    val = rb_yield_values(3, key, rb_f_getenv(Qnil, key), val);
-	}
-	env_aset(Qnil, key, val);
+    if (rb_block_given_p()) {
+	val = rb_yield_values(3, key, rb_f_getenv(Qnil, key), val);
     }
+    env_aset(Qnil, key, val);
     return ST_CONTINUE;
 }
 
@@ -3276,6 +3358,7 @@ Init_Hash(void)
     rb_define_method(rb_cHash,"rehash", rb_hash_rehash, 0);
 
     rb_define_method(rb_cHash,"to_hash", rb_hash_to_hash, 0);
+    rb_define_method(rb_cHash,"to_h", rb_hash_to_h, 0);
     rb_define_method(rb_cHash,"to_a", rb_hash_to_a, 0);
     rb_define_method(rb_cHash,"inspect", rb_hash_inspect, 0);
     rb_define_alias(rb_cHash, "to_s", "inspect");
@@ -3386,6 +3469,7 @@ Init_Hash(void)
     rb_define_singleton_method(envtbl,"key?", env_has_key, 1);
     rb_define_singleton_method(envtbl,"value?", env_has_value, 1);
     rb_define_singleton_method(envtbl,"to_hash", env_to_hash, 0);
+    rb_define_singleton_method(envtbl,"to_h", env_to_hash, 0);
     rb_define_singleton_method(envtbl,"assoc", env_assoc, 1);
     rb_define_singleton_method(envtbl,"rassoc", env_rassoc, 1);
 

@@ -460,6 +460,24 @@ class TestObject < Test::Unit::TestCase
     assert_equal([[:respond_to?, :to_ary]], called, '[bug:6000]')
   end
 
+  def test_implicit_respond_to_arity_3
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |a, b, c|
+        called << [:respond_to?, a, b, c]
+        false
+      end
+    end
+
+    e = assert_raise(ArgumentError, '[bug:6000]') do
+      [[p]].flatten
+    end
+
+    assert_equal('respond_to? must accept 1 or 2 arguments (requires 3)', e.message)
+  end
+
   def test_method_missing_passed_block
     bug5731 = '[ruby-dev:44961]'
 
@@ -726,6 +744,24 @@ class TestObject < Test::Unit::TestCase
     end
     assert_raise(TypeError) do
       :foo.singleton_class
+    end
+  end
+
+  def test_redef_method_missing
+    bug5473 = '[ruby-core:40287]'
+    ['ArgumentError.new("bug5473")', 'ArgumentError, "bug5473"', '"bug5473"'].each do |code|
+      out, err, status = EnvUtil.invoke_ruby([], <<-SRC, true, true)
+      class ::Object
+        def method_missing(m, *a, &b)
+          raise #{code}
+        end
+      end
+
+      p((1.foo rescue $!))
+      SRC
+      assert_send([status, :success?], bug5473)
+      assert_equal("", err, bug5473)
+      assert_equal((eval("raise #{code}") rescue $!.inspect), out.chomp, bug5473)
     end
   end
 end

@@ -287,7 +287,8 @@ strio_unimpl(int argc, VALUE *argv, VALUE self)
 {
     StringIO(self);
     rb_notimplement();
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -1209,7 +1210,7 @@ strio_putc(VALUE self, VALUE ch)
 
 /*
  * call-seq:
- *   strio.read([length [, buffer]])    -> string, buffer, or nil
+ *   strio.read([length [, outbuf]])    -> string, outbuf, or nil
  *
  * See IO#read.
  */

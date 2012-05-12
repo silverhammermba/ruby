@@ -668,6 +668,38 @@ class TestTime < Test::Unit::TestCase
 
     bug4457 = '[ruby-dev:43285]'
     assert_raise(Errno::ERANGE, bug4457) {Time.now.strftime('%8192z')}
+
+    bug4458 = '[ruby-dev:43287]'
+    t = T2000.getlocal("+09:00")
+    assert_equal("      +900", t.strftime("%_10z"), bug4458)
+    assert_equal("+000000900", t.strftime("%10z"), bug4458)
+    assert_equal("     +9:00", t.strftime("%_:10z"), bug4458)
+    assert_equal("+000009:00", t.strftime("%:10z"), bug4458)
+    assert_equal("  +9:00:00", t.strftime("%_::10z"), bug4458)
+    assert_equal("+009:00:00", t.strftime("%::10z"), bug4458)
+    t = T2000.getlocal("-05:00")
+    assert_equal("      -500", t.strftime("%_10z"), bug4458)
+    assert_equal("-000000500", t.strftime("%10z"), bug4458)
+    assert_equal("     -5:00", t.strftime("%_:10z"), bug4458)
+    assert_equal("-000005:00", t.strftime("%:10z"), bug4458)
+    assert_equal("  -5:00:00", t.strftime("%_::10z"), bug4458)
+    assert_equal("-005:00:00", t.strftime("%::10z"), bug4458)
+
+    bug6323 = '[ruby-core:44447]'
+    t = T2000.getlocal("+00:36")
+    assert_equal("      +036", t.strftime("%_10z"), bug6323)
+    assert_equal("+000000036", t.strftime("%10z"), bug6323)
+    assert_equal("     +0:36", t.strftime("%_:10z"), bug6323)
+    assert_equal("+000000:36", t.strftime("%:10z"), bug6323)
+    assert_equal("  +0:36:00", t.strftime("%_::10z"), bug6323)
+    assert_equal("+000:36:00", t.strftime("%::10z"), bug6323)
+    t = T2000.getlocal("-00:55")
+    assert_equal("      -055", t.strftime("%_10z"), bug6323)
+    assert_equal("-000000055", t.strftime("%10z"), bug6323)
+    assert_equal("     -0:55", t.strftime("%_:10z"), bug6323)
+    assert_equal("-000000:55", t.strftime("%:10z"), bug6323)
+    assert_equal("  -0:55:00", t.strftime("%_::10z"), bug6323)
+    assert_equal("-000:55:00", t.strftime("%::10z"), bug6323)
   end
 
   def test_delegate
@@ -743,5 +775,12 @@ class TestTime < Test::Unit::TestCase
       end.call
     end
     assert_equal("Insecure: can't modify #{tc}", error.message, bug5036)
+  end
+
+  def test_sec_str
+    bug6193 = '[ruby-core:43569]'
+    t = nil
+    assert_nothing_raised(bug6193) {t = Time.new(2012, 1, 2, 3, 4, "5")}
+    assert_equal(Time.new(2012, 1, 2, 3, 4, 5), t, bug6193)
   end
 end

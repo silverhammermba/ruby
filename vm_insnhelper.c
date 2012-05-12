@@ -105,22 +105,32 @@ vm_pop_frame(rb_thread_t *th)
 }
 
 /* method dispatch */
-
-NORETURN(static void argument_error(const rb_iseq_t *iseq, int miss_argc, int correct_argc));
-static void
-argument_error(const rb_iseq_t *iseq, int miss_argc, int correct_argc)
+static inline VALUE
+rb_arg_error_new(int argc, int min, int max)
 {
-    VALUE mesg = rb_sprintf("wrong number of arguments (%d for %d)", miss_argc, correct_argc);
-    VALUE exc = rb_exc_new3(rb_eArgError, mesg);
+    VALUE err_mess = 0;
+    if (min == max) {
+	err_mess = rb_sprintf("wrong number of arguments (%d for %d)", argc, min);
+    }
+    else if (max == UNLIMITED_ARGUMENTS) {
+	err_mess = rb_sprintf("wrong number of arguments (%d for %d+)", argc, min);
+    }
+    else {
+	err_mess = rb_sprintf("wrong number of arguments (%d for %d..%d)", argc, min, max);
+    }
+    return rb_exc_new3(rb_eArgError, err_mess);
+}
+
+NORETURN(static void argument_error(const rb_iseq_t *iseq, int miss_argc, int min_argc, int max_argc));
+static void
+argument_error(const rb_iseq_t *iseq, int miss_argc, int min_argc, int max_argc)
+{
+    VALUE exc = rb_arg_error_new(miss_argc, min_argc, max_argc);
     VALUE bt = rb_make_backtrace();
     VALUE err_line = 0;
 
     if (iseq) {
-	int line_no = 1;
-
-	if (iseq->line_info_size) {
-	    line_no = iseq->line_info_table[0].line_no;
-	}
+	int line_no = rb_iseq_first_lineno(iseq);
 
 	err_line = rb_sprintf("%s:%d:in `%s'",
 			      RSTRING_PTR(iseq->filename),
@@ -150,11 +160,17 @@ unknown_keyword_error(const rb_iseq_t *iseq, VALUE hash)
     rb_raise(rb_eArgError, msg, RSTRING_PTR(keys));
 }
 
+void
+rb_error_arity(int argc, int min, int max)
+{
+    rb_exc_raise(rb_arg_error_new(argc, min, max));
+}
+
 #define VM_CALLEE_SETUP_ARG(ret, th, iseq, orig_argc, orig_argv, block) \
     if (LIKELY((iseq)->arg_simple & 0x01)) { \
 	/* simple check */ \
 	if ((orig_argc) != (iseq)->argc) { \
-	    argument_error((iseq), (orig_argc), (iseq)->argc); \
+	    argument_error((iseq), (orig_argc), (iseq)->argc, (iseq)->argc); \
 	} \
 	(ret) = 0; \
     } \
@@ -168,6 +184,9 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
 			    const rb_block_t **block)
 {
     const int m = iseq->argc;
+    const int opts = iseq->arg_opts - (iseq->arg_opts > 0);
+    const int min = m + iseq->arg_post_len;
+    const int max = (iseq->arg_rest == -1) ? m + opts + iseq->arg_post_len : UNLIMITED_ARGUMENTS;
     int argc = orig_argc;
     VALUE *argv = orig_argv;
     rb_num_t opt_pc = 0;
@@ -177,7 +196,7 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
 
     if (iseq->arg_keyword != -1) {
 	int i, j;
-	if (argc > 0) keyword_hash = rb_check_convert_type(argv[argc-1], T_HASH, "Hash", "to_hash");
+	if (argc > 0) keyword_hash = rb_check_hash_type(argv[argc-1]);
 	if (!NIL_P(keyword_hash)) {
 	    argc--;
 	    keyword_hash = rb_hash_dup(keyword_hash);
@@ -196,8 +215,8 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
     }
 
     /* mandatory */
-    if (argc < (m + iseq->arg_post_len)) { /* check with post arg */
-	argument_error(iseq, argc, m + iseq->arg_post_len);
+    if ((argc < min) || (argc > max && max != UNLIMITED_ARGUMENTS)) {
+	argument_error(iseq, argc, min, max);
     }
 
     argv += m;
@@ -217,12 +236,6 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
 
     /* opt arguments */
     if (iseq->arg_opts) {
-	const int opts = iseq->arg_opts - 1 /* no opt */;
-
-	if (iseq->arg_rest == -1 && argc > opts) {
-	    argument_error(iseq, orig_argc, m + opts + iseq->arg_post_len);
-	}
-
 	if (argc > opts) {
 	    argc -= opts;
 	    argv += opts;
@@ -254,10 +267,6 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
 	VALUE blockval = Qnil;
 	const rb_block_t *blockptr = *block;
 
-	if (argc != 0) {
-	    argument_error(iseq, orig_argc, m + iseq->arg_post_len);
-	}
-
 	if (blockptr) {
 	    /* make Proc object */
 	    if (blockptr->proc == 0) {
@@ -272,10 +281,6 @@ vm_callee_setup_arg_complex(rb_thread_t *th, const rb_iseq_t * iseq,
 	}
 
 	orig_argv[iseq->arg_block] = blockval; /* Proc or nil */
-    }
-
-    if (iseq->arg_keyword && argc != 0) {
-	argument_error(iseq, orig_argc, m + iseq->arg_post_len);
     }
 
     th->mark_stack_len = 0;
@@ -352,10 +357,7 @@ call_cfunc(VALUE (*func)(), VALUE recv,
 {
     /* printf("len: %d, argc: %d\n", len, argc); */
 
-    if (len >= 0 && argc != len) {
-	rb_raise(rb_eArgError, "wrong number of arguments(%d for %d)",
-		 argc, len);
-    }
+    if (len >= 0) rb_check_arity(argc, len, len);
 
     switch (len) {
       case -2:
@@ -429,7 +431,7 @@ call_cfunc(VALUE (*func)(), VALUE recv,
 	break;
       default:
 	rb_raise(rb_eArgError, "too many arguments(%d)", len);
-	return Qundef; /* not reached */
+	UNREACHABLE;
     }
 }
 
@@ -579,17 +581,13 @@ vm_call_method(rb_thread_t *th, rb_control_frame_t *cfp,
 		break;
 	      }
 	      case VM_METHOD_TYPE_ATTRSET:{
-		if (num != 1) {
-		    rb_raise(rb_eArgError, "wrong number of arguments (%d for 1)", num);
-		}
+		rb_check_arity(num, 1, 1);
 		val = rb_ivar_set(recv, me->def->body.attr.id, *(cfp->sp - 1));
 		cfp->sp -= 2;
 		break;
 	      }
 	      case VM_METHOD_TYPE_IVAR:{
-		if (num != 0) {
-		    rb_raise(rb_eArgError, "wrong number of arguments (%d for 0)", num);
-		}
+		rb_check_arity(num, 0, 0);
 		val = rb_attr_get(recv, me->def->body.attr.id);
 		cfp->sp -= 1;
 		break;
@@ -1464,6 +1462,8 @@ vm_search_normal_superclass(VALUE klass, VALUE recv)
     else {
 	rb_bug("vm_search_normal_superclass: should not be reach here");
     }
+
+    UNREACHABLE;
 }
 
 static void

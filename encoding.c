@@ -161,7 +161,7 @@ rb_to_encoding_index(VALUE enc)
 
 /* Returns encoding index or UNSPECIFIED_ENCODING */
 static int
-str_to_encindex(VALUE enc)
+str_find_encindex(VALUE enc)
 {
     int idx;
 
@@ -170,6 +170,13 @@ str_to_encindex(VALUE enc)
 	rb_raise(rb_eArgError, "invalid name encoding (non ASCII)");
     }
     idx = rb_enc_find_index(StringValueCStr(enc));
+    return idx;
+}
+
+static int
+str_to_encindex(VALUE enc)
+{
+    int idx = str_find_encindex(enc);
     if (idx < 0) {
 	rb_raise(rb_eArgError, "unknown encoding name - %s", RSTRING_PTR(enc));
     }
@@ -187,6 +194,16 @@ rb_to_encoding(VALUE enc)
 {
     if (enc_check_encoding(enc) >= 0) return RDATA(enc)->data;
     return str_to_encoding(enc);
+}
+
+rb_encoding *
+rb_find_encoding(VALUE enc)
+{
+    int idx;
+    if (enc_check_encoding(enc) >= 0) return RDATA(enc)->data;
+    idx = str_find_encindex(enc);
+    if (idx < 0) return NULL;
+    return rb_enc_from_index(idx);
 }
 
 void
@@ -905,12 +922,11 @@ rb_enc_codepoint_len(const char *p, const char *e, int *len_p, rb_encoding *enc)
     if (e <= p)
         rb_raise(rb_eArgError, "empty string");
     r = rb_enc_precise_mbclen(p, e, enc);
-    if (MBCLEN_CHARFOUND_P(r)) {
-	if (len_p) *len_p = MBCLEN_CHARFOUND_LEN(r);
-        return rb_enc_mbc_to_codepoint(p, e, enc);
-    }
-    else
+    if (!MBCLEN_CHARFOUND_P(r)) {
 	rb_raise(rb_eArgError, "invalid byte sequence in %s", rb_enc_name(enc));
+    }
+    if (len_p) *len_p = MBCLEN_CHARFOUND_LEN(r);
+    return rb_enc_mbc_to_codepoint(p, e, enc);
 }
 
 #undef rb_enc_codepoint

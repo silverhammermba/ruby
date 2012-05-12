@@ -10,6 +10,14 @@ require 'weakref'
 require_relative 'envutil'
 
 class TestIO < Test::Unit::TestCase
+  def setup
+    GC.disable
+  end
+
+  def teardown
+    GC.enable
+  end
+
   def have_close_on_exec?
     begin
       $stdin.close_on_exec?
@@ -991,6 +999,16 @@ class TestIO < Test::Unit::TestCase
     }
   end
 
+  def test_readpartial_with_not_empty_buffer
+    pipe(proc do |w|
+      w.write "foob"
+      w.close
+    end, proc do |r|
+      r.readpartial(5, s = "01234567")
+      assert_equal("foob", s)
+    end)
+  end
+
   def test_readpartial_buffer_error
     with_pipe do |r, w|
       s = ""
@@ -1026,6 +1044,16 @@ class TestIO < Test::Unit::TestCase
     end
   end
 
+  def test_read_with_not_empty_buffer
+    pipe(proc do |w|
+      w.write "foob"
+      w.close
+    end, proc do |r|
+      r.read(nil, s = "01234567")
+      assert_equal("foob", s)
+    end)
+  end
+
   def test_read_buffer_error
     with_pipe do |r, w|
       s = ""
@@ -1045,6 +1073,16 @@ class TestIO < Test::Unit::TestCase
     end, proc do |r|
       assert_equal("1", r.read)
     end)
+  end
+
+  def test_read_nonblock_with_not_empty_buffer
+    skip "IO#read_nonblock is not supported on file/pipe." if /mswin|bccwin|mingw/ =~ RUBY_PLATFORM
+    with_pipe {|r, w|
+      w.write "foob"
+      w.close
+      r.read_nonblock(5, s = "01234567")
+      assert_equal("foob", s)
+    }
   end
 
   def test_read_nonblock_error
@@ -1357,6 +1395,30 @@ class TestIO < Test::Unit::TestCase
     end
   end
 
+  def test_pos_with_getc
+    bug6179 = '[ruby-core:43497]'
+    t = make_tempfile
+    ["", "t", "b"].each do |mode|
+      open(t.path, "w#{mode}") do |f|
+        f.write "0123456789\n"
+      end
+
+      open(t.path, "r#{mode}") do |f|
+        assert_equal 0, f.pos, "mode=r#{mode}"
+        assert_equal '0', f.getc, "mode=r#{mode}"
+        assert_equal 1, f.pos, "mode=r#{mode}"
+        assert_equal '1', f.getc, "mode=r#{mode}"
+        assert_equal 2, f.pos, "mode=r#{mode}"
+        assert_equal '2', f.getc, "mode=r#{mode}"
+        assert_equal 3, f.pos, "mode=r#{mode}"
+        assert_equal '3', f.getc, "mode=r#{mode}"
+        assert_equal 4, f.pos, "mode=r#{mode}"
+        assert_equal '4', f.getc, "mode=r#{mode}"
+      end
+    end
+  end
+
+
   def test_sysseek
     t = make_tempfile
 
@@ -1391,6 +1453,16 @@ class TestIO < Test::Unit::TestCase
       a.reverse_each {|c| f.ungetc c }
       assert_raise(IOError) { f.sysread(1) }
     end
+  end
+
+  def test_sysread_with_not_empty_buffer
+    pipe(proc do |w|
+      w.write "foob"
+      w.close
+    end, proc do |r|
+      r.sysread( 5, s = "01234567" )
+      assert_equal( "foob", s )
+    end)
   end
 
   def test_flag
@@ -1431,11 +1503,13 @@ class TestIO < Test::Unit::TestCase
     f.close
   end
 
-  def try_fdopen(fd, autoclose = true, level = 100)
+  def try_fdopen(fd, autoclose = true, level = 50)
     if level > 0
-      f = try_fdopen(fd, autoclose, level - 1)
-      GC.start
-      f
+      begin
+        1.times {return try_fdopen(fd, autoclose, level - 1)}
+      ensure
+        GC.start
+      end
     else
       WeakRef.new(IO.for_fd(fd, autoclose: autoclose))
     end

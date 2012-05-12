@@ -260,7 +260,8 @@ num_sadded(VALUE x, VALUE name)
 	     "can't define singleton method \"%s\" for %s",
 	     rb_id2name(mid),
 	     rb_obj_classname(x));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /* :nodoc: */
@@ -269,7 +270,8 @@ num_init_copy(VALUE x, VALUE y)
 {
     /* Numerics are immutable values, which should not be copied */
     rb_raise(rb_eTypeError, "can't copy %s", rb_obj_classname(x));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -814,16 +816,18 @@ flodivmod(double x, double y, double *divp, double *modp)
     double div, mod;
 
     if (y == 0.0) rb_num_zerodiv();
+    if((x == 0.0) || (isinf(y) && !isinf(x)))
+        mod = x;
+    else {
 #ifdef HAVE_FMOD
-    mod = fmod(x, y);
+	mod = fmod(x, y);
 #else
-    {
 	double z;
 
 	modf(x/y, &z);
 	mod = x - z * y;
-    }
 #endif
+    }
     if (isinf(x) && !isinf(y) && !isnan(y))
 	div = x;
     else
@@ -834,6 +838,19 @@ flodivmod(double x, double y, double *divp, double *modp)
     }
     if (modp) *modp = mod;
     if (divp) *divp = div;
+}
+
+/*
+ * Returns the modulo of division of x by y.
+ * An error will be raised if y == 0.
+ */
+
+double
+ruby_float_mod(double x, double y)
+{
+    double mod;
+    flodivmod(x, y, 0, &mod);
+    return mod;
 }
 
 
@@ -851,7 +868,7 @@ flodivmod(double x, double y, double *divp, double *modp)
 static VALUE
 flo_mod(VALUE x, VALUE y)
 {
-    double fy, mod;
+    double fy;
 
     switch (TYPE(y)) {
       case T_FIXNUM:
@@ -866,8 +883,7 @@ flo_mod(VALUE x, VALUE y)
       default:
 	return rb_num_coerce_bin(x, y, '%');
     }
-    flodivmod(RFLOAT_VALUE(x), fy, 0, &mod);
-    return DBL2NUM(mod);
+    return DBL2NUM(ruby_float_mod(RFLOAT_VALUE(x), fy));
 }
 
 static VALUE
@@ -1753,13 +1769,9 @@ num_step(int argc, VALUE *argv, VALUE from)
 	step = INT2FIX(1);
     }
     else {
-	if (argc == 2) {
-	    to = argv[0];
-	    step = argv[1];
-	}
-	else {
-	    rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-	}
+	rb_check_arity(argc, 1, 2);
+	to = argv[0];
+	step = argv[1];
 	if (rb_equal(step, INT2FIX(0))) {
 	    rb_raise(rb_eArgError, "step can't be 0");
 	}
@@ -2089,17 +2101,19 @@ rb_num2ll(VALUE val)
 
       case T_STRING:
 	rb_raise(rb_eTypeError, "no implicit conversion from string");
-	return Qnil;            /* not reached */
+	break;
 
       case T_TRUE:
       case T_FALSE:
 	rb_raise(rb_eTypeError, "no implicit conversion from boolean");
-	return Qnil;		/* not reached */
+	break;
 
       default:
-	val = rb_to_int(val);
-	return NUM2LL(val);
+	break;
     }
+
+    val = rb_to_int(val);
+    return NUM2LL(val);
 }
 
 unsigned LONG_LONG
@@ -2131,17 +2145,19 @@ rb_num2ull(VALUE val)
 
       case T_STRING:
 	rb_raise(rb_eTypeError, "no implicit conversion from string");
-	return Qnil;            /* not reached */
+	break;
 
       case T_TRUE:
       case T_FALSE:
 	rb_raise(rb_eTypeError, "no implicit conversion from boolean");
-	return Qnil;		/* not reached */
+	break;
 
       default:
-	val = rb_to_int(val);
-	return NUM2ULL(val);
+	break;
     }
+
+    val = rb_to_int(val);
+    return NUM2ULL(val);
 }
 
 #endif  /* HAVE_LONG_LONG */
@@ -2345,7 +2361,7 @@ int_chr(int argc, VALUE *argv, VALUE num)
       case 1:
 	break;
       default:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..1)", argc);
+	rb_check_arity(argc, 0, 1);
 	break;
     }
     enc = rb_to_encoding(argv[0]);
@@ -2733,12 +2749,7 @@ fix_mod(VALUE x, VALUE y)
 	x = rb_int2big(FIX2LONG(x));
 	return rb_big_modulo(x, y);
       case T_FLOAT:
-	{
-	    double mod;
-
-	    flodivmod((double)FIX2LONG(x), RFLOAT_VALUE(y), 0, &mod);
-	    return DBL2NUM(mod);
-	}
+	return DBL2NUM(ruby_float_mod((double)FIX2LONG(x), RFLOAT_VALUE(y)));
       default:
 	return rb_num_coerce_bin(x, y, '%');
     }

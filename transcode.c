@@ -2665,9 +2665,7 @@ str_transcode0(int argc, VALUE *argv, VALUE *self, int ecflags, VALUE ecopts)
     const char *sname, *dname;
     int dencidx;
 
-    if (argc <0 || argc > 2) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..2)", argc);
-    }
+    rb_check_arity(argc, 0, 2);
 
     if (argc == 0) {
 	arg1 = rb_enc_default_internal();
@@ -2787,6 +2785,10 @@ str_encode_bang(int argc, VALUE *argv, VALUE str)
     encidx = str_transcode(argc, argv, &newstr);
 
     if (encidx < 0) return str;
+    if (newstr == str) {
+	rb_enc_associate_index(str, encidx);
+	return str;
+    }
     rb_str_shared_replace(str, newstr);
     return str_encode_associate(str, encidx);
 }
@@ -2812,6 +2814,10 @@ static VALUE encoded_dup(VALUE newstr, VALUE str, int encidx);
  *  Encoding::InvalidByteSequenceError for invalid byte sequences
  *  in the source encoding. The last form by default does not raise
  *  exceptions but uses replacement strings.
+ *
+ *  Please note that conversion from an encoding +enc+ to the
+ *  same encoding +enc+ is a no-op, i.e. the receiver is returned without
+ *  any changes, and no exceptions are raised, even if there are invalid bytes.
  *
  *  The +options+ Hash gives details for conversion and can have the following
  *  keys:
@@ -2873,6 +2879,8 @@ encoded_dup(VALUE newstr, VALUE str, int encidx)
     if (encidx < 0) return rb_str_dup(str);
     if (newstr == str) {
 	newstr = rb_str_dup(str);
+	rb_enc_associate_index(newstr, encidx);
+	return newstr;
     }
     else {
 	RBASIC(newstr)->klass = rb_obj_class(str);
@@ -2984,8 +2992,7 @@ econv_args(int argc, VALUE *argv,
 
     if (!NIL_P(flags_v)) {
 	if (!NIL_P(opt)) {
-	    rb_raise(rb_eArgError, "wrong number of arguments (%d for 2..3)",
-		argc + 1);
+	    rb_error_arity(argc + 1, 2, 3);
 	}
         ecflags = NUM2INT(rb_to_int(flags_v));
         ecopts = Qnil;
@@ -3619,9 +3626,12 @@ econv_result_to_symbol(rb_econv_result_t res)
  *
  * primitive_convert stops conversion when one of following condition met.
  * - invalid byte sequence found in source buffer (:invalid_byte_sequence)
+ *   +primitive_errinfo+ and +last_error+ methods returns the detail of the error.
  * - unexpected end of source buffer (:incomplete_input)
  *   this occur only when :partial_input is not specified.
+ *   +primitive_errinfo+ and +last_error+ methods returns the detail of the error.
  * - character not representable in output encoding (:undefined_conversion)
+ *   +primitive_errinfo+ and +last_error+ methods returns the detail of the error.
  * - after some output is generated, before input is done (:after_output)
  *   this occur only when :after_output is specified.
  * - destination buffer is full (:destination_buffer_full)
@@ -3672,8 +3682,7 @@ econv_primitive_convert(int argc, VALUE *argv, VALUE self)
 
     if (!NIL_P(flags_v)) {
 	if (!NIL_P(opt)) {
-	    rb_raise(rb_eArgError, "wrong number of arguments (%d for 2..5)",
-		argc + 1);
+	    rb_error_arity(argc + 1, 2, 5);
 	}
 	flags = NUM2INT(rb_to_int(flags_v));
     }

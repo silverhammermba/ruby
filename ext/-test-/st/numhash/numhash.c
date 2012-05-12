@@ -42,10 +42,9 @@ numhash_aset(VALUE self, VALUE key, VALUE data)
 }
 
 static int
-numhash_i(st_data_t key, st_data_t value, st_data_t arg, int error)
+numhash_i(st_data_t key, st_data_t value, st_data_t arg)
 {
     VALUE ret;
-    if (key == 0 && value == 0 && error == 1) rb_raise(rb_eRuntimeError, "numhash modified");
     ret = rb_yield_values(3, (VALUE)key, (VALUE)value, (VALUE)arg);
     if (ret == Qtrue) return ST_CHECK;
     return ST_CONTINUE;
@@ -60,9 +59,9 @@ numhash_each(VALUE self)
 }
 
 static int
-update_func(st_data_t key, st_data_t *value, st_data_t arg)
+update_func(st_data_t *key, st_data_t *value, st_data_t arg, int existing)
 {
-    VALUE ret = rb_yield_values(2, (VALUE)key, (VALUE)*value);
+    VALUE ret = rb_yield_values(existing ? 2 : 1, (VALUE)*key, (VALUE)*value);
     switch (ret) {
       case Qfalse:
 	return ST_STOP;

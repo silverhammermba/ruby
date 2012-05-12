@@ -244,7 +244,7 @@ class TestSocket_UNIXSocket < Test::Unit::TestCase
   end
 
   def bound_unix_socket(klass)
-    tmpfile = Tempfile.new("testrubysock")
+    tmpfile = Tempfile.new("s")
     path = tmpfile.path
     tmpfile.close(true)
     yield klass.new(path), path
@@ -339,9 +339,10 @@ class TestSocket_UNIXSocket < Test::Unit::TestCase
     assert_raise(ArgumentError) { UNIXServer.new("a" * 300) }
   end
 
-  def test_nul
-    assert_raise(ArgumentError) { Socket.sockaddr_un("a\0b") }
-  end
+  #def test_nul
+  #  # path may contain NULs for abstract unix sockets.  [ruby-core:10288]
+  #  assert_raise(ArgumentError) { Socket.sockaddr_un("a\0b") }
+  #end
 
   def test_dgram_pair
     s1, s2 = UNIXSocket.pair(Socket::SOCK_DGRAM)

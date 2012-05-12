@@ -6,6 +6,8 @@
 #define CACHE_MASK 0x7ff
 #define EXPR1(c,m) ((((c)>>3)^(m))&CACHE_MASK)
 
+#define NOEX_NOREDEF NOEX_RESPONDS
+
 static void rb_vm_check_redefinition_opt_method(const rb_method_entry_t *me, VALUE klass);
 
 static ID object_id, respond_to_missing;
@@ -64,6 +66,8 @@ VALUE
 rb_f_notimplement(int argc, VALUE *argv, VALUE obj)
 {
     rb_notimplement();
+
+    UNREACHABLE;
 }
 
 static void
@@ -195,6 +199,11 @@ rb_method_entry_make(VALUE klass, ID mid, rb_method_type_t type,
 	rb_method_definition_t *old_def = old_me->def;
 
 	if (rb_method_definition_eq(old_def, def)) return old_me;
+#if 0
+	if (old_me->flag & NOEX_NOREDEF) {
+	    rb_raise(rb_eTypeError, "cannot redefine %s#%s", rb_class2name(klass), rb_id2name(mid));
+	}
+#endif
 	rb_vm_check_redefinition_opt_method(old_me, klass);
 
 	if (RTEST(ruby_verbose) &&
@@ -751,10 +760,12 @@ rb_mod_method_defined(VALUE mod, VALUE mid)
 #define VISI_CHECK(x,f) (((x)&NOEX_MASK) == (f))
 
 static VALUE
-check_definition(VALUE mod, ID mid, rb_method_flag_t noex)
+check_definition(VALUE mod, VALUE mid, rb_method_flag_t noex)
 {
     const rb_method_entry_t *me;
-    me = rb_method_entry(mod, mid);
+    ID id = rb_check_id(&mid);
+    if (!id) return Qfalse;
+    me = rb_method_entry(mod, id);
     if (me) {
 	if (VISI_CHECK(me->flag, noex))
 	    return Qtrue;
@@ -791,9 +802,7 @@ check_definition(VALUE mod, ID mid, rb_method_flag_t noex)
 static VALUE
 rb_mod_public_method_defined(VALUE mod, VALUE mid)
 {
-    ID id = rb_check_id(&mid);
-    if (!id) return Qfalse;
-    return check_definition(mod, id, NOEX_PUBLIC);
+    return check_definition(mod, mid, NOEX_PUBLIC);
 }
 
 /*
@@ -825,9 +834,7 @@ rb_mod_public_method_defined(VALUE mod, VALUE mid)
 static VALUE
 rb_mod_private_method_defined(VALUE mod, VALUE mid)
 {
-    ID id = rb_check_id(&mid);
-    if (!id) return Qfalse;
-    return check_definition(mod, id, NOEX_PRIVATE);
+    return check_definition(mod, mid, NOEX_PRIVATE);
 }
 
 /*
@@ -859,9 +866,7 @@ rb_mod_private_method_defined(VALUE mod, VALUE mid)
 static VALUE
 rb_mod_protected_method_defined(VALUE mod, VALUE mid)
 {
-    ID id = rb_check_id(&mid);
-    if (!id) return Qfalse;
-    return check_definition(mod, id, NOEX_PROTECTED);
+    return check_definition(mod, mid, NOEX_PROTECTED);
 }
 
 int
@@ -934,7 +939,8 @@ rb_hash_method_definition(st_index_t hash, const rb_method_definition_t *def)
 }
 
 st_index_t
-rb_hash_method_entry(st_index_t hash, const rb_method_entry_t *me) {
+rb_hash_method_entry(st_index_t hash, const rb_method_entry_t *me)
+{
     return rb_hash_method_definition(hash, me->def);
 }
 
@@ -1385,5 +1391,14 @@ Init_eval_method(void)
     singleton_undefined = rb_intern("singleton_method_undefined");
     attached = rb_intern("__attached__");
     respond_to_missing = rb_intern("respond_to_missing?");
+
+    {
+#define REPLICATE_METHOD(klass, id, noex) \
+	rb_method_entry_set((klass), (id), rb_method_entry((klass), (id)), \
+			    (rb_method_flag_t)(noex | NOEX_BASIC | NOEX_NOREDEF))
+	REPLICATE_METHOD(rb_eException, idMethodMissing, NOEX_PRIVATE);
+	REPLICATE_METHOD(rb_eException, idRespond_to, NOEX_PUBLIC);
+	REPLICATE_METHOD(rb_eException, respond_to_missing, NOEX_PUBLIC);
+    }
 }
 

@@ -483,6 +483,7 @@ rb_str_conv_enc_opts(VALUE str, rb_encoding *from, rb_encoding *to, int ecflags,
     unsigned char *dp;
 
     if (!to) return str;
+    if (!from) from = rb_enc_get(str);
     if (from == to) return str;
     if ((rb_enc_asciicompat(to) && ENC_CODERANGE(str) == ENC_CODERANGE_7BIT) ||
 	to == rb_ascii8bit_encoding()) {
@@ -725,6 +726,7 @@ static VALUE
 str_new_empty(VALUE str)
 {
     VALUE v = rb_str_new5(str, 0, 0);
+    rb_enc_copy(v, str);
     OBJ_INFECT(v, str);
     return v;
 }
@@ -1406,6 +1408,15 @@ rb_str_associated(VALUE str)
 	return RSTRING(str)->as.heap.aux.shared;
     }
     return Qfalse;
+}
+
+void
+rb_must_asciicompat(VALUE str)
+{
+    rb_encoding *enc = rb_enc_get(str);
+    if (!rb_enc_asciicompat(enc)) {
+	rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
+    }
 }
 
 VALUE
@@ -2727,7 +2738,7 @@ rb_str_match_m(int argc, VALUE *argv, VALUE str)
 {
     VALUE re, result;
     if (argc < 1)
-       rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
+	rb_check_arity(argc, 1, 2);
     re = argv[0];
     argv[0] = str;
     result = rb_funcall2(get_pat(re, 0), rb_intern("match"), argc, argv);
@@ -3175,7 +3186,8 @@ rb_str_aref(VALUE str, VALUE indx)
 	idx = NUM2LONG(indx);
 	goto num_index;
     }
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 
@@ -3237,9 +3249,7 @@ rb_str_aref_m(int argc, VALUE *argv, VALUE str)
 	}
 	return rb_str_substr(str, NUM2LONG(argv[0]), NUM2LONG(argv[1]));
     }
-    if (argc != 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-    }
+    rb_check_arity(argc, 1, 2);
     return rb_str_aref(str, argv[0]);
 }
 
@@ -3467,9 +3477,7 @@ rb_str_aset_m(int argc, VALUE *argv, VALUE str)
 	}
 	return argv[2];
     }
-    if (argc != 2) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 2..3)", argc);
-    }
+    rb_check_arity(argc, 2, 3);
     return rb_str_aset(str, argv[0], argv[1]);
 }
 
@@ -3532,9 +3540,7 @@ rb_str_slice_bang(int argc, VALUE *argv, VALUE str)
     VALUE buf[3];
     int i;
 
-    if (argc < 1 || 2 < argc) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-    }
+    rb_check_arity(argc, 1, 2);
     for (i=0; i<argc; i++) {
 	buf[i] = argv[i];
     }
@@ -3593,11 +3599,13 @@ rb_str_sub_bang(int argc, VALUE *argv, VALUE str)
     int tainted = 0;
     int untrusted = 0;
     long plen;
+    int min_arity = rb_block_given_p() ? 1 : 2;
 
-    if (argc == 1 && rb_block_given_p()) {
+    rb_check_arity(argc, min_arity, 2);
+    if (argc == 1) {
 	iter = 1;
     }
-    else if (argc == 2) {
+    else {
 	repl = argv[1];
 	hash = rb_check_convert_type(argv[1], T_HASH, "Hash", "to_hash");
 	if (NIL_P(hash)) {
@@ -3605,9 +3613,6 @@ rb_str_sub_bang(int argc, VALUE *argv, VALUE str)
 	}
 	if (OBJ_TAINTED(repl)) tainted = 1;
 	if (OBJ_UNTRUSTED(repl)) untrusted = 1;
-    }
-    else {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
     }
 
     pat = get_pat(argv[0], 1);
@@ -3761,7 +3766,7 @@ str_gsub(int argc, VALUE *argv, VALUE str, int bang)
 	if (OBJ_TAINTED(repl)) tainted = 1;
 	break;
       default:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
+	rb_check_arity(argc, 1, 2);
     }
 
     pat = get_pat(argv[0], 1);
@@ -4088,7 +4093,8 @@ str_byte_aref(VALUE str, VALUE indx)
 	idx = NUM2LONG(indx);
 	goto num_index;
     }
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -4120,9 +4126,7 @@ rb_str_byteslice(int argc, VALUE *argv, VALUE str)
     if (argc == 2) {
 	return str_byte_substr(str, NUM2LONG(argv[0]), NUM2LONG(argv[1]));
     }
-    if (argc != 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-    }
+    rb_check_arity(argc, 1, 2);
     return str_byte_aref(str, argv[0]);
 }
 
@@ -4964,13 +4968,13 @@ trnext(struct tr *t, rb_encoding *enc)
     for (;;) {
 	if (!t->gen) {
 	    if (t->p == t->pend) return -1;
-	    if (t->p < t->pend - 1 && *t->p == '\\') {
-		t->p++;
+	    if (rb_enc_ascget(t->p, t->pend, &n, enc) == '\\' && t->p + n < t->pend) {
+		t->p += n;
 	    }
 	    t->now = rb_enc_codepoint_len(t->p, t->pend, &n, enc);
 	    t->p += n;
-	    if (t->p < t->pend - 1 && *t->p == '-') {
-		t->p++;
+	    if (rb_enc_ascget(t->p, t->pend, &n, enc) == '-' && t->p + n < t->pend) {
+		t->p += n;
 		if (t->p < t->pend) {
 		    unsigned int c = rb_enc_codepoint_len(t->p, t->pend, &n, enc);
 		    t->p += n;
@@ -5268,20 +5272,35 @@ rb_str_tr_bang(VALUE str, VALUE src, VALUE repl)
  *  call-seq:
  *     str.tr(from_str, to_str)   => new_str
  *
- *  Returns a copy of <i>str</i> with the characters in <i>from_str</i>
- *  replaced by the corresponding characters in <i>to_str</i>. If
- *  <i>to_str</i> is shorter than <i>from_str</i>, it is padded with its last
- *  character in order to maintain the correspondence.
+ *  Returns a copy of +str+ with the characters in +from_str+ replaced by the
+ *  corresponding characters in +to_str+.  If +to_str+ is shorter than
+ *  +from_str+, it is padded with its last character in order to maintain the
+ *  correspondence.
  *
  *     "hello".tr('el', 'ip')      #=> "hippo"
  *     "hello".tr('aeiou', '*')    #=> "h*ll*"
+ *     "hello".tr('aeiou', 'AA*')  #=> "hAll*"
  *
- *  Both strings may use the c1-c2 notation to denote ranges of characters,
- *  and <i>from_str</i> may start with a <code>^</code>, which denotes all
- *  characters except those listed.
+ *  Both strings may use the <code>c1-c2</code> notation to denote ranges of
+ *  characters, and +from_str+ may start with a <code>^</code>, which denotes
+ *  all characters except those listed.
  *
  *     "hello".tr('a-y', 'b-z')    #=> "ifmmp"
  *     "hello".tr('^aeiou', '*')   #=> "*e**o"
+ *
+ *  The backslash character <code>\</code> can be used to escape
+ *  <code>^</code> or <code>-</code> and is otherwise ignored unless it
+ *  appears at the end of a range or the end of the +from_str+ or +to_str+:
+ *
+ *     "hello^world".tr("\\^aeiou", "*") #=> "h*ll**w*rld"
+ *     "hello-world".tr("a\\-eo", "*")   #=> "h*ll**w*rld"
+ *
+ *     "hello\r\nworld".tr("\r", "")   #=> "hello\nworld"
+ *     "hello\r\nworld".tr("\\r", "")  #=> "hello\r\nwold"
+ *     "hello\r\nworld".tr("\\\r", "") #=> "hello\nworld"
+ *
+ *     "X['\\b']".tr("X\\", "")   #=> "['b']"
+ *     "X['\\b']".tr("X-\\]", "") #=> "'b'"
  */
 
 static VALUE
@@ -5331,24 +5350,28 @@ tr_setup_table(VALUE str, char stable[TR_TABLE_SIZE], int first,
 	else {
 	    VALUE key = UINT2NUM(c);
 
-	    if (!table) {
-		table = rb_hash_new();
+	    if (!table && (first || *tablep || stable[256])) {
 		if (cflag) {
 		    ptable = *ctablep;
+		    table = ptable ? ptable : rb_hash_new();
 		    *ctablep = table;
 		}
 		else {
+		    table = rb_hash_new();
 		    ptable = *tablep;
 		    *tablep = table;
 		}
 	    }
-	    if (!ptable || !NIL_P(rb_hash_aref(ptable, key))) {
+	    if (table && (!ptable || (cflag ^ !NIL_P(rb_hash_aref(ptable, key))))) {
 		rb_hash_aset(table, key, Qtrue);
 	    }
 	}
     }
     for (i=0; i<256; i++) {
 	stable[i] = stable[i] && buf[i];
+    }
+    if (!table && !cflag) {
+	*tablep = 0;
     }
 }
 
@@ -5394,9 +5417,7 @@ rb_str_delete_bang(int argc, VALUE *argv, VALUE str)
     int i, ascompat, cr;
 
     if (RSTRING_LEN(str) == 0 || !RSTRING_PTR(str)) return Qnil;
-    if (argc < 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     for (i=0; i<argc; i++) {
 	VALUE s = argv[i];
 
@@ -5618,16 +5639,27 @@ rb_str_tr_s(VALUE str, VALUE src, VALUE repl)
  *  call-seq:
  *     str.count([other_str]+)   -> fixnum
  *
- *  Each <i>other_str</i> parameter defines a set of characters to count.  The
- *  intersection of these sets defines the characters to count in
- *  <i>str</i>. Any <i>other_str</i> that starts with a caret (^) is
- *  negated. The sequence c1--c2 means all characters between c1 and c2.
+ *  Each +other_str+ parameter defines a set of characters to count.  The
+ *  intersection of these sets defines the characters to count in +str+.  Any
+ *  +other_str+ that starts with a caret <code>^</code> is negated.  The
+ *  sequence <code>c1-c2</code> means all characters between c1 and c2.  The
+ *  backslash character <code>\</code> can be used to escape <code>^</code> or
+ *  <code>-</code> and is otherwise ignored unless it appears at the end of a
+ *  sequence or the end of a +other_str+.
  *
  *     a = "hello world"
- *     a.count "lo"            #=> 5
- *     a.count "lo", "o"       #=> 2
- *     a.count "hello", "^l"   #=> 4
- *     a.count "ej-m"          #=> 4
+ *     a.count "lo"                   #=> 5
+ *     a.count "lo", "o"              #=> 2
+ *     a.count "hello", "^l"          #=> 4
+ *     a.count "ej-m"                 #=> 4
+ *
+ *     "hello^world".count "\\^aeiou" #=> 4
+ *     "hello-world".count "a\\-eo"   #=> 4
+ *
+ *     c = "hello world\\r\\n"
+ *     c.count "\\"                   #=> 2
+ *     c.count "\\A"                  #=> 0
+ *     c.count "X-\\w"                #=> 3
  */
 
 static VALUE
@@ -5640,9 +5672,7 @@ rb_str_count(int argc, VALUE *argv, VALUE str)
     int i;
     int ascompat;
 
-    if (argc < 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     for (i=0; i<argc; i++) {
 	VALUE tstr = argv[i];
 	unsigned char c;
@@ -5740,6 +5770,9 @@ static const char isspacetable[256] = {
  *  limit to the number of fields returned, and trailing null fields are not
  *  suppressed.
  *
+ *  When the input +str+ is empty an empty Array is returned as the string is
+ *  considered to have no fields to split.
+ *
  *     " now's  the time".split        #=> ["now's", "the", "time"]
  *     " now's  the time".split(' ')   #=> ["now's", "the", "time"]
  *     " now's  the time".split(/ /)   #=> ["", "now's", "", "the", "time"]
@@ -5752,6 +5785,8 @@ static const char isspacetable[256] = {
  *     "1,2,,3,4,,".split(',')         #=> ["1", "2", "", "3", "4"]
  *     "1,2,,3,4,,".split(',', 4)      #=> ["1", "2", "", "3,4,,"]
  *     "1,2,,3,4,,".split(',', -4)     #=> ["1", "2", "", "3", "4", "", ""]
+ *
+ *     "".split(',', -1)               #=> []
  */
 
 static VALUE
@@ -6734,11 +6769,6 @@ rb_str_scan(VALUE str, VALUE pat)
 static VALUE
 rb_str_hex(VALUE str)
 {
-    rb_encoding *enc = rb_enc_get(str);
-
-    if (!rb_enc_asciicompat(enc)) {
-	rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
-    }
     return rb_str_to_inum(str, 16, FALSE);
 }
 
@@ -6760,11 +6790,6 @@ rb_str_hex(VALUE str)
 static VALUE
 rb_str_oct(VALUE str)
 {
-    rb_encoding *enc = rb_enc_get(str);
-
-    if (!rb_enc_asciicompat(enc)) {
-	rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
-    }
     return rb_str_to_inum(str, -8, FALSE);
 }
 
@@ -7205,8 +7230,8 @@ rb_str_start_with(int argc, VALUE *argv, VALUE str)
     int i;
 
     for (i=0; i<argc; i++) {
-	VALUE tmp = rb_check_string_type(argv[i]);
-	if (NIL_P(tmp)) continue;
+	VALUE tmp = argv[i];
+	StringValue(tmp);
 	rb_enc_check(str, tmp);
 	if (RSTRING_LEN(str) < RSTRING_LEN(tmp)) continue;
 	if (memcmp(RSTRING_PTR(str), RSTRING_PTR(tmp), RSTRING_LEN(tmp)) == 0)
@@ -7230,8 +7255,8 @@ rb_str_end_with(int argc, VALUE *argv, VALUE str)
     rb_encoding *enc;
 
     for (i=0; i<argc; i++) {
-	VALUE tmp = rb_check_string_type(argv[i]);
-	if (NIL_P(tmp)) continue;
+	VALUE tmp = argv[i];
+	StringValue(tmp);
 	enc = rb_enc_check(str, tmp);
 	if (RSTRING_LEN(str) < RSTRING_LEN(tmp)) continue;
 	p = RSTRING_PTR(str);
@@ -7741,7 +7766,8 @@ rb_to_id(VALUE name)
       case T_SYMBOL:
 	return SYM2ID(name);
     }
-    return Qnil; /* not reached */
+
+    UNREACHABLE;
 }
 
 /*

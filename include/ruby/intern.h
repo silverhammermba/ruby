@@ -43,6 +43,7 @@ extern "C" {
  */
 
 #define ID_ALLOCATOR 1
+#define UNLIMITED_ARGUMENTS (-1)
 
 /* array.c */
 void rb_mem_clear(register VALUE*, register long);
@@ -197,6 +198,7 @@ VALUE rb_fiber_yield(int argc, VALUE *args);
 VALUE rb_fiber_current(void);
 VALUE rb_fiber_alive_p(VALUE);
 /* enum.c */
+VALUE rb_enum_values_pack(int, VALUE*);
 /* enumerator.c */
 VALUE rb_enumeratorize(VALUE, VALUE, int, VALUE *);
 #define RETURN_ENUMERATOR(obj, argc, argv) do {				\
@@ -254,6 +256,12 @@ rb_check_trusted_inline(VALUE obj)
 int rb_sourceline(void);
 const char *rb_sourcefile(void);
 VALUE rb_check_funcall(VALUE, ID, int, VALUE*);
+
+NORETURN(void rb_error_arity(int, int, int));
+#define rb_check_arity(argc, min, max) do { \
+  if (((argc) < (min)) || ((argc) > (max) && (max) != UNLIMITED_ARGUMENTS)) \
+    rb_error_arity(argc, min, max); \
+  } while(0)
 
 #if defined(NFDBITS) && defined(HAVE_RB_FD_INIT)
 typedef struct {
@@ -699,6 +707,7 @@ VALUE rb_str_buf_cat2(VALUE, const char*);
 VALUE rb_str_buf_cat_ascii(VALUE, const char*);
 VALUE rb_obj_as_string(VALUE);
 VALUE rb_check_string_type(VALUE);
+void rb_must_asciicompat(VALUE);
 VALUE rb_str_dup(VALUE);
 VALUE rb_str_resurrect(VALUE str);
 VALUE rb_str_locktmp(VALUE);

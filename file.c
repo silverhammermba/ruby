@@ -2581,7 +2581,7 @@ rb_file_s_umask(int argc, VALUE *argv)
 	omask = umask(NUM2INT(argv[0]));
     }
     else {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..1)", argc);
+	rb_check_arity(argc, 0, 1);
     }
     return INT2FIX(omask);
 }
@@ -3563,7 +3563,7 @@ ruby_enc_find_basename(const char *name, long *baselen, long *alllen, rb_encodin
 #endif
     long f = 0, n = -1;
 
-    end = name + *alllen;
+    end = name + (alllen ? (size_t)*alllen : strlen(name));
     name = skipprefix(name, end, enc);
 #if defined DOSISH_DRIVE_LETTER || defined DOSISH_UNC
     root = name;
@@ -3640,9 +3640,9 @@ rb_file_s_basename(int argc, VALUE *argv)
     rb_encoding *enc;
 
     if (rb_scan_args(argc, argv, "11", &fname, &fext) == 2) {
-	rb_encoding *enc;
 	StringValue(fext);
-	if (!rb_enc_asciicompat(enc = rb_enc_get(fext))) {
+	enc = rb_enc_get(fext);
+	if (!rb_enc_asciicompat(enc)) {
 	    rb_raise(rb_eEncCompatError, "ascii incompatible character encodings: %s",
 		     rb_enc_name(enc));
 	}
@@ -4180,15 +4180,10 @@ test_check(int n, int argc, VALUE *argv)
 
     rb_secure(2);
     n+=1;
-    if (n != argc) rb_raise(rb_eArgError, "wrong number of arguments (%d for %d)", argc, n);
+    rb_check_arity(argc, n, n);
     for (i=1; i<n; i++) {
-	switch (TYPE(argv[i])) {
-	  case T_STRING:
-	  default:
+	if (!RB_TYPE_P(argv[i], T_FILE)) {
 	    FilePathValue(argv[i]);
-	    break;
-	  case T_FILE:
-	    break;
 	}
     }
 }
@@ -4258,9 +4253,18 @@ rb_f_test(int argc, VALUE *argv)
 {
     int cmd;
 
-    if (argc == 0) rb_raise(rb_eArgError, "wrong number of arguments (0 for 2..3)");
+    if (argc == 0) rb_check_arity(argc, 2, 3);
     cmd = NUM2CHR(argv[0]);
-    if (cmd == 0) goto unknown;
+    if (cmd == 0) {
+      unknown:
+	/* unknown command */
+	if (ISPRINT(cmd)) {
+	    rb_raise(rb_eArgError, "unknown command '%s%c'", cmd == '\'' || cmd == '\\' ? "\\" : "", cmd);
+	}
+	else {
+	    rb_raise(rb_eArgError, "unknown command \"\\x%02X\"", cmd);
+	}
+    }
     if (strchr("bcdefgGkloOprRsSuwWxXz", cmd)) {
 	CHECK(1);
 	switch (cmd) {
@@ -4379,15 +4383,7 @@ rb_f_test(int argc, VALUE *argv)
 	    return Qfalse;
 	}
     }
-  unknown:
-    /* unknown command */
-    if (ISPRINT(cmd)) {
-	rb_raise(rb_eArgError, "unknown command '%s%c'", cmd == '\'' || cmd == '\\' ? "\\" : "", cmd);
-    }
-    else {
-	rb_raise(rb_eArgError, "unknown command \"\\x%02X\"", cmd);
-    }
-    return Qnil;		/* not reached */
+    goto unknown;
 }
 
 

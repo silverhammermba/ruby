@@ -247,7 +247,8 @@ num2i32(VALUE x)
 	return rb_big2ulong_pack(x);
     }
     rb_raise(rb_eTypeError, "can't convert %s to `integer'", rb_obj_classname(x));
-    return 0;			/* not reached */
+
+    UNREACHABLE;
 }
 
 #define MAX_INTEGER_PACK_SIZE 8
@@ -1026,6 +1027,8 @@ pack_pack(VALUE ary, VALUE fmt)
 	    break;
 
 	  default:
+	    rb_warning("unknown pack directive '%c' in '%s'",
+		type, RSTRING_PTR(fmt));
 	    break;
 	}
     }
@@ -1991,7 +1994,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	  case 'M':
 	    {
 		VALUE buf = infected_str_new(0, send - s, str);
-		char *ptr = RSTRING_PTR(buf);
+		char *ptr = RSTRING_PTR(buf), *ss = s;
 		int c1, c2;
 
 		while (s < send) {
@@ -2010,8 +2013,10 @@ pack_unpack(VALUE str, VALUE fmt)
 			*ptr++ = *s;
 		    }
 		    s++;
+		    ss = s;
 		}
 		rb_str_set_len(buf, ptr - RSTRING_PTR(buf));
+		rb_str_buf_cat(buf, ss, send-ss);
 		ENCODING_CODERANGE_SET(buf, rb_ascii8bit_encindex(), ENC_CODERANGE_VALID);
 		UNPACK_PUSH(buf);
 	    }
@@ -2141,6 +2146,8 @@ pack_unpack(VALUE str, VALUE fmt)
 	    break;
 
 	  default:
+	    rb_warning("unknown unpack directive '%c' in '%s'",
+		type, RSTRING_PTR(fmt));
 	    break;
 	}
     }
@@ -2193,6 +2200,8 @@ rb_uv_to_utf8(char buf[6], unsigned long uv)
 	return 6;
     }
     rb_raise(rb_eRangeError, "pack(U): value out of range");
+
+    UNREACHABLE;
 }
 
 static const unsigned long utf8_limits[] = {

@@ -400,8 +400,11 @@ rb_inspect(VALUE obj)
 }
 
 static int
-inspect_i(ID id, VALUE value, VALUE str)
+inspect_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID id = (ID)k;
+    VALUE value = (VALUE)v;
+    VALUE str = (VALUE)a;
     VALUE str2;
     const char *ivname;
 
@@ -627,9 +630,9 @@ rb_obj_tap(VALUE obj)
  * Example:
  *
  *    class Foo
- *       def self.inherited(subclass)
- *          puts "New subclass: #{subclass}"
- *       end
+ *      def self.inherited(subclass)
+ *        puts "New subclass: #{subclass}"
+ *      end
  *    end
  *
  *    class Bar < Foo
@@ -1052,6 +1055,23 @@ static VALUE
 nil_to_a(VALUE obj)
 {
     return rb_ary_new2(0);
+}
+
+/*
+ * Document-method: to_h
+ *
+ *  call-seq:
+ *     nil.to_h    -> {}
+ *
+ *  Always returns an empty hash.
+ *
+ *     nil.to_h   #=> {}
+ */
+
+static VALUE
+nil_to_h(VALUE obj)
+{
+    return rb_hash_new();
 }
 
 /*
@@ -2480,6 +2500,8 @@ rb_Float(VALUE val)
       default:
 	return rb_convert_type(val, T_FLOAT, "Float", "to_f");
     }
+
+    UNREACHABLE;
 }
 
 /*
@@ -2891,6 +2913,7 @@ Init_Object(void)
     rb_define_method(rb_cNilClass, "to_f", nil_to_f, 0);
     rb_define_method(rb_cNilClass, "to_s", nil_to_s, 0);
     rb_define_method(rb_cNilClass, "to_a", nil_to_a, 0);
+    rb_define_method(rb_cNilClass, "to_h", nil_to_h, 0);
     rb_define_method(rb_cNilClass, "inspect", nil_inspect, 0);
     rb_define_method(rb_cNilClass, "&", false_and, 1);
     rb_define_method(rb_cNilClass, "|", false_or, 1);
@@ -2949,8 +2972,8 @@ Init_Object(void)
     rb_define_method(rb_cModule, "class_variable_get", rb_mod_cvar_get, 1);
     rb_define_method(rb_cModule, "class_variable_set", rb_mod_cvar_set, 2);
     rb_define_method(rb_cModule, "class_variable_defined?", rb_mod_cvar_defined, 1);
-    rb_define_method(rb_cModule, "public_constant", rb_mod_public_constant, -1);
-    rb_define_method(rb_cModule, "private_constant", rb_mod_private_constant, -1);
+    rb_define_method(rb_cModule, "public_constant", rb_mod_public_constant, -1); /* in variable.c */
+    rb_define_method(rb_cModule, "private_constant", rb_mod_private_constant, -1); /* in variable.c */
 
     rb_define_method(rb_cClass, "allocate", rb_obj_alloc, 0);
     rb_define_method(rb_cClass, "new", rb_class_new_instance, -1);

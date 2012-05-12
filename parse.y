@@ -11,6 +11,9 @@
 
 %{
 
+#ifndef PARSER_DEBUG
+#define PARSER_DEBUG 0
+#endif
 #define YYDEBUG 1
 #define YYERROR_VERBOSE 1
 #define YYSTACK_USE_ALLOCA 0
@@ -73,6 +76,10 @@ enum lex_state_e {
     EXPR_VALUE,			/* alike EXPR_BEG but label is disallowed. */
     EXPR_MAX_STATE
 };
+
+#if PARSER_DEBUG
+static const char *lex_state_name(enum lex_state_e state);
+#endif
 
 typedef VALUE stack_type;
 
@@ -213,6 +220,7 @@ struct parser_params {
     int parser_lpar_beg;
     int parser_in_single;
     int parser_in_def;
+    int parser_brace_nest;
     int parser_compile_for_eval;
     VALUE parser_cur_mid;
     int parser_in_defined;
@@ -287,6 +295,7 @@ static int parser_yyerror(struct parser_params*, const char*);
 #define class_nest		(parser->parser_class_nest)
 #define paren_nest		(parser->parser_paren_nest)
 #define lpar_beg		(parser->parser_lpar_beg)
+#define brace_nest		(parser->parser_brace_nest)
 #define in_single		(parser->parser_in_single)
 #define in_def			(parser->parser_in_def)
 #define compile_for_eval	(parser->parser_compile_for_eval)
@@ -373,8 +382,10 @@ static NODE *call_bin_op_gen(struct parser_params*,NODE*,ID,NODE*);
 static NODE *call_uni_op_gen(struct parser_params*,NODE*,ID);
 #define call_uni_op(recv,id) call_uni_op_gen(parser, (recv),(id))
 
-static NODE *new_args_gen(struct parser_params*,NODE*,NODE*,ID,NODE*,NODE*,ID,ID);
-#define new_args(f,o,r,p,k,kr,b) new_args_gen(parser, (f),(o),(r),(p),(k),(kr),(b))
+static NODE *new_args_gen(struct parser_params*,NODE*,NODE*,ID,NODE*,NODE*);
+#define new_args(f,o,r,p,t) new_args_gen(parser, (f),(o),(r),(p),(t))
+static NODE *new_args_tail_gen(struct parser_params*,NODE*,ID,ID);
+#define new_args_tail(k,kr,b) new_args_tail_gen(parser, (k),(kr),(b))
 
 static NODE *negate_lit(NODE*);
 static NODE *ret_args_gen(struct parser_params*,NODE*);
@@ -551,13 +562,31 @@ static VALUE ripper_id2sym(ID);
 
 #define escape_Qundef(x) ((x)==Qundef ? Qnil : (x))
 
+static inline VALUE
+new_args_gen(struct parser_params *parser, VALUE f, VALUE o, VALUE r, VALUE p, VALUE tail)
+{
+    NODE *t = (NODE *)tail;
+    VALUE k = t->u1.value, kr = t->u2.value, b = t->u3.value;
+    return params_new(f, o, r, p, k, kr, escape_Qundef(b));
+}
+#define new_args(f,o,r,p,t) new_args_gen(parser, (f),(o),(r),(p),(t))
+
+static inline VALUE
+new_args_tail_gen(struct parser_params *parser, VALUE k, VALUE kr, VALUE b)
+{
+    return (VALUE)rb_node_newnode(NODE_MEMO, k, kr, b);
+}
+#define new_args_tail(k,kr,b) new_args_tail_gen(parser, (k),(kr),(b))
+
 #define FIXME 0
 
 #endif /* RIPPER */
 
 #ifndef RIPPER
+# define Qnone 0
 # define ifndef_ripper(x) (x)
 #else
+# define Qnone Qnil
 # define ifndef_ripper(x)
 #endif
 
@@ -693,7 +722,7 @@ static void token_info_pop(struct parser_params*, const char *token);
 %type <node> expr_value arg_value primary_value
 %type <node> if_tail opt_else case_body cases opt_rescue exc_list exc_var opt_ensure
 %type <node> args call_args opt_call_args
-%type <node> paren_args opt_paren_args
+%type <node> paren_args opt_paren_args args_tail opt_args_tail block_args_tail opt_block_args_tail
 %type <node> command_args aref_args opt_block_arg block_arg var_ref var_lhs
 %type <node> command_asgn mrhs superclass block_call block_command
 %type <node> f_block_optarg f_block_opt
@@ -737,10 +766,11 @@ static void token_info_pop(struct parser_params*, const char *token);
 %token tLBRACE		/* { */
 %token tLBRACE_ARG	/* { */
 %token tSTAR		/* * */
+%token tDSTAR		/* ** */
 %token tAMPER		/* & */
 %token tLAMBDA		/* -> */
 %token tSYMBEG tSTRING_BEG tXSTRING_BEG tREGEXP_BEG tWORDS_BEG tQWORDS_BEG
-%token tSTRING_DBEG tSTRING_DVAR tSTRING_END tLAMBEG
+%token tSTRING_DBEG tSTRING_DEND tSTRING_DVAR tSTRING_END tLAMBEG
 
 /*
  *	precedence table
@@ -780,6 +810,10 @@ static void token_info_pop(struct parser_params*, const char *token);
 %nonassoc id_core_define_method
 %nonassoc id_core_define_singleton_method
 %nonassoc id_core_set_postexe
+%nonassoc id_core_hash_from_ary
+%nonassoc id_core_hash_merge_ary
+%nonassoc id_core_hash_merge_ptr
+%nonassoc id_core_hash_merge_kwd
 
 %token tLAST_TOKEN
 
@@ -1893,6 +1927,7 @@ op		: '|'		{ ifndef_ripper($$ = '|'); }
 		| '/'		{ ifndef_ripper($$ = '/'); }
 		| '%'		{ ifndef_ripper($$ = '%'); }
 		| tPOW		{ ifndef_ripper($$ = tPOW); }
+		| tDSTAR	{ ifndef_ripper($$ = tDSTAR); }
 		| '!'		{ ifndef_ripper($$ = '!'); }
 		| '~'		{ ifndef_ripper($$ = '~'); }
 		| tUPLUS	{ ifndef_ripper($$ = tUPLUS); }
@@ -2649,6 +2684,8 @@ primary		: literal
 		    }
 		| k_begin
 		    {
+			$<val>1 = cmdarg_stack;
+			cmdarg_stack = 0;
 		    /*%%%*/
 			$<num>$ = ruby_sourceline;
 		    /*%
@@ -2657,6 +2694,7 @@ primary		: literal
 		  bodystmt
 		  k_end
 		    {
+			cmdarg_stack = $<val>1;
 		    /*%%%*/
 			if ($3 == NULL) {
 			    $$ = NEW_NIL();
@@ -2674,7 +2712,6 @@ primary		: literal
 		    }
 		| tLPAREN_ARG expr {lex_state = EXPR_ENDARG;} rparen
 		    {
-			rb_warning0("(...) interpreted as grouped expression");
 		    /*%%%*/
 			$$ = $2;
 		    /*%
@@ -2745,7 +2782,7 @@ primary		: literal
 		| keyword_yield '(' rparen
 		    {
 		    /*%%%*/
-			$$ = NEW_YIELD(0, Qfalse);
+			$$ = NEW_YIELD(0);
 		    /*%
 			$$ = dispatch1(yield, dispatch1(paren, arg_new()));
 		    %*/
@@ -2753,7 +2790,7 @@ primary		: literal
 		| keyword_yield
 		    {
 		    /*%%%*/
-			$$ = NEW_YIELD(0, Qfalse);
+			$$ = NEW_YIELD(0);
 		    /*%
 			$$ = dispatch0(yield0);
 		    %*/
@@ -2789,7 +2826,6 @@ primary		: literal
 		    /*%%%*/
 			$2->nd_iter = NEW_FCALL($1, 0);
 			$$ = $2;
-			fixpos($2->nd_iter, $2);
 		    /*%
 			$$ = method_arg(dispatch1(fcall, $1), arg_new());
 			$$ = method_add_block($$, $2);
@@ -2802,7 +2838,6 @@ primary		: literal
 			block_dup_check($1->nd_args, $2);
 			$2->nd_iter = $1;
 			$$ = $2;
-			fixpos($$, $1);
 		    /*%
 			$$ = method_add_block($1, $2);
 		    %*/
@@ -2918,7 +2953,7 @@ primary		: literal
 				    0),
 				node_assign($2, NEW_DVAR(id)));
 
-			    args = new_args(m, 0, id, 0, 0, 0, 0);
+			    args = new_args(m, 0, id, 0, new_args_tail(0, 0, 0));
 			}
 			else {
 			    if (nd_type($2) == NODE_LASGN ||
@@ -2927,11 +2962,11 @@ primary		: literal
 				$2->nd_value = NEW_DVAR(id);
 				m->nd_plen = 1;
 				m->nd_next = $2;
-				args = new_args(m, 0, 0, 0, 0, 0, 0);
+				args = new_args(m, 0, 0, 0, new_args_tail(0, 0, 0));
 			    }
 			    else {
 				m->nd_next = node_assign(NEW_MASGN(NEW_LIST($2), 0), NEW_DVAR(id));
-				args = new_args(m, 0, id, 0, 0, 0, 0);
+				args = new_args(m, 0, id, 0, new_args_tail(0, 0, 0));
 			    }
 			}
 			scope = NEW_NODE(NODE_SCOPE, tbl, $8, args);
@@ -3335,350 +3370,97 @@ f_margs		: f_marg_list
 		    }
 		;
 
-block_param	: f_arg ',' f_block_optarg ',' f_rest_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
+
+block_args_tail	: f_block_kwarg ',' f_kwrest opt_f_block_arg
 		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, 0, $7, $8, $9);
-		    /*%
-			$$ = params_new($1, $3, $5, Qnil, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_rest_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, 0, $7, 0, $8);
-		    /*%
-			$$ = params_new($1, $3, $5, Qnil, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, 0, 0, 0, $6);
-		    /*%
-			$$ = params_new($1, $3, $5, Qnil, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_rest_arg ',' f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, $7, $9, $10, $11);
-		    /*%
-			$$ = params_new($1, $3, $5, $7, $9, $10, escape_Qundef($11));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_rest_arg ',' f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, $7, $9, 0, $10);
-		    /*%
-			$$ = params_new($1, $3, $5, $7, $9, Qnil, escape_Qundef($10));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, $7, 0, 0, $8);
-		    /*%
-			$$ = params_new($1, $3, $5, $7, Qnil, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, 0, $5, $6, $7);
-		    /*%
-			$$ = params_new($1, $3, Qnil, Qnil, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, 0, $5, 0, $6);
-		    /*%
-			$$ = params_new($1, $3, Qnil, Qnil, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, 0, 0, 0, $4);
-		    /*%
-			$$ = params_new($1, $3, Qnil, Qnil, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, $5, $7, $8, $9);
-		    /*%
-			$$ = params_new($1, $3, Qnil, $5, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, $5, $7, 0, $8);
-		    /*%
-			$$ = params_new($1, $3, Qnil, $5, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_block_optarg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, $5, 0, 0, $6);
-		    /*%
-			$$ = params_new($1, $3, Qnil, $5, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-                | f_arg ',' f_rest_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, 0, $5, $6, $7);
-		    /*%
-			$$ = params_new($1, Qnil, $3, Qnil, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-                | f_arg ',' f_rest_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, 0, $5, 0, $6);
-		    /*%
-			$$ = params_new($1, Qnil, $3, Qnil, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-                | f_arg ',' f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, 0, 0, 0, $4);
-		    /*%
-			$$ = params_new($1, Qnil, $3, Qnil, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_arg ','
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 1, 0, 0, 0, 0);
-		    /*%
-			$$ = params_new($1, Qnil, Qnil, Qnil, Qnil, Qnil, Qnil);
-                        dispatch1(excessed_comma, $$);
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, $5, $7, $8, $9);
-		    /*%
-			$$ = params_new($1, Qnil, $3, $5, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, $5, $7, 0, $8);
-		    /*%
-			$$ = params_new($1, Qnil, $3, $5, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, $5, 0, 0, $6);
-		    /*%
-			$$ = params_new($1, Qnil, $3, $5, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 0, 0, $3, $4, $5);
-		    /*%
-			$$ = params_new($1, Qnil,Qnil, Qnil, $3, $4, escape_Qundef($5));
-		    %*/
-		    }
-		| f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 0, 0, $3, 0, $4);
-		    /*%
-			$$ = params_new($1, Qnil,Qnil, Qnil, $3, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 0, 0, 0, 0, $2);
-		    /*%
-			$$ = params_new($1, Qnil,Qnil, Qnil, Qnil, Qnil, escape_Qundef($2));
-		    %*/
-		    }
-		| f_block_optarg ',' f_rest_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, 0, $5, $6, $7);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, Qnil, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_block_optarg ',' f_rest_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, 0, $5, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, Qnil, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_block_optarg ',' f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, 0, 0, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, Qnil, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_block_optarg ',' f_rest_arg ',' f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, $5, $7, $8, $9);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, $5, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_block_optarg ',' f_rest_arg ',' f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, $5, $7, 0, $8);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, $5, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_block_optarg ',' f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, $5, 0, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, $5, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_block_optarg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, 0, $3, $4, $5);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, Qnil, $3, $4, escape_Qundef($5));
-		    %*/
-		    }
-		| f_block_optarg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, 0, $3, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, Qnil, $3, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_block_optarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, 0, 0, 0, $2);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, Qnil, Qnil, Qnil, escape_Qundef($2));
-		    %*/
-		    }
-		| f_block_optarg ',' f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, $3, $5, $6, $7);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, $3, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_block_optarg ',' f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, $3, $5, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, $3, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_block_optarg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, $3, 0, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, $3, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_rest_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, 0, $3, $4, $5);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, Qnil, $3, $4, escape_Qundef($5));
-		    %*/
-		    }
-		| f_rest_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, 0, $3, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, Qnil, $3, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, 0, 0, 0, $2);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, Qnil, Qnil, Qnil, escape_Qundef($2));
-		    %*/
-		    }
-		| f_rest_arg ',' f_arg ',' f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, $3, $5, $6, $7);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, $3, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_rest_arg ',' f_arg ',' f_block_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, $3, $5, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, $3, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, $3, 0, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, $3, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_block_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, $1, $2, $3);
-		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, $1, $2, escape_Qundef($3));
-		    %*/
+			$$ = new_args_tail($1, $3, $4);
 		    }
 		| f_block_kwarg opt_f_block_arg
 		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, $1, 0, $2);
-		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, $1, Qnil, escape_Qundef($2));
-		    %*/
+			$$ = new_args_tail($1, Qnone, $2);
+		    }
+		| f_kwrest opt_f_block_arg
+		    {
+			$$ = new_args_tail(Qnone, $1, $2);
 		    }
 		| f_block_arg
 		    {
+			$$ = new_args_tail(Qnone, Qnone, $1);
+		    }
+		;
+
+opt_block_args_tail : ',' block_args_tail
+		    {
+			$$ = $2;
+		    }
+		| /* none */
+		    {
+			$$ = new_args_tail(Qnone, Qnone, Qnone);
+		    }
+ 		;
+block_param	: f_arg ',' f_block_optarg ',' f_rest_arg opt_block_args_tail
+		    {
+			$$ = new_args($1, $3, $5, Qnone, $6);
+		    }
+		| f_arg ',' f_block_optarg ',' f_rest_arg ',' f_arg opt_block_args_tail
+		    {
+			$$ = new_args($1, $3, $5, $7, $8);
+		    }
+		| f_arg ',' f_block_optarg opt_block_args_tail
+		    {
+			$$ = new_args($1, $3, Qnone, Qnone, $4);
+		    }
+		| f_arg ',' f_block_optarg ',' f_arg opt_block_args_tail
+		    {
+			$$ = new_args($1, $3, Qnone, $5, $6);
+		    }
+                | f_arg ',' f_rest_arg opt_block_args_tail
+		    {
+			$$ = new_args($1, Qnone, $3, Qnone, $4);
+		    }
+		| f_arg ','
+		    {
+			$$ = new_args($1, Qnone, 1, Qnone, new_args_tail(Qnone, Qnone, Qnone));
 		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, 0, 0, $1);
 		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, Qnil, Qnil, $1);
+                        dispatch1(excessed_comma, $$);
 		    %*/
+		    }
+		| f_arg ',' f_rest_arg ',' f_arg opt_block_args_tail
+		    {
+			$$ = new_args($1, Qnone, $3, $5, $6);
+		    }
+		| f_arg opt_block_args_tail
+		    {
+			$$ = new_args($1, Qnone, Qnone, Qnone, $2);
+		    }
+		| f_block_optarg ',' f_rest_arg opt_block_args_tail
+		    {
+			$$ = new_args(Qnone, $1, $3, Qnone, $4);
+		    }
+		| f_block_optarg ',' f_rest_arg ',' f_arg opt_block_args_tail
+		    {
+			$$ = new_args(Qnone, $1, $3, $5, $6);
+		    }
+		| f_block_optarg opt_block_args_tail
+		    {
+			$$ = new_args(Qnone, $1, Qnone, Qnone, $2);
+		    }
+		| f_block_optarg ',' f_arg opt_block_args_tail
+		    {
+			$$ = new_args(Qnone, $1, Qnone, $3, $4);
+		    }
+		| f_rest_arg opt_block_args_tail
+		    {
+			$$ = new_args(Qnone, Qnone, $1, Qnone, $2);
+		    }
+		| f_rest_arg ',' f_arg opt_block_args_tail
+		    {
+			$$ = new_args(Qnone, Qnone, $1, $3, $4);
+		    }
+		| block_args_tail
+		    {
+			$$ = new_args(Qnone, Qnone, Qnone, Qnone, $1);
 		    }
 		;
 
@@ -4453,16 +4235,21 @@ string_content	: tSTRING_CONTENT
 			lex_strterm = 0;
 			lex_state = EXPR_BEG;
 		    }
-		  compstmt '}'
+		    {
+			$<num>$ = brace_nest;
+			brace_nest = 0;
+		    }
+		  compstmt tSTRING_DEND
 		    {
 			cond_stack = $<val>1;
 			cmdarg_stack = $<val>2;
 			lex_strterm = $<node>3;
+			brace_nest = $<num>4;
 		    /*%%%*/
-			if ($4) $4->flags &= ~NODE_FL_NEWLINE;
-			$$ = new_evstr($4);
+			if ($5) $5->flags &= ~NODE_FL_NEWLINE;
+			$$ = new_evstr($5);
 		    /*%
-			$$ = dispatch1(string_embexpr, $4);
+			$$ = dispatch1(string_embexpr, $5);
 		    %*/
 		    }
 		;
@@ -4633,6 +4420,7 @@ superclass	: term
 		| '<'
 		    {
 			lex_state = EXPR_BEG;
+			command_start = TRUE;
 		    }
 		  expr_value term
 		    {
@@ -4666,349 +4454,94 @@ f_arglist	: '(' f_args rparen
 		    }
 		;
 
-f_args		: f_arg ',' f_optarg ',' f_rest_arg ',' f_kwarg f_kwrest opt_f_block_arg
+args_tail	: f_kwarg ',' f_kwrest opt_f_block_arg
 		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, 0, $7, $8, $9);
-		    /*%
-			$$ = params_new($1, $3, $5, Qnil, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_rest_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, 0, $7, 0, $8);
-		    /*%
-			$$ = params_new($1, $3, $5, Qnil, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, 0, 0, 0, $6);
-		    /*%
-			$$ = params_new($1, $3, $5, Qnil, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_rest_arg ',' f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, $7, $9, $10, $11);
-		    /*%
-			$$ = params_new($1, $3, $5, $7, $9, $10, escape_Qundef($11));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_rest_arg ',' f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, $7, $9, 0, $10);
-		    /*%
-			$$ = params_new($1, $3, $5, $7, $9, Qnil, escape_Qundef($10));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, $5, $7, 0, 0, $8);
-		    /*%
-			$$ = params_new($1, $3, $5, $7, Qnil, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, 0, $5, $6, $7);
-		    /*%
-			$$ = params_new($1, $3, Qnil, Qnil, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, 0, $5, 0, $6);
-		    /*%
-			$$ = params_new($1, $3, Qnil, Qnil, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_optarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, 0, 0, 0, $4);
-		    /*%
-			$$ = params_new($1, $3, Qnil, Qnil, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, $5, $7, $8, $9);
-		    /*%
-			$$ = params_new($1, $3, Qnil, $5, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, $5, $7, 0, $8);
-		    /*%
-			$$ = params_new($1, $3, Qnil, $5, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_optarg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, $3, 0, $5, 0, 0, $6);
-		    /*%
-			$$ = params_new($1, $3, Qnil, $5, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, 0, $5, $6, $7);
-		    /*%
-			$$ = params_new($1, Qnil, $3, Qnil, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, 0, $5, 0, $6);
-		    /*%
-			$$ = params_new($1, Qnil, $3, Qnil, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, 0, 0, 0, $4);
-		    /*%
-			$$ = params_new($1, Qnil, $3, Qnil, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, $5, $7, $8, $9);
-		    /*%
-			$$ = params_new($1, Qnil, $3, $5, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, $5, $7, 0, $8);
-		    /*%
-			$$ = params_new($1, Qnil, $3, $5, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_arg ',' f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, $3, $5, 0, 0, $6);
-		    /*%
-			$$ = params_new($1, Qnil, $3, $5, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 0, 0, $3, $4, $5);
-		    /*%
-			$$ = params_new($1, Qnil, Qnil, Qnil, $3, $4, escape_Qundef($5));
-		    %*/
-		    }
-		| f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 0, 0, $3, 0, $4);
-		    /*%
-			$$ = params_new($1, Qnil, Qnil, Qnil, $3, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args($1, 0, 0, 0, 0, 0, $2);
-		    /*%
-			$$ = params_new($1, Qnil, Qnil, Qnil, Qnil, Qnil, escape_Qundef($2));
-		    %*/
-		    }
-		| f_optarg ',' f_rest_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, 0, $5, $6, $7);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, Qnil, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_optarg ',' f_rest_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, 0, $5, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, Qnil, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_optarg ',' f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, 0, 0, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, Qnil, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_optarg ',' f_rest_arg ',' f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, $5, $7, $8, $9);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, $5, $7, $8, escape_Qundef($9));
-		    %*/
-		    }
-		| f_optarg ',' f_rest_arg ',' f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, $5, $7, 0, $8);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, $5, $7, Qnil, escape_Qundef($8));
-		    %*/
-		    }
-		| f_optarg ',' f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, $3, $5, 0, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, $1, $3, $5, Qnil, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_optarg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, 0, $3, $4, $5);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, Qnil, $3, $4, escape_Qundef($5));
-		    %*/
-		    }
-		| f_optarg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, 0, $3, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, Qnil, $3, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_optarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, 0, 0, 0, $2);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, Qnil, Qnil, Qnil, escape_Qundef($2));
-		    %*/
-		    }
-		| f_optarg ',' f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, $3, $5, $6, $7);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, $3, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_optarg ',' f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, $3, $5, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, $3, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_optarg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, $1, 0, $3, 0, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, $1, Qnil, $3, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_rest_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, 0, $3, $4, $5);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, Qnil, $3, $4, escape_Qundef($5));
-		    %*/
-		    }
-		| f_rest_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, 0, $3, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, Qnil, $3, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_rest_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, 0, 0, 0, $2);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, Qnil, Qnil, Qnil, escape_Qundef($2));
-		    %*/
-		    }
-		| f_rest_arg ',' f_arg ',' f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, $3, $5, $6, $7);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, $3, $5, $6, escape_Qundef($7));
-		    %*/
-		    }
-		| f_rest_arg ',' f_arg ',' f_kwarg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, $3, $5, 0, $6);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, $3, $5, Qnil, escape_Qundef($6));
-		    %*/
-		    }
-		| f_rest_arg ',' f_arg opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, $1, $3, 0, 0, $4);
-		    /*%
-			$$ = params_new(Qnil, Qnil, $1, $3, Qnil, Qnil, escape_Qundef($4));
-		    %*/
-		    }
-		| f_kwarg f_kwrest opt_f_block_arg
-		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, $1, $2, $3);
-		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, $1, $2, escape_Qundef($3));
-		    %*/
+			$$ = new_args_tail($1, $3, $4);
 		    }
 		| f_kwarg opt_f_block_arg
 		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, $1, 0, $2);
-		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, $1, Qnil, escape_Qundef($2));
-		    %*/
+			$$ = new_args_tail($1, Qnone, $2);
+		    }
+		| f_kwrest opt_f_block_arg
+		    {
+			$$ = new_args_tail(Qnone, $1, $2);
 		    }
 		| f_block_arg
 		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, 0, 0, $1);
-		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, Qnil, Qnil, $1);
-		    %*/
+			$$ = new_args_tail(Qnone, Qnone, $1);
+		    }
+		;
+
+opt_args_tail	: ',' args_tail
+		    {
+			$$ = $2;
 		    }
 		| /* none */
 		    {
-		    /*%%%*/
-			$$ = new_args(0, 0, 0, 0, 0, 0, 0);
-		    /*%
-			$$ = params_new(Qnil, Qnil, Qnil, Qnil, Qnil, Qnil, Qnil);
-		    %*/
+			$$ = new_args_tail(Qnone, Qnone, Qnone);
+		    }
+ 		;
+
+f_args		: f_arg ',' f_optarg ',' f_rest_arg opt_args_tail
+		    {
+			$$ = new_args($1, $3, $5, Qnone, $6);
+		    }
+		| f_arg ',' f_optarg ',' f_rest_arg ',' f_arg opt_args_tail
+		    {
+			$$ = new_args($1, $3, $5, $7, $8);
+		    }
+		| f_arg ',' f_optarg opt_args_tail
+		    {
+			$$ = new_args($1, $3, Qnone, Qnone, $4);
+		    }
+		| f_arg ',' f_optarg ',' f_arg opt_args_tail
+		    {
+			$$ = new_args($1, $3, Qnone, $5, $6);
+		    }
+		| f_arg ',' f_rest_arg opt_args_tail
+		    {
+			$$ = new_args($1, Qnone, $3, Qnone, $4);
+		    }
+		| f_arg ',' f_rest_arg ',' f_arg opt_args_tail
+		    {
+			$$ = new_args($1, Qnone, $3, $5, $6);
+		    }
+		| f_arg opt_args_tail
+		    {
+			$$ = new_args($1, Qnone, Qnone, Qnone, $2);
+		    }
+		| f_optarg ',' f_rest_arg opt_args_tail
+		    {
+			$$ = new_args(Qnone, $1, $3, Qnone, $4);
+		    }
+		| f_optarg ',' f_rest_arg ',' f_arg opt_args_tail
+		    {
+			$$ = new_args(Qnone, $1, $3, $5, $6);
+		    }
+		| f_optarg opt_args_tail
+		    {
+			$$ = new_args(Qnone, $1, Qnone, Qnone, $2);
+		    }
+		| f_optarg ',' f_arg opt_args_tail
+		    {
+			$$ = new_args(Qnone, $1, Qnone, $3, $4);
+		    }
+		| f_rest_arg opt_args_tail
+		    {
+			$$ = new_args(Qnone, Qnone, $1, Qnone, $2);
+		    }
+		| f_rest_arg ',' f_arg opt_args_tail
+		    {
+			$$ = new_args(Qnone, Qnone, $1, $3, $4);
+		    }
+		| args_tail
+		    {
+			$$ = new_args(Qnone, Qnone, Qnone, Qnone, $1);
+		    }
+		| /* none */
+		    {
+			$$ = new_args_tail(Qnone, Qnone, Qnone);
+			$$ = new_args(Qnone, Qnone, Qnone, Qnone, $$);
 		    }
 		;
 
@@ -5179,9 +4712,13 @@ f_kwarg		: f_kw
 		    }
 		;
 
-f_kwrest	: ',' tPOW tIDENTIFIER
+kwrest_mark	: tPOW
+		| tDSTAR
+		;
+
+f_kwrest	: kwrest_mark tIDENTIFIER
 		    {
-			$$ = $3;
+			$$ = $2;
 		    }
 		;
 
@@ -5403,6 +4940,16 @@ assoc		: arg_value tASSOC arg_value
 			$$ = dispatch2(assoc_new, $1, $2);
 		    %*/
 		    }
+		| tDSTAR arg_value
+		    {
+		    /*%%%*/
+			$$ = list_append(NEW_LIST(0), $2);
+		    /*%
+			$$ = dispatch1(assoc_splat, $2);
+		    %*/
+		    }
+		;
+
 		;
 
 operation	: tIDENTIFIER
@@ -6625,6 +6172,7 @@ parser_parse_string(struct parser_params *parser, NODE *quote)
 	    pushback(c);
 	    return tSTRING_DVAR;
 	  case '{':
+	    command_start = TRUE;
 	    return tSTRING_DBEG;
 	}
 	tokadd('#');
@@ -6850,6 +6398,7 @@ parser_here_document(struct parser_params *parser, NODE *here)
 		pushback(c);
 		return tSTRING_DVAR;
 	      case '{':
+		command_start = TRUE;
 		return tSTRING_DBEG;
 	    }
 	    tokadd('#');
@@ -7368,7 +6917,17 @@ parser_yylex(struct parser_params *parser)
 		return tOP_ASGN;
 	    }
 	    pushback(c);
-	    c = tPOW;
+	    if (IS_SPCARG(c)) {
+		rb_warning0("`**' interpreted as argument prefix");
+		c = tDSTAR;
+	    }
+	    else if (IS_BEG()) {
+		c = tDSTAR;
+	    }
+	    else {
+		warn_balanced("**", "argument prefix");
+		c = tPOW;
+	    }
 	}
 	else {
 	    if (c == '=') {
@@ -7490,6 +7049,8 @@ parser_yylex(struct parser_params *parser)
 	switch (lex_state) {
 	  case EXPR_FNAME: case EXPR_DOT:
 	    lex_state = EXPR_ARG; break;
+	  case EXPR_CLASS:
+	    command_start = TRUE;
 	  default:
 	    lex_state = EXPR_BEG; break;
 	}
@@ -7743,7 +7304,7 @@ parser_yylex(struct parser_params *parser)
 	    return tOP_ASGN;
 	}
 	if (c == '>') {
-	    lex_state = EXPR_ARG;
+	    lex_state = EXPR_ENDFN;
 	    return tLAMBDA;
 	}
 	if (IS_BEG() || (IS_SPCARG(c) && arg_ambiguous())) {
@@ -8006,6 +7567,9 @@ parser_yylex(struct parser_params *parser)
 	    lex_state = EXPR_ENDFN;
 	else
 	    lex_state = EXPR_ENDARG;
+	if (c == '}') {
+	    if (!brace_nest--) c = tSTRING_DEND;
+	}
 	return c;
 
       case ':':
@@ -8105,6 +7669,7 @@ parser_yylex(struct parser_params *parser)
 	}
 	else if (IS_SPCARG(-1)) {
 	    c = tLPAREN_ARG;
+	    rb_warning0("(...) interpreted as grouped expression");
 	}
 	paren_nest++;
 	COND_PUSH(0);
@@ -8138,6 +7703,7 @@ parser_yylex(struct parser_params *parser)
 	return c;
 
       case '{':
+	++brace_nest;
 	if (lpar_beg && lpar_beg == paren_nest) {
 	    lex_state = EXPR_BEG;
 	    lpar_beg = 0;
@@ -8473,8 +8039,10 @@ parser_yylex(struct parser_params *parser)
 			set_yylval_name(rb_intern(kw->name));
 			return kw->id[0];
 		    }
-		    if (kw->id[0] == keyword_do) {
+		    if (lex_state == EXPR_BEG) {
 			command_start = TRUE;
+		    }
+		    if (kw->id[0] == keyword_do) {
 			if (lpar_beg && lpar_beg == paren_nest) {
 			    lpar_beg = 0;
 			    --paren_nest;
@@ -8643,7 +8211,7 @@ block_append_gen(struct parser_params *parser, NODE *head, NODE *tail)
       case NODE_REDO:
       case NODE_RETRY:
 	if (RTEST(ruby_verbose)) {
-	    parser_warning(nd, "statement not reached");
+	    parser_warning(tail, "statement not reached");
 	}
 	break;
 
@@ -8920,6 +8488,28 @@ id_is_var_gen(struct parser_params *parser, ID id)
     return 0;
 }
 #endif /* !RIPPER */
+
+#if PARSER_DEBUG
+static const char *
+lex_state_name(enum lex_state_e state)
+{
+    switch (state) {
+      case EXPR_BEG:    return "EXPR_BEG";
+      case EXPR_END:    return "EXPR_END";
+      case EXPR_ENDARG: return "EXPR_ENDARG";
+      case EXPR_ENDFN:  return "EXPR_ENDFN";
+      case EXPR_ARG:    return "EXPR_ARG";
+      case EXPR_CMDARG: return "EXPR_CMDARG";
+      case EXPR_MID:    return "EXPR_MID";
+      case EXPR_FNAME:  return "EXPR_FNAME";
+      case EXPR_DOT:    return "EXPR_DOT";
+      case EXPR_CLASS: 	return "EXPR_CLASS";
+      case EXPR_VALUE: 	return "EXPR_VALUE";
+      case EXPR_MAX_STATE: break;
+    }
+    return NULL;
+}
+#endif
 
 #ifdef RIPPER
 static VALUE
@@ -9634,18 +9224,9 @@ ret_args_gen(struct parser_params *parser, NODE *node)
 static NODE *
 new_yield_gen(struct parser_params *parser, NODE *node)
 {
-    long state = Qtrue;
+    if (node) no_blockarg(parser, node);
 
-    if (node) {
-        no_blockarg(parser, node);
-	if (node && nd_type(node) == NODE_SPLAT) {
-	    state = Qtrue;
-	}
-    }
-    else {
-        state = Qfalse;
-    }
-    return NEW_YIELD(node, state);
+    return NEW_YIELD(node);
 }
 
 static NODE*
@@ -9677,13 +9258,12 @@ arg_blk_pass(NODE *node1, NODE *node2)
     return node1;
 }
 
+
 static NODE*
-new_args_gen(struct parser_params *parser, NODE *m, NODE *o, ID r, NODE *p, NODE *k, ID kr, ID b)
+new_args_gen(struct parser_params *parser, NODE *m, NODE *o, ID r, NODE *p, NODE *tail)
 {
     int saved_line = ruby_sourceline;
-    struct rb_args_info *args;
-
-    args = ALLOC(struct rb_args_info);
+    struct rb_args_info *args = tail->nd_ainfo;
 
     args->pre_args_num   = m ? rb_long2int(m->nd_plen) : 0;
     args->pre_init       = m ? m->nd_next : 0;
@@ -9693,13 +9273,31 @@ new_args_gen(struct parser_params *parser, NODE *m, NODE *o, ID r, NODE *p, NODE
     args->first_post_arg = p ? p->nd_pid : 0;
 
     args->rest_arg       = r;
-    args->block_arg      = b;
 
     args->opt_args       = o;
+
+    ruby_sourceline = saved_line;
+
+    return tail;
+}
+
+static NODE*
+new_args_tail_gen(struct parser_params *parser, NODE *k, ID kr, ID b)
+{
+    int saved_line = ruby_sourceline;
+    struct rb_args_info *args;
+    NODE *kw_rest_arg = 0;
+
+    args = ALLOC(struct rb_args_info);
+
+    args->block_arg      = b;
     args->kw_args        = k;
     if (k && !kr) kr = internal_id();
-    arg_var(kr);
-    args->kw_rest_arg    = NEW_DVAR(kr);
+    if (kr) {
+	arg_var(kr);
+	kw_rest_arg  = NEW_DVAR(kr);
+    }
+    args->kw_rest_arg    = kw_rest_arg;
 
     ruby_sourceline = saved_line;
     return NEW_NODE(NODE_ARGS, 0, 0, args);
@@ -10162,6 +9760,7 @@ static const struct {
     {'+',	"+(binary)"},
     {'-',	"-(binary)"},
     {tPOW,	"**"},
+    {tDSTAR,	"**"},
     {tUPLUS,	"+@"},
     {tUMINUS,	"-@"},
     {tCMP,	"<=>"},
@@ -10240,6 +9839,9 @@ Init_sym(void)
 
     (void)nodetype;
     (void)nodeline;
+#if PARSER_DEBUG
+    (void)lex_state_name(-1);
+#endif
 
     Init_id();
 }
@@ -10435,13 +10037,21 @@ register_symid_str(ID id, VALUE str)
 static int
 sym_check_asciionly(VALUE str)
 {
-    int cr = rb_enc_str_coderange(str);
-    if (cr == ENC_CODERANGE_BROKEN) {
+    if (!rb_enc_asciicompat(rb_enc_get(str))) return FALSE;
+    switch (rb_enc_str_coderange(str)) {
+      case ENC_CODERANGE_BROKEN:
     	rb_raise(rb_eEncodingError, "invalid encoding symbol");
+      case ENC_CODERANGE_7BIT:
+	return TRUE;
     }
-    return cr == ENC_CODERANGE_7BIT;
+    return FALSE;
 }
 
+/*
+ * _str_ itself will be registered at the global symbol table.  _str_
+ * can be modified before the registration, since the encoding will be
+ * set to ASCII-8BIT if it is a special global name.
+ */
 static ID intern_str(VALUE str);
 
 ID
@@ -10459,8 +10069,6 @@ rb_intern3(const char *name, long len, rb_encoding *enc)
     rb_enc_associate(str, enc);
     OBJ_FREEZE(str);
 
-    if (sym_check_asciionly(str)) enc = rb_usascii_encoding();
-
     if (st_lookup(global_symbols.sym_id, str, &data))
 	return (ID)data;
 
@@ -10473,7 +10081,7 @@ intern_str(VALUE str)
 {
     const char *name, *m, *e;
     long len, last;
-    rb_encoding *enc;
+    rb_encoding *enc, *symenc;
     unsigned char c;
     ID id;
     int mb;
@@ -10482,6 +10090,7 @@ intern_str(VALUE str)
     m = name;
     e = m + len;
     enc = rb_enc_get(str);
+    symenc = enc;
 
     if (rb_cString && !rb_enc_asciicompat(enc)) {
 	id = ID_JUNK;
@@ -10493,7 +10102,7 @@ intern_str(VALUE str)
       case '$':
 	id |= ID_GLOBAL;
 	if ((mb = is_special_global_name(++m, e, enc)) != 0) {
-	    if (!--mb) enc = rb_ascii8bit_encoding();
+	    if (!--mb) symenc = rb_usascii_encoding();
 	    goto new_id;
 	}
 	break;
@@ -10555,7 +10164,9 @@ intern_str(VALUE str)
 	}
     }
     if (m - name < len) id = ID_JUNK;
+    if (sym_check_asciionly(str)) symenc = rb_usascii_encoding();
   new_id:
+    if (symenc != enc) rb_enc_associate(str, symenc);
     if (global_symbols.last_id >= ~(ID)0 >> (ID_SCOPE_SHIFT+RUBY_SPECIAL_SHIFT)) {
 	if (len > 20) {
 	    rb_raise(rb_eRuntimeError, "symbol table overflow (symbol %.20s...)",
@@ -10587,21 +10198,11 @@ rb_intern(const char *name)
 ID
 rb_intern_str(VALUE str)
 {
-    rb_encoding *enc;
     st_data_t id;
-    int ascii = sym_check_asciionly(str);
 
     if (st_lookup(global_symbols.sym_id, str, &id))
 	return (ID)id;
-    if (ascii && (enc = rb_usascii_encoding()) != rb_enc_get(str)) {
-	str = rb_str_dup(str);
-	rb_enc_associate(str, enc);
-	OBJ_FREEZE(str);
-    }
-    else {
-	str = rb_str_dup_frozen(str);
-    }
-    return intern_str(str);
+    return intern_str(rb_str_dup(str));
 }
 
 VALUE
@@ -10806,6 +10407,34 @@ rb_check_id(volatile VALUE *namep)
     return (ID)0;
 }
 
+ID
+rb_check_id_cstr(const char *ptr, long len, rb_encoding *enc)
+{
+    st_data_t id;
+    struct RString fake_str;
+    const VALUE name = (VALUE)&fake_str;
+    fake_str.basic.flags = T_STRING|RSTRING_NOEMBED;
+    fake_str.basic.klass = rb_cString;
+    fake_str.as.heap.len = len;
+    fake_str.as.heap.ptr = (char *)ptr;
+    fake_str.as.heap.aux.capa = len;
+    rb_enc_associate(name, enc);
+
+    sym_check_asciionly(name);
+
+    if (st_lookup(global_symbols.sym_id, (st_data_t)name, &id))
+	return (ID)id;
+
+    if (rb_is_attrset_name(name)) {
+	fake_str.as.heap.len = len - 1;
+	if (st_lookup(global_symbols.sym_id, (st_data_t)name, &id)) {
+	    return rb_id_attrset((ID)id);
+	}
+    }
+
+    return (ID)0;
+}
+
 int
 rb_is_const_name(VALUE name)
 {
@@ -10871,6 +10500,7 @@ parser_initialize(struct parser_params *parser)
     parser->parser_class_nest = 0;
     parser->parser_paren_nest = 0;
     parser->parser_lpar_beg = 0;
+    parser->parser_brace_nest = 0;
     parser->parser_in_single = 0;
     parser->parser_in_def = 0;
     parser->parser_in_defined = 0;

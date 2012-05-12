@@ -370,6 +370,19 @@ ruby: $(PROGRAM)
 rubyw: $(WPROGRAM)
 stub: $(STUBPROGRAM)
 
+!if !exist(newline.c) && exist($(srcdir)/newline.c)
+NEWLINE_C = $(srcdir)/newline.c
+!else
+NEWLINE_C = newline.c
+!endif
+!if !exist(miniprelude.c) && exist($(srcdir)/miniprelude.c)
+MINIPRELUDE_C = $(srcdir)/miniprelude.c
+!else
+MINIPRELUDE_C = miniprelude.c
+!endif
+
+!include $(srcdir)/common.mk
+
 !ifdef SCRIPTPROGRAMS
 !else if [echo>scriptbin.mk SCRIPTPROGRAMS = \]
 !else if [for %I in ($(srcdir:/=\)\bin\*) do @echo>>scriptbin.mk %~nI.exe \]
@@ -380,9 +393,12 @@ stub: $(STUBPROGRAM)
 !endif
 !if [for %I in ($(srcdir:/=\)\bin\*) do @for %J in (\
 "%~nI.exe: $$(srcdir)/bin/%~nI" \
-"	@echo generating $$(@)" \
-"	@copy /b $$(STUBPROGRAM) +<< +$$(srcdir:/=\)\bin\%~nI $$(@) > nul" \
-"" "<<" "" \
+"	$$(ECHO) generating $$(@)" \
+"	$$(Q) copy /y /b $$(STUBPROGRAM) $$(@) > nul" \
+"	$$(Q) echo.>>$$(@)" \
+"	$$(Q) echo.>>$$(@)" \
+"	$$(Q) copy /b $$(@)+$$(srcdir:/=\)\bin\%~nI $$(@) > nul" \
+"" \
 ) do @echo.%~J>>scriptbin.mk]
 !else
 ! include scriptbin.mk
@@ -396,8 +412,6 @@ $(SCRIPTPROGRAMS): $(STUBPROGRAM)
 
 up::
 	@cd "$(srcdir:/=\)" && set LC_TIME=C && $(VCSUP)
-
-!include $(srcdir)/common.mk
 
 update-mspec:
 !if exist($(srcdir)/spec/mspec)
@@ -437,8 +451,8 @@ config.status: $(CONFIG_H)
 
 BANG = !
 
-!if exist(config.h)
-!include config.h
+!if exist($(RUBY_CONFIG_H))
+!include $(RUBY_CONFIG_H)
 !endif
 
 guard = INCLUDE_RUBY_CONFIG_H
@@ -460,7 +474,7 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 !if "$(ENABLE_WIN95)" == "yes" && "$(MACHINE)" == "x86"
 #define WIN95 1
 !endif
-#define RT_VER $(RT_VER)
+#define RUBY_MSVCRT_VERSION $(RT_VER)
 #define STDC_HEADERS 1
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_SYS_STAT_H 1
@@ -637,6 +651,7 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #define HAVE_SIGNBIT 1
 #define HAVE_TZNAME 1
 #define HAVE_DAYLIGHT 1
+#define HAVE_GMTIME_R 1
 #define SETPGRP_VOID 1
 #define RSHIFT(x,y) ((x)>>(int)y)
 #define HAVE_RB_FD_INIT 1
@@ -656,10 +671,6 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #define LOAD_RELATIVE 1
 #define DLEXT ".so"
 #define EXECUTABLE_EXTS $(EXECUTABLE_EXTS)
-#define RUBY_LIB_VERSION_STYLE 3	/* full */
-#define RUBY_LIB_PREFIX "/lib/$(RUBY_BASE_NAME)"
-#define RUBY_PLATFORM "$(arch)"
-#define RUBY_SITEARCH "$(sitearch)"
 #define RUBY_COREDLL "$(RT)"
 #define LIBRUBY_SO "$(LIBRUBY_SO)"
 #if 0
@@ -668,6 +679,13 @@ config.h: nul
 $(BANG)endif
 #endif
 #endif /* $(guard) */
+<<
+	@echo Creating verconf.h
+	@$(IFCHANGE) verconf.h <<
+#define RUBY_LIB_VERSION_STYLE 3	/* full */
+#define RUBY_LIB_PREFIX "/lib/$(RUBY_BASE_NAME)"
+#define RUBY_PLATFORM "$(arch)"
+#define RUBY_SITEARCH "$(sitearch)"
 <<
 	@exit > $(@:/=\)
 
@@ -913,7 +931,7 @@ clean-local::
 
 distclean-local::
 		$(Q)$(RM) ext\config.cache $(RBCONFIG:/=\) $(CONFIG_H:/=\)
-		-$(Q)$(RM) $(INSTALLED_LIST:/=\) $(arch_hdrdir:/=\)\ruby\config.h
+		-$(Q)$(RM) $(INSTALLED_LIST:/=\) $(arch_hdrdir:/=\)\ruby\config.h verconf.h
 		-$(Q)$(RMDIRS) $(arch_hdrdir:/=\)\ruby
 
 clean-rdoc distclean-rdoc realclean-rdoc:

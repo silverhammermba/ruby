@@ -65,6 +65,7 @@ module Test
         opts.version = MiniTest::Unit::VERSION
 
         options[:retry] = true
+        options[:job_status] ||= :replace if @tty
 
         opts.on '-h', '--help', 'Display this help.' do
           puts opts
@@ -228,7 +229,7 @@ module Test
         return false if !super
         result = false
         files.each {|f|
-          d = File.dirname(path = File.expand_path(f))
+          d = File.dirname(path = File.realpath(f))
           unless $:.include? d
             $: << d
           end
@@ -374,32 +375,60 @@ module Test
         exit c
       end
 
+      def terminal_width
+        unless @terminal_width
+          begin
+            require 'io/console'
+            width = $stdout.winsize[1]
+          rescue LoadError, NoMethodError, Errno::ENOTTY
+            width = ENV["COLUMNS"].to_i.nonzero? || 80
+          end
+          width -= 1 if /mswin|mingw/ =~ RUBY_PLATFORM
+          @terminal_width = width
+        end
+        @terminal_width
+      end
+
+      def del_status_line
+        return unless @tty
+        print "\r"+" "*@status_line_size+"\r"
+        $stdout.flush
+      end
+
+      def put_status(line)
+        return print(line) unless @tty
+        @status_line_size ||= 0
+        del_status_line
+        $stdout.flush
+        line = line[0...terminal_width]
+        print line
+        $stdout.flush
+        @status_line_size = line.size
+      end
+
+      def add_status(line)
+        return print(line) unless @tty
+        @status_line_size ||= 0
+        line = line[0...(terminal_width-@status_line_size)]
+        print line
+        $stdout.flush
+        @status_line_size += line.size
+      end
+
       def jobs_status
         return unless @options[:job_status]
-        puts "" unless @options[:verbose]
+        puts "" unless @options[:verbose] or @tty
         status_line = @workers.map(&:to_s).join(" ")
-        if @options[:job_status] == :replace and $stdout.tty?
-          @terminal_width ||=
-            begin
-              require 'io/console'
-              $stdout.winsize[1]
-            rescue LoadError, NoMethodError
-              ENV["COLUMNS"].to_i.nonzero? || 80
-            end
-          @jstr_size ||= 0
-          del_jobs_status
-          $stdout.flush
-          print status_line[0...@terminal_width]
-          $stdout.flush
-          @jstr_size = [status_line.size, @terminal_width].min
+        if @options[:job_status] == :replace and @tty
+          put_status status_line
         else
           puts status_line
         end
       end
 
       def del_jobs_status
-        return unless @options[:job_status] == :replace && @jstr_size.nonzero?
-        print "\r"+" "*@jstr_size+"\r"
+        return unless @options[:job_status] == :replace && @status_line_size.nonzero?
+        del_status_line
       end
 
       def after_worker_quit(worker)
@@ -429,7 +458,12 @@ module Test
 
           # Array of workers.
           launch_worker = Proc.new {
-            worker = Worker.launch(@options[:ruby],@args)
+            begin
+              worker = Worker.launch(@options[:ruby],@args)
+            rescue => e
+              warn "ERROR: Failed to launch job process - #{e.class}: #{e.message}"
+              exit 1
+            end
             worker.hook(:dead) do |w,info|
               after_worker_quit w
               after_worker_down w, *info if !info.empty? && !worker.quit_called
@@ -536,50 +570,49 @@ module Test
                 end
             end
           end
-          @workers.each do |worker|
-            begin
-              timeout(1) do
-                worker.quit
-              end
-            rescue Errno::EPIPE
-            rescue Timeout::Error
-            end
-            worker.close
-          end
-          begin
-            timeout(0.2*@workers.size) do
-              Process.waitall
-            end
-          rescue Timeout::Error
+
+          if @workers
             @workers.each do |worker|
               begin
-                Process.kill(:KILL,worker.pid)
-              rescue Errno::ESRCH; end
+                timeout(1) do
+                  worker.quit
+                end
+              rescue Errno::EPIPE
+              rescue Timeout::Error
+              end
+              worker.close
+            end
+
+            begin
+              timeout(0.2*@workers.size) do
+                Process.waitall
+              end
+            rescue Timeout::Error
+              @workers.each do |worker|
+                begin
+                  Process.kill(:KILL,worker.pid)
+                rescue Errno::ESRCH; end
+              end
             end
           end
 
-          if @interrupt || !@options[:retry] || @need_quit
+          if !(@interrupt || !@options[:retry] || @need_quit) && @workers
+            @options[:parallel] = false
+            suites, rep = rep.partition {|r| r[:testcase] && r[:file] && !r[:report].empty?}
+            suites.map {|r| r[:file]}.uniq.each {|file| require file}
+            suites.map! {|r| eval("::"+r[:testcase])}
+            puts ""
+            puts "Retrying..."
+            puts ""
+            _run_suites(suites, type)
+          end
+          unless rep.empty?
             rep.each do |r|
               report.push(*r[:report])
             end
             @errors   += rep.map{|x| x[:result][0] }.inject(:+)
             @failures += rep.map{|x| x[:result][1] }.inject(:+)
             @skips    += rep.map{|x| x[:result][2] }.inject(:+)
-          else
-            puts ""
-            puts "Retrying..."
-            puts ""
-            rep.each do |r|
-              if r[:testcase] && r[:file] && !r[:report].empty?
-                require r[:file]
-                _run_suite(eval("::"+r[:testcase]),type)
-              else
-                report.push(*r[:report])
-                @errors += r[:result][0]
-                @failures += r[:result][1]
-                @skips += r[:result][2]
-              end
-            end
           end
           if @warnings
             warn ""
@@ -598,8 +631,10 @@ module Test
       end
 
       def _run_suites suites, type
+        _prepare_run(suites, type)
         @interrupt = nil
         result = []
+        GC.start
         if @options[:parallel]
           _run_parallel suites, type, result
         else
@@ -618,26 +653,74 @@ module Test
         result
       end
 
+      alias mini_run_suite _run_suite
+
+      def output
+        (@output ||= nil) || super
+      end
+
+      def _prepare_run(suites, type)
+        if @tty and !@verbose
+          @verbose = !options[:parallel]
+          @output = StatusLineOutput.new(self)
+        end
+        if /\A\/(.*)\/\z/ =~ (filter = options[:filter])
+          options[:filter] = filter = Regexp.new($1)
+        end
+        type = "#{type}_methods"
+        total = if filter
+                  suites.inject(0) {|n, suite| n + suite.send(type).grep(filter).size}
+                else
+                  suites.inject(0) {|n, suite| n + suite.send(type).size}
+                end
+        @test_count = 0
+        @total_tests = total.to_s(10)
+      end
+
+      def new_test(s)
+        put_status("[#{(@test_count += 1).to_s(10).rjust(@total_tests.size)}/#{@total_tests}] #{s}")
+      end
+
+      def _print(s); $stdout.print(s); end
+      def succeed; del_status_line; end
+
+      def failed(s)
+        sep = "\n"
+        @report_count ||= 0
+        report.each do |msg|
+          next if @options[:hide_skip] and msg.start_with? "Skipped:"
+          msg = msg.split(/$/, 2)
+          $stdout.printf("%s%s%3d) %s%s%s\n",
+                         sep, @failed_color, @report_count += 1,
+                         msg[0], @reset_color, msg[1])
+          sep = nil
+        end
+        report.clear
+      end
+
       # Overriding of MiniTest::Unit#puke
       def puke klass, meth, e
         # TODO:
         #   this overriding is for minitest feature that skip messages are
         #   hidden when not verbose (-v), note this is temporally.
-        e = case e
-            when MiniTest::Skip then
-              @skips += 1
-              return "." if /no message given\z/ =~ e.message
-              "Skipped:\n#{meth}(#{klass}) [#{location e}]:\n#{e.message}\n"
-            when MiniTest::Assertion then
-              @failures += 1
-              "Failure:\n#{meth}(#{klass}) [#{location e}]:\n#{e.message}\n"
-            else
-              @errors += 1
-              bt = MiniTest::filter_backtrace(e.backtrace).join "\n    "
-              "Error:\n#{meth}(#{klass}):\n#{e.class}: #{e.message}\n    #{bt}\n"
-            end
-        @report << e
-        e[0, 1]
+        n = report.size
+        rep = super
+        if MiniTest::Skip === e and /no message given\z/ =~ e.message
+          report.slice!(n..-1)
+          rep = "."
+        end
+        rep
+      end
+
+      def initialize # :nodoc:
+        super
+        @tty = $stdout.tty?
+        if @tty and /mswin|mingw/ !~ RUBY_PLATFORM and /dumb/ !~ ENV["TERM"]
+          @failed_color = "\e[#{ENV['FAILED_COLOR']||'31'}m"
+          @reset_color = "\e[m"
+        else
+          @failed_color = @reset_color = ""
+        end
       end
 
       def status(*args)
@@ -650,6 +733,27 @@ module Test
         result = super
         puts "\nruby -v: #{RUBY_DESCRIPTION}"
         result
+      end
+    end
+
+    class StatusLineOutput < Struct.new(:runner)
+      def puts(*a) $stdout.puts(*a) unless a.empty? end
+      def respond_to_missing?(*a) $stdout.respond_to?(*a) end
+      def method_missing(*a, &b) $stdout.__send__(*a, &b) end
+
+      def print(s)
+        case s
+        when /\A(.*\#.*) = \z/
+          runner.new_test($1)
+        when /\A(.* s) = \z/
+          runner.add_status(" = "+$1.chomp)
+        when /\A\.\z/
+          runner.succeed
+        when /\A[EFS]\z/
+          runner.failed(s)
+        else
+          $stdout.print(s)
+        end
       end
     end
 
@@ -686,6 +790,18 @@ module Test
         new(*args).run
       end
     end
+  end
+end
+
+class MiniTest::Unit::TestCase
+  undef run_test
+  RUN_TEST_TRACE = "#{__FILE__}:#{__LINE__+3}:in `run_test'".freeze
+  def run_test(name)
+    progname, $0 = $0, "#{$0}: #{self.class}##{name}"
+    self.__send__(name)
+  ensure
+    $@.delete(RUN_TEST_TRACE) if $@
+    $0 = progname
   end
 end
 

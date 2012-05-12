@@ -775,6 +775,7 @@ rb_str_to_inum(VALUE str, int base, int badcheck)
     VALUE ret;
 
     StringValue(str);
+    rb_must_asciicompat(str);
     if (badcheck) {
 	s = StringValueCStr(str);
     }
@@ -2975,32 +2976,31 @@ big_fdiv(VALUE x, VALUE y)
     switch (TYPE(y)) {
       case T_FIXNUM:
 	y = rb_int2big(FIX2LONG(y));
-      case T_BIGNUM: {
+      case T_BIGNUM:
 	bigtrunc(y);
 	l = RBIGNUM_LEN(y) - 1;
 	ey = l * BITSPERDIG;
 	ey += bdigbitsize(BDIGITS(y)[l]);
 	ey -= DBL_BIGDIG * BITSPERDIG;
 	if (ey) y = big_shift(y, ey);
-      bignum:
-	bigdivrem(x, y, &z, 0);
-	l = ex - ey;
-#if SIZEOF_LONG > SIZEOF_INT
-	{
-	    /* Visual C++ can't be here */
-	    if (l > INT_MAX) return DBL2NUM(INFINITY);
-	    if (l < INT_MIN) return DBL2NUM(0.0);
-	}
-#endif
-	return DBL2NUM(ldexp(big2dbl(z), (int)l));
-      }
+	break;
       case T_FLOAT:
 	y = dbl2big(ldexp(frexp(RFLOAT_VALUE(y), &i), DBL_MANT_DIG));
 	ey = i - DBL_MANT_DIG;
-	goto bignum;
+	break;
+      default:
+	rb_bug("big_fdiv");
     }
-    rb_bug("big_fdiv");
-    /* NOTREACHED */
+    bigdivrem(x, y, &z, 0);
+    l = ex - ey;
+#if SIZEOF_LONG > SIZEOF_INT
+    {
+	/* Visual C++ can't be here */
+	if (l > INT_MAX) return DBL2NUM(INFINITY);
+	if (l < INT_MIN) return DBL2NUM(0.0);
+    }
+#endif
+    return DBL2NUM(ldexp(big2dbl(z), (int)l));
 }
 
 /*
@@ -3095,10 +3095,11 @@ rb_big_pow(VALUE x, VALUE y)
 	else {
 	    VALUE z = 0;
 	    SIGNED_VALUE mask;
-	    const long BIGLEN_LIMIT = 1024*1024 / SIZEOF_BDIGITS;
+	    const long xlen = RBIGNUM_LEN(x) - 1;
+	    const long xbits = ffs(RBIGNUM_DIGITS(x)[xlen]) + SIZEOF_BDIGITS*BITSPERDIG*xlen;
+	    const long BIGLEN_LIMIT = BITSPERDIG*1024*1024;
 
-	    if ((RBIGNUM_LEN(x) > BIGLEN_LIMIT) ||
-		(RBIGNUM_LEN(x) > BIGLEN_LIMIT / yy)) {
+	    if ((xbits > BIGLEN_LIMIT) || (xbits * yy > BIGLEN_LIMIT)) {
 		rb_warn("in a**b, b may be too big");
 		d = (double)yy;
 		break;
@@ -3662,17 +3663,13 @@ static VALUE
 rb_big_coerce(VALUE x, VALUE y)
 {
     if (FIXNUM_P(y)) {
-	return rb_assoc_new(rb_int2big(FIX2LONG(y)), x);
+	y = rb_int2big(FIX2LONG(y));
     }
-    else if (RB_TYPE_P(y, T_BIGNUM)) {
-       return rb_assoc_new(y, x);
-    }
-    else {
+    else if (!RB_TYPE_P(y, T_BIGNUM)) {
 	rb_raise(rb_eTypeError, "can't coerce %s to Bignum",
 		 rb_obj_classname(y));
     }
-    /* not reached */
-    return Qnil;
+    return rb_assoc_new(y, x);
 }
 
 /*

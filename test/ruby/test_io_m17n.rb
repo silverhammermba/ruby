@@ -71,7 +71,7 @@ class TestIO_M17N < Test::Unit::TestCase
 #{encdump expected} expected but not equal to
 #{encdump actual}.
 EOT
-    assert_block(full_message) { expected == actual }
+    assert_equal(expected, actual, full_message)
   end
 
   def test_open_r
@@ -984,6 +984,33 @@ EOT
          end)
   end
 
+  def test_set_encoding_identical
+    #bug5568 = '[ruby-core:40727]'
+    bug6324 = '[ruby-core:44455]'
+    open(__FILE__, "r") do |f|
+      assert_warn('', bug6324) {
+        f.set_encoding("eucjp:euc-jp")
+      }
+      assert_warn('', bug6324) {
+        f.set_encoding("eucjp", "euc-jp")
+      }
+      assert_warn('', bug6324) {
+        f.set_encoding(Encoding::EUC_JP, "euc-jp")
+      }
+      assert_warn('', bug6324) {
+        f.set_encoding("eucjp", Encoding::EUC_JP)
+      }
+      assert_warn('', bug6324) {
+        f.set_encoding(Encoding::EUC_JP, Encoding::EUC_JP)
+      }
+      nonstr = Object.new
+      def nonstr.to_str; "eucjp"; end
+      assert_warn('', bug6324) {
+        f.set_encoding(nonstr, nonstr)
+      }
+    end
+  end
+
   def test_set_encoding_undef
     pipe(proc do |w|
            w << "\ufffd"
@@ -1058,6 +1085,17 @@ EOT
         f.set_encoding("iso-2022-jp")
       }
     }
+  end
+
+  def test_set_encoding_unsupported
+    bug5567 = '[ruby-core:40726]'
+    IO.pipe do |r, w|
+      assert_nothing_raised(bug5567) do
+        assert_warning(/Unsupported/, bug5567) {r.set_encoding("fffffffffffxx")}
+        assert_warning(/Unsupported/, bug5567) {r.set_encoding("fffffffffffxx", "us-ascii")}
+        assert_warning(/Unsupported/, bug5567) {r.set_encoding("us-ascii", "fffffffffffxx")}
+      end
+    end
   end
 
   def test_textmode_twice
@@ -2378,4 +2416,51 @@ EOT
     }
     assert_equal(paths.map(&:encoding), encs, bug6072)
   end
+
+  def test_pos_dont_move_cursor_position
+    bug6179 = '[ruby-core:43497]'
+    with_tmpdir {
+      str = "line one\r\nline two\r\nline three\r\n"
+      generate_file("tmp", str)
+      open("tmp", "r") do |f|
+        assert_equal("line one\n", f.readline)
+        assert_equal(10, f.pos, bug6179)
+        assert_equal("line two\n", f.readline, bug6179)
+        assert_equal(20, f.pos, bug6179)
+        assert_equal("line three\n", f.readline, bug6179)
+      end
+    }
+  end if /mswin|mingw/ =~ RUBY_PLATFORM
+
+  def test_pos_with_buffer_end_cr
+    bug6401 = '[ruby-core:44874]'
+    with_tmpdir {
+      # Read buffer size is 8191. This generates '\r' at 8191.
+      lines = ["X" * 8187, "X"]
+      generate_file("tmp", lines.join("\r\n") + "\r\n")
+
+      open("tmp", "r") do |f|
+        lines.each do |line|
+          f.pos
+          assert_equal(line, f.readline.chomp, bug6401)
+        end
+      end
+    }
+  end if /mswin|mingw/ =~ RUBY_PLATFORM
+
+  def test_read_crlf_and_eof
+    bug6271 = '[ruby-core:44189]'
+    with_tmpdir {
+      str = "a\r\nb\r\nc\r\n"
+      generate_file("tmp", str)
+      open("tmp", "r") do |f|
+        i = 0
+        until f.eof?
+          assert_equal(str[i], f.read(1), bug6271)
+          i += 1
+        end
+        assert_equal(str.size, i, bug6271)
+      end
+    }
+  end if /mswin|mingw/ =~ RUBY_PLATFORM
 end

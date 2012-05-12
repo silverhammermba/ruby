@@ -465,6 +465,8 @@ static rb_thread_t *register_cached_thread_and_wait(void);
 #define STACKADDR_AVAILABLE 1
 #elif defined HAVE_PTHREAD_GET_STACKADDR_NP && defined HAVE_PTHREAD_GET_STACKSIZE_NP
 #define STACKADDR_AVAILABLE 1
+void *pthread_get_stackaddr_np(pthread_t);
+size_t pthread_get_stacksize_np(pthread_t);
 #elif defined HAVE_THR_STKSEGMENT || defined HAVE_PTHREAD_STACKSEG_NP
 #define STACKADDR_AVAILABLE 1
 #elif defined HAVE_PTHREAD_GETTHRDS_NP
@@ -1025,7 +1027,8 @@ ubf_select(void *ptr)
 }
 
 static void
-ping_signal_thread_list(void) {
+ping_signal_thread_list(void)
+{
     if (signal_thread_list_anchor.next) {
 	FGLOCK(&signal_thread_list_lock, {
 	    struct signal_thread_list *list;

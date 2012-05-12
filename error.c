@@ -288,7 +288,7 @@ rb_bug(const char *fmt, ...)
     report_bug(file, line, fmt, args);
     va_end(args);
 
-#if defined(_WIN32) && defined(RT_VER) && RT_VER >= 80
+#if defined(_WIN32) && defined(RUBY_MSVCRT_VERSION) && RUBY_MSVCRT_VERSION >= 80
     _set_abort_behavior( 0, _CALL_REPORTFAULT);
 #endif
 
@@ -685,14 +685,12 @@ rb_check_backtrace(VALUE bt)
     static const char err[] = "backtrace must be Array of String";
 
     if (!NIL_P(bt)) {
-	int t = TYPE(bt);
-
-	if (t == T_STRING) return rb_ary_new3(1, bt);
-	if (t != T_ARRAY) {
+	if (RB_TYPE_P(bt, T_STRING)) return rb_ary_new3(1, bt);
+	if (!RB_TYPE_P(bt, T_ARRAY)) {
 	    rb_raise(rb_eTypeError, err);
 	}
 	for (i=0;i<RARRAY_LEN(bt);i++) {
-	    if (TYPE(RARRAY_PTR(bt)[i]) != T_STRING) {
+	    if (!RB_TYPE_P(RARRAY_PTR(bt)[i], T_STRING)) {
 		rb_raise(rb_eTypeError, err);
 	    }
 	}
@@ -1045,14 +1043,14 @@ name_err_mesg_to_str(VALUE obj)
 	int state = 0;
 
 	obj = ptr[1];
-	switch (TYPE(obj)) {
-	  case T_NIL:
+	switch (obj) {
+	  case Qnil:
 	    desc = "nil";
 	    break;
-	  case T_TRUE:
+	  case Qtrue:
 	    desc = "true";
 	    break;
-	  case T_FALSE:
+	  case Qfalse:
 	    desc = "false";
 	    break;
 	  default:
@@ -1726,6 +1724,19 @@ Init_Exception(void)
     rb_mErrno = rb_define_module("Errno");
 
     rb_define_global_function("warn", rb_warn_m, -1);
+}
+
+void
+rb_enc_raise(rb_encoding *enc, VALUE exc, const char *fmt, ...)
+{
+    va_list args;
+    VALUE mesg;
+
+    va_start(args, fmt);
+    mesg = rb_enc_vsprintf(enc, fmt, args);
+    va_end(args);
+
+    rb_exc_raise(rb_exc_new3(exc, mesg));
 }
 
 void

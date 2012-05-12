@@ -1180,6 +1180,12 @@ class TestProcess < Test::Unit::TestCase
   rescue NotImplementedError
   end
 
+  def test_seteuid_name
+    user = ENV["USER"] or return
+    assert_nothing_raised(TypeError) {Process.euid = user}
+  rescue NotImplementedError
+  end
+
   def test_getegid
     assert_kind_of(Integer, Process.egid)
   end
@@ -1353,5 +1359,14 @@ class TestProcess < Test::Unit::TestCase
     IO.popen([RUBY, "-e", ""]) {|io|
       assert(io.close_on_exec?)
     }
+  end
+
+  def test_execopts_new_pgroup
+    return unless windows?
+
+    assert_nothing_raised { system(*TRUECOMMAND, :new_pgroup=>true) }
+    assert_nothing_raised { system(*TRUECOMMAND, :new_pgroup=>false) }
+    assert_nothing_raised { spawn(*TRUECOMMAND, :new_pgroup=>true) }
+    assert_nothing_raised { IO.popen([*TRUECOMMAND, :new_pgroup=>true]) {} }
   end
 end

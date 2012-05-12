@@ -15,6 +15,7 @@
 =end
 
 require "mkmf"
+require_relative 'deprecation'
 
 dir_config("openssl")
 dir_config("kerberos")
@@ -27,13 +28,6 @@ message "=== OpenSSL for Ruby configurator ===\n"
 #
 if with_config("debug") or enable_config("debug")
   $defs.push("-DOSSL_DEBUG") unless $defs.include? "-DOSSL_DEBUG"
-end
-
-##
-# Automatically adds -Wall flag for compilation when GCC is used
-#
-if CONFIG['GCC'] == 'yes'
-  $CPPFLAGS += " -Wall" unless $CPPFLAGS.split.include? "-Wall"
 end
 
 message "=== Checking for system dependent stuff... ===\n"
@@ -63,6 +57,9 @@ end
 unless have_header("openssl/conf_api.h")
   message "OpenSSL 0.9.6 or later required.\n"
   exit 1
+end
+unless OpenSSL.check_func("SSL_library_init()", "openssl/ssl.h")
+  abort "Ignore OpenSSL broken by Apple"
 end
 
 message "=== Checking for OpenSSL features... ===\n"
@@ -106,6 +103,12 @@ have_func("OPENSSL_cleanse")
 have_func("SSLv2_method")
 have_func("SSLv2_server_method")
 have_func("SSLv2_client_method")
+have_func("TLSv1_1_method")
+have_func("TLSv1_1_server_method")
+have_func("TLSv1_1_client_method")
+have_func("TLSv1_2_method")
+have_func("TLSv1_2_server_method")
+have_func("TLSv1_2_client_method")
 unless have_func("SSL_set_tlsext_host_name", ['openssl/ssl.h'])
   have_macro("SSL_set_tlsext_host_name", ['openssl/ssl.h']) && $defs.push("-DHAVE_SSL_SET_TLSEXT_HOST_NAME")
 end
@@ -146,9 +149,6 @@ have_struct_member("X509_ATTRIBUTE", "single", "openssl/x509.h")
 
 message "=== Checking done. ===\n"
 
-if try_compile("", flag = " -Wno-deprecated-declarations")
-  $warnflags << flag
-end
 create_header
 create_makefile("openssl")
 message "Done.\n"

@@ -19,8 +19,13 @@ AC_ARG_WITH(baseruby,
 	[
 		BASERUBY="ruby"
 	])
-test "`RUBYOPT=- $BASERUBY -e 'p 42' 2>/dev/null`" = 42 ||
+if test "`RUBYOPT=- $BASERUBY -e 'p 42' 2>/dev/null`" = 42; then
+    if test "`RUBYOPT=- $BASERUBY --disable=gems -e 'p 42' 2>/dev/null`" = 42; then
+	BASERUBY="$BASERUBY --disable=gems"
+    fi
+else
     BASERUBY="echo executable host ruby is required.  use --with-baseruby option.; false"
+fi
 AC_SUBST(BASERUBY)
 
 AC_DEFUN([RUBY_MINGW32],
@@ -343,6 +348,9 @@ AS_CASE(["$target_os"],
 				   sed -n '/^[[ 	]]*dll name: \(msvc.*\)\.dll$/{s//\1/p;q;}'`],
 		    [rb_cv_msvcrt=msvcrt])
 	test "$rb_cv_msvcrt" = "" && rb_cv_msvcrt=msvcrt])
+	RT_VER=`echo "$rb_cv_msvcrt" | tr -cd [0-9]`
+	test "$RT_VER" = "" && RT_VER=60
+	AC_DEFINE_UNQUOTED(RUBY_MSVCRT_VERSION, $RT_VER)
     ])
     : ${enable_shared=yes}
     ],
@@ -365,11 +373,11 @@ fi
 MAKEDIRS="$MKDIR_P"
 AC_SUBST(MAKEDIRS)
 
-AC_CHECK_PROG(DOT, dot)
-AC_CHECK_PROG(DOXYGEN, doxygen)
+AC_CHECK_PROGS(DOT, dot)
+AC_CHECK_PROGS(DOXYGEN, doxygen)
 
-AC_CHECK_PROG(PKG_CONFIG, pkg-config, [], [], [],
-    [`$as_dir/$ac_word$ac_exec_ext --print-errors --version > /dev/null 2>&1 || continue`])
+AC_CHECK_PROG(PKG_CONFIG, pkg-config, [pkg-config], [], [],
+    [`"$as_dir/$ac_word$ac_exec_ext" --print-errors --version > /dev/null 2>&1 || echo "$as_dir/$ac_word$ac_exec_ext"`])
 
 # checks for UNIX variants that set C preprocessor variables
 AC_USE_SYSTEM_EXTENSIONS
@@ -471,11 +479,14 @@ if test "$GCC:${warnflags+set}:no" = yes::no; then
 	    wflag=`echo x$wflag | sed 's/^x-Werror=/-W/;s/^x//'`
 	fi
 	ok=no
-	RUBY_TRY_CFLAGS($wflag, [warnflags="${warnflags+$warnflags }$wflag" ok=yes])
+	RUBY_TRY_CFLAGS($wflag, [
+	    RUBY_APPEND_OPTIONS(warnflags, $wflag)
+	    ok=yes
+	])
 	AS_CASE([$ok:$wflag], [no:-Werror=*], [
 	    wflag=`echo x$wflag | sed 's/^x-Werror=/-W/'`
 	    RUBY_TRY_CFLAGS($wflag, [
-		warnflags="${warnflags+$warnflags }$wflag"
+		RUBY_APPEND_OPTIONS(warnflags, $wflag)
 		particular_werror_flags=no
 	    ])
 	])
@@ -531,9 +542,16 @@ if test "$GCC" = yes; then
 fi
 
 if test "$GCC" = yes; then
+    # optflags
+
     AS_CASE(["$target_os"], [mingw*], [
 	RUBY_TRY_CFLAGS(-fno-omit-frame-pointer, [optflags="${optflags+$optflags }-fno-omit-frame-pointer"])
     ])
+
+    # disable fast-math
+    for oflag in -fno-fast-math; do
+	RUBY_TRY_CFLAGS($oflag, [RUBY_APPEND_OPTION(optflags, $oflag)])
+    done
 fi
 
 test -z "${ac_env_CFLAGS_set}" -a -n "${cflags+set}" && eval CFLAGS="\"$cflags $ARCH_FLAG\""
@@ -912,10 +930,12 @@ if test "$GCC" = yes; then
     fi
 
     AC_CACHE_CHECK(for __builtin_unreachable, rb_cv_func___builtin_unreachable,
+    [RUBY_WERROR_FLAG(
     [AC_TRY_LINK([@%:@include <stdlib.h>],
 	[exit(0); __builtin_unreachable();],
 	[rb_cv_func___builtin_unreachable=yes],
 	[rb_cv_func___builtin_unreachable=no])
+    ])
     ])
     if test "$rb_cv_func___builtin_unreachable" = yes; then
 	AC_DEFINE_UNQUOTED(UNREACHABLE, [__builtin_unreachable()])
@@ -983,6 +1003,8 @@ AC_ARG_ENABLE(pthread,
 dnl Checks for libraries.
 AS_CASE(["$target_os"],[*bsd*|dragonfly*],[],[ac_cv_func_daemon=no])
 
+POSTLINK=:
+AC_SUBST(POSTLINK)
 AS_CASE(["$target_os"],
 [nextstep*], [	],
 [openstep*], [	],
@@ -1039,6 +1061,10 @@ main()
                 if test "$rb_cv_broken_crypt" = yes; then
                   AC_DEFINE(BROKEN_CRYPT, 1)
                 fi
+		if test "${RUBY_CODESIGN:+set}"; then
+		    AC_CHECK_PROGS(codesign, codesign)
+		    POSTLINK="$ac_cv_prog_codesign -s '$RUBY_CODESIGN' -f \$@"
+		fi
 		],
 [hpux*], [	LIBS="-lm $LIBS"
 		ac_cv_c_inline=no],
@@ -1084,6 +1110,7 @@ main()
 		rb_cv_negative_time_t=no
 		ac_cv_func_fcntl=yes
 		ac_cv_func_flock=yes
+		ac_cv_func_gmtime_r=yes
 		rb_cv_large_fd_select=yes
 		AC_LIBOBJ([langinfo])
 		: ${enable_win95=maybe}
@@ -1420,7 +1447,7 @@ AC_CHECK_FUNCS(fmod killpg wait4 waitpid fork spawnv syscall __syscall chroot ge
 	      setitimer setruid seteuid setreuid setresuid socketpair\
 	      setrgid setegid setregid setresgid issetugid pause lchown lchmod\
 	      getpgrp setpgrp getpgid setpgid initgroups getgroups setgroups\
-	      getpriority getrlimit setrlimit sysconf close getgrnam_r\
+	      getpriority getrlimit setrlimit sysconf close getpwnam_r getgrnam_r\
 	      dlopen sigprocmask sigaction sigsetjmp _setjmp _longjmp\
 	      setsid telldir seekdir fchmod cosh sinh tanh log2 round\
 	      setuid setgid daemon select_large_fdset setenv unsetenv\
@@ -2600,7 +2627,7 @@ AS_CASE(["$target_os"],
 	CPPFLAGS="$CPPFLAGS -I/boot/home/config/include"
 	],
     [cygwin*|mingw*], [
-	RUBY_SO_NAME="${RUBY_SO_NAME}${MAJOR}${MINOR}${TEENY}"
+	RUBY_SO_NAME="${RUBY_SO_NAME}"'$(MAJOR)$(MINOR)$(TEENY)'
 	LIBRUBY_DLDFLAGS="${DLDFLAGS}"' -Wl,--out-implib=$(LIBRUBY)'
 	AS_CASE(["$target_os"],
 	[cygwin*], [
@@ -2831,10 +2858,12 @@ if test ${RUBY_LIB_VERSION_STYLE+set}; then
     echo "#define RUBY_LIB_VERSION_STYLE $RUBY_LIB_VERSION_STYLE"
     echo '#define STRINGIZE(x) x'
     test -f revision.h -o -f "${srcdir}/revision.h" || echo '#define RUBY_REVISION 0'
+    echo '#include "verconf.h"'
     echo '#include "version.h"'
     echo 'ruby_version=RUBY_LIB_VERSION'
     } > conftest.c
-    ruby_version="`$CPP -I"${srcdir}" -I"${srcdir}/include" conftest.c | sed '/^ruby_version=/!d;s/ //g'`"
+    test -f verconf.h || > verconf.h
+    ruby_version="`$CPP -I. -I"${srcdir}" -I"${srcdir}/include" conftest.c | sed '/^ruby_version=/!d;s/ //g'`"
     eval $ruby_version
 else
     RUBY_LIB_VERSION="\"${ruby_version}\""
@@ -2896,21 +2925,21 @@ AS_CASE(["$RUBY_LIB_PREFIX"],
     ])
 
 if test ${RUBY_LIB_VERSION_STYLE+set}; then
-    AC_DEFINE_UNQUOTED(RUBY_LIB_VERSION_STYLE, $RUBY_LIB_VERSION_STYLE)
+    AC_DEFINE_UNQUOTED(RUBY_LIB_VERSION_STYLE, $RUBY_LIB_VERSION_STYLE !<verconf>!)
 else
-    AC_DEFINE_UNQUOTED(RUBY_LIB_VERSION, [$RUBY_LIB_VERSION])
+    AC_DEFINE_UNQUOTED(RUBY_LIB_VERSION, [$RUBY_LIB_VERSION] !<verconf>!)
 fi
 AC_DEFINE_UNQUOTED(RUBY_EXEC_PREFIX, "${RUBY_EXEC_PREFIX}")
-AC_DEFINE_UNQUOTED(RUBY_LIB_PREFIX, ${RUBY_LIB_PREFIX})
+AC_DEFINE_UNQUOTED(RUBY_LIB_PREFIX, ${RUBY_LIB_PREFIX} !<verconf>!)
 if test "x$SITE_DIR" = xno; then
-    AC_DEFINE(NO_RUBY_SITE_LIB)
+    AC_DEFINE(NO_RUBY_SITE_LIB, [] !<verconf>!)
 else
-    AC_DEFINE_UNQUOTED(RUBY_SITE_LIB, ${RUBY_SITE_LIB_PATH})
+    AC_DEFINE_UNQUOTED(RUBY_SITE_LIB, ${RUBY_SITE_LIB_PATH} !<verconf>!)
 fi
 if test "x$VENDOR_DIR" = xno; then
-    AC_DEFINE(NO_RUBY_VENDOR_LIB)
+    AC_DEFINE(NO_RUBY_VENDOR_LIB, [] !<verconf>!)
 else
-    AC_DEFINE_UNQUOTED(RUBY_VENDOR_LIB, ${RUBY_VENDOR_LIB_PATH})
+    AC_DEFINE_UNQUOTED(RUBY_VENDOR_LIB, ${RUBY_VENDOR_LIB_PATH} !<verconf>!)
 fi
 
 AC_SUBST(arch)dnl
@@ -2928,7 +2957,7 @@ if test "${universal_binary-no}" = yes ; then
 	AC_TRY_COMPILE([const char arch[] = __ARCHITECTURE__;], [puts(arch);],
 	     [rb_cv_architecture_available=yes], [rb_cv_architecture_available=no]))
     if test "${rb_cv_architecture_available}" = yes; then
-	AC_DEFINE_UNQUOTED(RUBY_PLATFORM_CPU, __ARCHITECTURE__)
+	AC_DEFINE_UNQUOTED(RUBY_PLATFORM_CPU, __ARCHITECTURE__ !<verconf>!)
     else
 	for archs in ${universal_archnames}; do
 	    cpu=`echo $archs | sed 's/.*=//'`
@@ -2940,24 +2969,24 @@ if test "${universal_binary-no}" = yes ; then
     test "$ac_cv_type_long_long" = yes && ints="'long long' $ints"
     AC_SUBST(UNIVERSAL_ARCHNAMES, "${universal_archnames}")
     AC_SUBST(UNIVERSAL_INTS, "${ints}")
-    AC_DEFINE_UNQUOTED(RUBY_PLATFORM_OS, "${target_os}")
-    AC_DEFINE_UNQUOTED(RUBY_ARCH, "universal-"RUBY_PLATFORM_OS)
-    AC_DEFINE_UNQUOTED(RUBY_PLATFORM, "universal."RUBY_PLATFORM_CPU"-"RUBY_PLATFORM_OS)
+    AC_DEFINE_UNQUOTED(RUBY_PLATFORM_OS, "${target_os}" !<verconf>!)
+    AC_DEFINE_UNQUOTED(RUBY_ARCH, "universal-"RUBY_PLATFORM_OS !<verconf>!)
+    AC_DEFINE_UNQUOTED(RUBY_PLATFORM, "universal."RUBY_PLATFORM_CPU"-"RUBY_PLATFORM_OS !<verconf>!)
 else
     arch="${target_cpu}-${target_os}"
-    AC_DEFINE_UNQUOTED(RUBY_PLATFORM, "${arch}")
+    AC_DEFINE_UNQUOTED(RUBY_PLATFORM, "${arch}" !<verconf>!)
 fi
 
 unset sitearch
 AS_CASE(["$target_os"],[mingw*],[sitearch="$target_cpu-$rb_cv_msvcrt"])
-test ${sitearch+set} && AC_DEFINE_UNQUOTED(RUBY_SITEARCH, "${sitearch}")
+test ${sitearch+set} && AC_DEFINE_UNQUOTED(RUBY_SITEARCH, "${sitearch}" !<verconf>!)
 : ${sitearch='${arch}'}
 
 AC_ARG_WITH(search-path,
 		AS_HELP_STRING([--with-search-path=DIR], [specify the additional search path]),
 		[search_path=$withval])
 if test "$search_path" != ""; then
-    AC_DEFINE_UNQUOTED(RUBY_SEARCH_PATH,"$search_path")
+    AC_DEFINE_UNQUOTED(RUBY_SEARCH_PATH,"$search_path" !<verconf>!)
 fi
 
 AC_ARG_WITH(rubyhdrdir,
@@ -3017,10 +3046,11 @@ guard=INCLUDE_RUBY_CONFIG_H
 {
   echo "#ifndef $guard"
   echo "#define $guard 1"
-  grep -v "^#define PACKAGE_" confdefs.h
+  grep -v "^#define PACKAGE_" confdefs.h | grep -v ' !<verconf>!$'
   echo "#endif /* $guard */"
 } | tr -d '\015' |
 ${srcdir}/tool/ifchange "${config_h}" -
+sed -n 's/ !<verconf>!$//p' confdefs.h | ${srcdir}/tool/ifchange verconf.h -
 tr -d '\015' < largefile.h > confdefs.h
 rm largefile.h
 
@@ -3050,20 +3080,25 @@ AC_MSG_RESULT($PACKAGE library version = $ruby_version)
 AS_CASE([" $CPP "], [*" $CC "*], [CPP=`echo " $CPP " | sed "s| $CC |"' $(CC) |;s/^ *//;s/  *$//'`])
 
 AC_CONFIG_FILES($FIRSTMAKEFILE)
-AC_CONFIG_FILES(Makefile, [{
-	if test -d "$srcdir/.svn"; then
+AC_CONFIG_FILES(Makefile, [
+    tmpmk=confmk$$.tmp
+    {
+	if test ${VCS+set}; then
+	    :
+	elif svn info "$srcdir" > /dev/null 2>&1; then
 	    VCS='svn'
-	    VCSUP='$(VCS) up $(SVNUPOPTIONS)'
 	elif test -d "$srcdir/.git/svn"; then
 	    VCS='git svn'
-	    VCSUP='$(VCS) rebase $(GITSVNREBASEOPTIONS)'
 	elif test -d "$srcdir/.git"; then
 	    VCS='git'
-	    VCSUP='$(VCS) pull $(GITPULLOPTIONS)'
 	else
 	    VCS='echo cannot'
-	    VCSUP='$(VCS)'
 	fi
+	AS_CASE("$VCS",
+		[svn],       [VCSUP='$(VCS) up $(SVNUPOPTIONS)'],
+		["git svn"], [VCSUP='$(VCS) rebase $(GITSVNREBASEOPTIONS)'],
+		[git],       [VCSUP='$(VCS) pull $(GITPULLOPTIONS)'],
+		[VCSUP='$(VCS)'])
 	sed '/^MISSING/s/\$U\././g;/^VCS *=/s#@VCS@#'"$VCS"'#;/^VCSUP *=/s#@VCSUP@#'"$VCSUP"'#' Makefile
 	echo; test x"$EXEEXT" = x || echo 'miniruby: miniruby$(EXEEXT)'
 	if test "$gnumake" != yes; then
@@ -3072,12 +3107,20 @@ AC_CONFIG_FILES(Makefile, [{
 	else
 	    echo 'distclean-local::; @$(RM) GNUmakefile uncommon.mk'
 	fi
-    } > confmk$$.tmp && mv -f confmk$$.tmp Makefile &&
-    {
-	grep '^ruby:' Makefile > /dev/null ||
-	${MAKE-make} info-program | grep '^PROGRAM=ruby$' > /dev/null ||
-	echo 'ruby: $(PROGRAM);' >> Makefile
-    }],
+    } > $tmpmk && if ! grep '^ruby:' $tmpmk > /dev/null; then
+	if test "${gnumake}" = yes; then
+	    tmpgmk=confgmk$$.tmp
+	    {
+		echo "include $tmpmk"
+		echo "-include uncommon.mk"
+	    } > $tmpgmk
+	else
+	    tmpgmk=$tmpmk
+	fi &&
+	test -z "`${MAKE-make} -f $tmpgmk info-program | grep '^PROGRAM=ruby$'`" &&
+	echo 'ruby: $(PROGRAM);' >> $tmpmk
+	test "$tmpmk" = "$tmpgmk" || rm -f "$tmpgmk"
+    fi && mv -f $tmpmk Makefile],
 [EXEEXT='$EXEEXT' gnumake='$gnumake'])
 
 AC_ARG_WITH([ruby-pc],

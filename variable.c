@@ -70,8 +70,11 @@ fc_path(struct fc_result *fc, ID name)
 }
 
 static int
-fc_i(ID key, rb_const_entry_t *ce, struct fc_result *res)
+fc_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID key = (ID)k;
+    rb_const_entry_t *ce = (rb_const_entry_t *)v;
+    struct fc_result *res = (struct fc_result *)a;
     VALUE value = ce->value;
     if (!rb_is_const_id(key)) return ST_CONTINUE;
 
@@ -455,8 +458,9 @@ readonly_setter(VALUE val, ID id, void *data, struct global_variable *gvar)
 }
 
 static int
-mark_global_entry(ID key, struct global_entry *entry)
+mark_global_entry(st_data_t k, st_data_t v, st_data_t a)
 {
+    struct global_entry *entry = (struct global_entry *)v;
     struct trace_var *trace;
     struct global_variable *var = entry->var;
 
@@ -690,7 +694,8 @@ trace_ev(struct trace_data *data)
 	(*trace->func)(trace->data, data->val);
 	trace = trace->next;
     }
-    return Qnil;		/* not reached */
+
+    return Qnil;
 }
 
 static VALUE
@@ -746,8 +751,10 @@ rb_gvar_defined(struct global_entry *entry)
 }
 
 static int
-gvar_i(ID key, struct global_entry *entry, VALUE ary)
+gvar_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID key = (ID)k;
+    VALUE ary = (VALUE)a;
     rb_ary_push(ary, ID2SYM(key));
     return ST_CONTINUE;
 }
@@ -916,15 +923,18 @@ rb_mark_generic_ivar(VALUE obj)
 }
 
 static int
-givar_mark_i(ID key, VALUE value)
+givar_mark_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    VALUE value = (VALUE)v;
     rb_gc_mark(value);
     return ST_CONTINUE;
 }
 
 static int
-givar_i(VALUE obj, st_table *tbl)
+givar_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    VALUE obj = (VALUE)k;
+    st_table *tbl = (st_table *)v;
     if (rb_special_const_p(obj)) {
 	st_foreach_safe(tbl, givar_mark_i, 0);
     }
@@ -1241,8 +1251,11 @@ rb_ivar_count(VALUE obj)
 }
 
 static int
-ivar_i(ID key, VALUE val, VALUE ary)
+ivar_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID key = (ID)k;
+    VALUE ary = (VALUE)a;
+
     if (rb_is_instance_id(key)) {
 	rb_ary_push(ary, ID2SYM(key));
     }
@@ -1351,7 +1364,8 @@ rb_obj_remove_instance_variable(VALUE obj, VALUE name)
 	break;
     }
     rb_name_error(id, "instance variable %s not defined", rb_id2name(id));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 NORETURN(static void uninitialized_constant(VALUE, ID));
@@ -1415,7 +1429,8 @@ rb_mod_const_missing(VALUE klass, VALUE name)
 {
     rb_frame_pop(); /* pop frame for "const_missing" */
     uninitialized_constant(klass, rb_to_id(name));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static void
@@ -1800,10 +1815,9 @@ rb_public_const_get_at(VALUE klass, ID id)
  *     remove_const(sym)   -> obj
  *
  *  Removes the definition of the given constant, returning that
- *  constant's value.  Although predefined classes/modules also can be
- *  removed, they just can't be refered with the names but still
- *  exist.  It could cause very severe confusion.
- *  Feel Free to Shoot Your Own Foot.
+ *  constant's previous value.  If that constant referred to
+ *  a module, this will not change that module's name and can lead
+ *  to confusion.
  */
 
 VALUE
@@ -1856,8 +1870,12 @@ rb_const_remove(VALUE mod, ID id)
 }
 
 static int
-sv_i(ID key, rb_const_entry_t *ce, st_table *tbl)
+sv_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID key = (ID)k;
+    rb_const_entry_t *ce = (rb_const_entry_t *)v;
+    st_table *tbl = (st_table *)a;
+
     if (rb_is_const_id(key)) {
 	if (!st_lookup(tbl, (st_data_t)key, 0)) {
 	    st_insert(tbl, (st_data_t)key, (st_data_t)ce);
@@ -2302,8 +2320,11 @@ rb_define_class_variable(VALUE klass, const char *name, VALUE val)
 }
 
 static int
-cv_i(ID key, VALUE value, VALUE ary)
+cv_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID key = (ID)k;
+    VALUE ary = (VALUE)a;
+
     if (rb_is_class_id(key)) {
 	VALUE kval = ID2SYM(key);
 	if (!rb_ary_includes(ary, kval)) {
@@ -2335,7 +2356,7 @@ rb_mod_class_variables(VALUE obj)
     VALUE ary = rb_ary_new();
 
     if (RCLASS_IV_TBL(obj)) {
-	st_foreach_safe(RCLASS_IV_TBL(obj), cv_i, ary);
+	st_foreach_safe(RCLASS_IV_TBL(obj), cv_i, (st_data_t)ary);
     }
     return ary;
 }
@@ -2390,7 +2411,8 @@ rb_mod_remove_cvar(VALUE mod, VALUE name)
     }
     rb_name_error(id, "class variable %s not defined for %s",
 		  rb_id2name(id), rb_class2name(mod));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 VALUE
