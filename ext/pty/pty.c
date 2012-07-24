@@ -32,6 +32,7 @@
 #include "ruby/ruby.h"
 #include "ruby/io.h"
 #include "ruby/util.h"
+#include "internal.h"
 
 #include <signal.h>
 #ifdef HAVE_SYS_STROPTS_H
@@ -77,8 +78,8 @@ static void getDevice(int*, int*, char [DEVICELEN], int);
 struct child_info {
     int master, slave;
     char *slavename;
-    int argc;
-    VALUE *argv;
+    VALUE execarg_obj;
+    struct rb_execarg *eargp;
 };
 
 static int
@@ -87,15 +88,11 @@ chfunc(void *data, char *errbuf, size_t errbuf_len)
     struct child_info *carg = data;
     int master = carg->master;
     int slave = carg->slave;
-    int argc = carg->argc;
-    VALUE *argv = carg->argv;
 
 #define ERROR_EXIT(str) do { \
 	strlcpy(errbuf, (str), errbuf_len); \
 	return -1; \
     } while (0)
-
-    rb_thread_atfork_before_exec();
 
     /*
      * Set free from process group and controlling terminal
@@ -146,8 +143,7 @@ chfunc(void *data, char *errbuf, size_t errbuf_len)
     seteuid(getuid());
 #endif
 
-    rb_f_exec(argc, argv);
-    return 0;
+    return rb_exec_async_signal_safe(carg->eargp, errbuf, sizeof(errbuf_len));
 #undef ERROR_EXIT
 }
 
@@ -155,7 +151,7 @@ static void
 establishShell(int argc, VALUE *argv, struct pty_info *info,
 	       char SlaveName[DEVICELEN])
 {
-    int 		master,slave;
+    int 		master, slave, status = 0;
     rb_pid_t		pid;
     char		*p, *getenv();
     struct passwd	*pwent;
@@ -181,21 +177,24 @@ establishShell(int argc, VALUE *argv, struct pty_info *info,
 	argv = &v;
     }
 
+    carg.execarg_obj = rb_execarg_new(argc, argv, 1);
+    carg.eargp = rb_execarg_get(carg.execarg_obj);
+    rb_execarg_fixup(carg.execarg_obj);
+
     getDevice(&master, &slave, SlaveName, 0);
 
     carg.master = master;
     carg.slave = slave;
     carg.slavename = SlaveName;
-    carg.argc = argc;
-    carg.argv = argv;
     errbuf[0] = '\0';
-    pid = rb_fork_err(0, chfunc, &carg, Qnil, errbuf, sizeof(errbuf));
+    pid = rb_fork_async_signal_safe(&status, chfunc, &carg, Qnil, errbuf, sizeof(errbuf));
 
     if (pid < 0) {
 	int e = errno;
 	close(master);
 	close(slave);
 	errno = e;
+	if (status) rb_jump_tag(status);
 	rb_sys_fail(errbuf[0] ? errbuf : "fork failed");
     }
 
@@ -203,6 +202,8 @@ establishShell(int argc, VALUE *argv, struct pty_info *info,
 
     info->child_pid = pid;
     info->fd = master;
+
+    RB_GC_GUARD(carg.execarg_obj);
 }
 
 static int
@@ -461,7 +462,7 @@ pty_close_pty(VALUE assoc)
 
     for (i = 0; i < 2; i++) {
         io = rb_ary_entry(assoc, i);
-        if (TYPE(io) == T_FILE && 0 <= RFILE(io)->fptr->fd)
+        if (RB_TYPE_P(io, T_FILE) && 0 <= RFILE(io)->fptr->fd)
             rb_io_close(io);
     }
     return Qnil;

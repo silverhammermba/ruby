@@ -13,6 +13,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/io.h"
+#include "ruby/thread.h"
 #include "dln.h"
 #include "internal.h"
 #include <ctype.h>
@@ -28,7 +29,9 @@
 #if defined HAVE_NET_SOCKET_H
 # include <net/socket.h>
 #elif defined HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
+# ifndef __native_client__
+#  include <sys/socket.h>
+# endif
 #endif
 
 #if defined(__BOW__) || defined(__CYGWIN__) || defined(_WIN32) || defined(__EMX__) || defined(__BEOS__) || defined(__HAIKU__)
@@ -46,6 +49,9 @@
 #include <sys/types.h>
 #if defined(HAVE_SYS_IOCTL_H) && !defined(_WIN32)
 #include <sys/ioctl.h>
+#endif
+#if defined(__native_client__) && defined(NACL_NEWLIB)
+# include "nacl/ioctl.h"
 #endif
 #if defined(HAVE_FCNTL_H) || defined(_WIN32)
 #include <fcntl.h>
@@ -161,7 +167,7 @@ void
 rb_maygvl_fd_fix_cloexec(int fd)
 {
   /* MinGW don't have F_GETFD and FD_CLOEXEC.  [ruby-core:40281] */
-#ifdef F_GETFD
+#if defined(F_GETFD) && !defined(__native_client__)
     int flags, flags2, ret;
     flags = fcntl(fd, F_GETFD); /* should not fail except EBADF. */
     if (flags == -1) {
@@ -186,7 +192,6 @@ rb_fd_fix_cloexec(int fd)
     rb_maygvl_fd_fix_cloexec(fd);
     if (max_file_descriptor < fd) max_file_descriptor = fd;
 }
-
 
 int
 rb_cloexec_open(const char *pathname, int flags, mode_t mode)
@@ -1347,7 +1352,8 @@ rb_io_addstr(VALUE io, VALUE str)
 }
 
 #ifdef HAVE_FSYNC
-static VALUE nogvl_fsync(void *ptr)
+static VALUE
+nogvl_fsync(void *ptr)
 {
     rb_io_t *fptr = ptr;
 
@@ -1502,8 +1508,6 @@ rb_io_set_pos(VALUE io, VALUE offset)
 
 static void clear_readconv(rb_io_t *fptr);
 
-#ifdef HAVE_FSYNC
-
 /*
  *  call-seq:
  *     ios.rewind    -> 0
@@ -1654,6 +1658,8 @@ rb_io_sync(VALUE io)
     return (fptr->mode & FMODE_SYNC) ? Qtrue : Qfalse;
 }
 
+#ifdef HAVE_FSYNC
+
 /*
  *  call-seq:
  *     ios.sync = boolean   -> boolean
@@ -1709,18 +1715,26 @@ rb_io_fsync(VALUE io)
 
     if (io_fflush(fptr) < 0)
         rb_sys_fail(0);
-#ifndef _WIN32	/* already called in io_fflush() */
+# ifndef _WIN32	/* already called in io_fflush() */
     if ((int)rb_thread_io_blocking_region(nogvl_fsync, fptr, fptr->fd) < 0)
 	rb_sys_fail_path(fptr->pathv);
-#endif
+# endif
     return INT2FIX(0);
 }
 #else
-#define rb_io_fsync rb_f_notimplement
+# define rb_io_fsync rb_f_notimplement
+# define rb_io_sync rb_f_notimplement
+static VALUE
+rb_io_set_sync(VALUE io, VALUE sync)
+{
+    rb_notimplement();
+    UNREACHABLE;
+}
 #endif
 
 #ifdef HAVE_FDATASYNC
-static VALUE nogvl_fdatasync(void *ptr)
+static VALUE
+nogvl_fdatasync(void *ptr)
 {
     rb_io_t *fptr = ptr;
 
@@ -3997,8 +4011,7 @@ rb_io_close(VALUE io)
     if (fptr->fd < 0) return Qnil;
 
     fd = fptr->fd;
-#if defined __APPLE__ && defined(__MACH__) && \
-    (!defined(MAC_OS_X_VERSION_MIN_ALLOWED) || MAC_OS_X_VERSION_MIN_ALLOWED <= 1050)
+#if defined __APPLE__ && (!defined(MAC_OS_X_VERSION_MIN_ALLOWED) || MAC_OS_X_VERSION_MIN_ALLOWED <= 1050)
     /* close(2) on a fd which is being read by another thread causes
      * deadlock on Mac OS X 10.5 */
     rb_thread_fd_close(fd);
@@ -4997,19 +5010,19 @@ struct sysopen_struct {
     mode_t perm;
 };
 
-static VALUE
+static void *
 sysopen_func(void *ptr)
 {
     const struct sysopen_struct *data = ptr;
     const char *fname = RSTRING_PTR(data->fname);
-    return (VALUE)rb_cloexec_open(fname, data->oflags, data->perm);
+    return (void *)(VALUE)rb_cloexec_open(fname, data->oflags, data->perm);
 }
 
 static inline int
 rb_sysopen_internal(struct sysopen_struct *data)
 {
     int fd;
-    fd = (int)rb_thread_blocking_region(sysopen_func, data, RUBY_UBF_IO, 0);
+    fd = (int)(VALUE)rb_thread_call_without_gvl(sysopen_func, data, RUBY_UBF_IO, 0);
     if (0 <= fd)
         rb_update_max_fd(fd);
     return fd;
@@ -5090,65 +5103,63 @@ static void io_encoding_set(rb_io_t *, VALUE, VALUE, VALUE);
 static int
 io_strip_bom(VALUE io)
 {
-    int b1, b2, b3, b4;
-    switch (b1 = FIX2INT(rb_io_getbyte(io))) {
-      case 0xEF:
-	b2 = FIX2INT(rb_io_getbyte(io));
-	if (b2 == 0xBB) {
-	    b3 = FIX2INT(rb_io_getbyte(io));
-	    if (b3 == 0xBF) {
+    VALUE b1, b2, b3, b4;
+
+    if (NIL_P(b1 = rb_io_getbyte(io))) return 0;
+    switch (b1) {
+      case INT2FIX(0xEF):
+	if (NIL_P(b2 = rb_io_getbyte(io))) break;
+	if (b2 == INT2FIX(0xBB) && !NIL_P(b3 = rb_io_getbyte(io))) {
+	    if (b3 == INT2FIX(0xBF)) {
 		return rb_utf8_encindex();
 	    }
-	    rb_io_ungetbyte(io, INT2FIX(b3));
+	    rb_io_ungetbyte(io, b3);
 	}
-	rb_io_ungetbyte(io, INT2FIX(b2));
+	rb_io_ungetbyte(io, b2);
 	break;
 
-      case 0xFE:
-	b2 = FIX2INT(rb_io_getbyte(io));
-	if (b2 == 0xFF) {
+      case INT2FIX(0xFE):
+	if (NIL_P(b2 = rb_io_getbyte(io))) break;
+	if (b2 == INT2FIX(0xFF)) {
 	    return rb_enc_find_index("UTF-16BE");
 	}
-	rb_io_ungetbyte(io, INT2FIX(b2));
+	rb_io_ungetbyte(io, b2);
 	break;
 
-      case 0xFF:
-	b2 = FIX2INT(rb_io_getbyte(io));
-	if (b2 == 0xFE) {
-	    b3 = FIX2INT(rb_io_getbyte(io));
-	    if (b3 == 0) {
-		b4 = FIX2INT(rb_io_getbyte(io));
-		if (b4 == 0) {
+      case INT2FIX(0xFF):
+	if (NIL_P(b2 = rb_io_getbyte(io))) break;
+	if (b2 == INT2FIX(0xFE)) {
+	    b3 = rb_io_getbyte(io);
+	    if (b3 == INT2FIX(0) && !NIL_P(b4 = rb_io_getbyte(io))) {
+		if (b4 == INT2FIX(0)) {
 		    return rb_enc_find_index("UTF-32LE");
 		}
-		rb_io_ungetbyte(io, INT2FIX(b4));
+		rb_io_ungetbyte(io, b4);
+		rb_io_ungetbyte(io, b3);
 	    }
 	    else {
-		rb_io_ungetbyte(io, INT2FIX(b3));
+		rb_io_ungetbyte(io, b3);
 		return rb_enc_find_index("UTF-16LE");
 	    }
-	    rb_io_ungetbyte(io, INT2FIX(b3));
 	}
-	rb_io_ungetbyte(io, INT2FIX(b2));
+	rb_io_ungetbyte(io, b2);
 	break;
 
-      case 0:
-	b2 = FIX2INT(rb_io_getbyte(io));
-	if (b2 == 0) {
-	    b3 = FIX2INT(rb_io_getbyte(io));
-	    if (b3 == 0xFE) {
-		b4 = FIX2INT(rb_io_getbyte(io));
-		if (b4 == 0xFF) {
+      case INT2FIX(0):
+	if (NIL_P(b2 = rb_io_getbyte(io))) break;
+	if (b2 == INT2FIX(0) && !NIL_P(b3 = rb_io_getbyte(io))) {
+	    if (b3 == INT2FIX(0xFE) && !NIL_P(b4 = rb_io_getbyte(io))) {
+		if (b4 == INT2FIX(0xFF)) {
 		    return rb_enc_find_index("UTF-32BE");
 		}
-		rb_io_ungetbyte(io, INT2FIX(b4));
+		rb_io_ungetbyte(io, b4);
 	    }
-	    rb_io_ungetbyte(io, INT2FIX(b3));
+	    rb_io_ungetbyte(io, b3);
 	}
-	rb_io_ungetbyte(io, INT2FIX(b2));
+	rb_io_ungetbyte(io, b2);
 	break;
     }
-    rb_io_ungetbyte(io, INT2FIX(b1));
+    rb_io_ungetbyte(io, b1);
     return 0;
 }
 
@@ -5333,14 +5344,23 @@ rb_pipe(int *pipes)
     return ret;
 }
 
-#ifdef HAVE_FORK
+#ifdef _WIN32
+#define HAVE_SPAWNV 1
+#define spawnv(mode, cmd, args) rb_w32_aspawn((mode), (cmd), (args))
+#define spawn(mode, cmd) rb_w32_spawn((mode), (cmd), 0)
+#endif
+
+#if defined(HAVE_FORK) || defined(HAVE_SPAWNV)
 struct popen_arg {
-    struct rb_exec_arg *execp;
+    VALUE execarg_obj;
+    struct rb_execarg *eargp;
     int modef;
     int pair[2];
     int write_pair[2];
 };
+#endif
 
+#ifdef HAVE_FORK
 static void
 popen_redirect(struct popen_arg *p)
 {
@@ -5414,6 +5434,7 @@ linux_get_maxfd(void)
 }
 #endif
 
+/* This function should be async-signal-safe. */
 void
 rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds)
 {
@@ -5421,7 +5442,7 @@ rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds)
     int max = max_file_descriptor;
 #ifdef F_MAXFD
     /* F_MAXFD is available since NetBSD 2.0. */
-    ret = fcntl(0, F_MAXFD);
+    ret = fcntl(0, F_MAXFD); /* async-signal-safe */
     if (ret != -1)
         maxhint = max = ret;
 #elif defined(__linux__)
@@ -5434,16 +5455,12 @@ rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds)
         max = maxhint;
     for (fd = lowfd; fd <= max; fd++) {
         if (!NIL_P(noclose_fds) &&
-            RTEST(rb_hash_lookup(noclose_fds, INT2FIX(fd))))
+            RTEST(rb_hash_lookup(noclose_fds, INT2FIX(fd)))) /* async-signal-safe */
             continue;
-#ifdef FD_CLOEXEC
-	ret = fcntl(fd, F_GETFD);
+	ret = fcntl(fd, F_GETFD); /* async-signal-safe */
 	if (ret != -1 && !(ret & FD_CLOEXEC)) {
-            fcntl(fd, F_SETFD, ret|FD_CLOEXEC);
+            fcntl(fd, F_SETFD, ret|FD_CLOEXEC); /* async-signal-safe */
         }
-#else
-	ret = close(fd);
-#endif
 #define CONTIGUOUS_CLOSED_FDS 20
         if (ret != -1) {
 	    if (max < fd + CONTIGUOUS_CLOSED_FDS)
@@ -5457,14 +5474,15 @@ popen_exec(void *pp, char *errmsg, size_t errmsg_len)
 {
     struct popen_arg *p = (struct popen_arg*)pp;
 
-    rb_thread_atfork_before_exec();
-    return rb_exec_err(p->execp, errmsg, errmsg_len);
+    return rb_exec_async_signal_safe(p->eargp, errmsg, errmsg_len);
 }
 #endif
 
 static VALUE
-pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode, convconfig_t *convconfig)
+pipe_open(VALUE execarg_obj, const char *modestr, int fmode, convconfig_t *convconfig)
 {
+    struct rb_execarg *eargp = NIL_P(execarg_obj) ? NULL : rb_execarg_get(execarg_obj);
+    VALUE prog = eargp ? (eargp->use_shell ? eargp->invoke.sh.shell_script : eargp->invoke.cmd.command_name) : Qfalse ;
     rb_pid_t pid = 0;
     rb_io_t *fptr;
     VALUE port;
@@ -5472,51 +5490,53 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     VALUE write_port;
 #if defined(HAVE_FORK)
     int status;
-    struct popen_arg arg;
     char errmsg[80] = { '\0' };
-#elif defined(_WIN32)
-    volatile VALUE argbuf;
+#endif
+#if defined(HAVE_FORK) || defined(HAVE_SPAWNV)
+    struct popen_arg arg;
+    int e = 0;
+#endif
+#if defined(HAVE_SPAWNV)
+# if defined(HAVE_SPAWNVE)
+#   define DO_SPAWN(cmd, args, envp) ((args) ? \
+				      spawnve(P_NOWAIT, (cmd), (args), (envp)) : \
+				      spawne(P_NOWAIT, (cmd), (envp)))
+# else
+#   define DO_SPAWN(cmd, args, envp) ((args) ? \
+				      spawnv(P_NOWAIT, (cmd), (args)) : \
+				      spawn(P_NOWAIT, (cmd)))
+# endif
     char **args = NULL;
-    int pair[2], write_pair[2];
+    char **envp = NULL;
 #endif
 #if !defined(HAVE_FORK)
-    struct rb_exec_arg sarg;
+    struct rb_execarg sarg, *sargp = &sarg;
 #endif
     FILE *fp = 0;
     int fd = -1;
     int write_fd = -1;
 #if !defined(HAVE_FORK)
     const char *cmd = 0;
+#if !defined(HAVE_SPAWNV)
     int argc;
     VALUE *argv;
+#endif
 
     if (prog)
         cmd = StringValueCStr(prog);
 #endif
 
-#if !defined(HAVE_FORK)
-    if (!eargp) {
-        /* fork : IO.popen("-") */
-        argc = 0;
-        argv = 0;
-    }
-    else if (eargp->argc) {
-        /* no shell : IO.popen([prog, arg0], arg1, ...) */
-        argc = eargp->argc;
-        argv = eargp->argv;
-    }
-    else {
-        /* with shell : IO.popen(prog) */
-        argc = 0;
-        argv = 0;
-    }
-#endif
-
-#if defined(HAVE_FORK)
-    arg.execp = eargp;
+#if defined(HAVE_FORK) || defined(HAVE_SPAWNV)
+    arg.execarg_obj = execarg_obj;
+    arg.eargp = eargp;
     arg.modef = fmode;
     arg.pair[0] = arg.pair[1] = -1;
     arg.write_pair[0] = arg.write_pair[1] = -1;
+# if !defined(HAVE_FORK)
+    if (eargp && !eargp->use_shell) {
+        args = ARGVSTR2ARGV(eargp->invoke.cmd.argv_str);
+    }
+# endif
     switch (fmode & (FMODE_READABLE|FMODE_WRITABLE)) {
       case FMODE_READABLE|FMODE_WRITABLE:
         if (rb_pipe(arg.write_pair) < 0)
@@ -5529,31 +5549,51 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
             rb_sys_fail_str(prog);
         }
         if (eargp) {
-            rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(arg.write_pair[0]));
-            rb_exec_arg_addopt(eargp, INT2FIX(1), INT2FIX(arg.pair[1]));
+            rb_execarg_addopt(execarg_obj, INT2FIX(0), INT2FIX(arg.write_pair[0]));
+            rb_execarg_addopt(execarg_obj, INT2FIX(1), INT2FIX(arg.pair[1]));
         }
 	break;
       case FMODE_READABLE:
         if (rb_pipe(arg.pair) < 0)
             rb_sys_fail_str(prog);
         if (eargp)
-            rb_exec_arg_addopt(eargp, INT2FIX(1), INT2FIX(arg.pair[1]));
+            rb_execarg_addopt(execarg_obj, INT2FIX(1), INT2FIX(arg.pair[1]));
 	break;
       case FMODE_WRITABLE:
         if (rb_pipe(arg.pair) < 0)
             rb_sys_fail_str(prog);
         if (eargp)
-            rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(arg.pair[0]));
+            rb_execarg_addopt(execarg_obj, INT2FIX(0), INT2FIX(arg.pair[0]));
 	break;
       default:
         rb_sys_fail_str(prog);
     }
-    if (eargp) {
-        rb_exec_arg_fixup(arg.execp);
-	pid = rb_fork_err(&status, popen_exec, &arg, arg.execp->redirect_fds, errmsg, sizeof(errmsg));
+    if (!NIL_P(execarg_obj)) {
+        rb_execarg_fixup(execarg_obj);
+# if defined(HAVE_FORK)
+	pid = rb_fork_async_signal_safe(&status, popen_exec, &arg, arg.eargp->redirect_fds, errmsg, sizeof(errmsg));
+# else
+	rb_execarg_run_options(eargp, sargp, NULL, 0);
+	if (eargp->envp_str) envp = (char **)RSTRING_PTR(eargp->envp_str);
+	while ((pid = DO_SPAWN(cmd, args, envp)) == -1) {
+	    /* exec failed */
+	    switch (e = errno) {
+	      case EAGAIN:
+#   if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
+	      case EWOULDBLOCK:
+#   endif
+		rb_thread_sleep(1);
+		continue;
+	    }
+	    break;
+	}
+	if (eargp)
+	    rb_execarg_run_options(sargp, NULL, NULL, 0);
+# endif
     }
     else {
-	pid = rb_fork(&status, 0, 0, Qnil);
+# if defined(HAVE_FORK)
+	pid = rb_fork_ruby(&status);
 	if (pid == 0) {		/* child */
 	    rb_thread_atfork();
 	    popen_redirect(&arg);
@@ -5561,11 +5601,16 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
 	    rb_io_synchronized(RFILE(orig_stderr)->fptr);
 	    return Qnil;
 	}
+# else
+	rb_notimplement();
+# endif
     }
 
     /* parent */
     if (pid == -1) {
-	int e = errno;
+# if defined(HAVE_FORK)
+	e = errno;
+# endif
 	close(arg.pair[0]);
 	close(arg.pair[1]);
         if ((fmode & (FMODE_READABLE|FMODE_WRITABLE)) == (FMODE_READABLE|FMODE_WRITABLE)) {
@@ -5573,8 +5618,10 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
             close(arg.write_pair[1]);
         }
 	errno = e;
+# if defined(HAVE_FORK)
         if (errmsg[0])
             rb_sys_fail(errmsg);
+# endif
 	rb_sys_fail_str(prog);
     }
     if ((fmode & FMODE_READABLE) && (fmode & FMODE_WRITABLE)) {
@@ -5591,114 +5638,18 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
         close(arg.pair[0]);
         fd = arg.pair[1];
     }
-#elif defined(_WIN32)
-    if (argc) {
-	int i;
-
-	if (argc >= (int)(FIXNUM_MAX / sizeof(char *))) {
-	    rb_raise(rb_eArgError, "too many arguments");
-	}
-	argbuf = rb_str_tmp_new((argc+1) * sizeof(char *));
-	args = (void *)RSTRING_PTR(argbuf);
-	for (i = 0; i < argc; ++i) {
-	    args[i] = StringValueCStr(argv[i]);
-	}
-	args[i] = NULL;
-    }
-    switch (fmode & (FMODE_READABLE|FMODE_WRITABLE)) {
-      case FMODE_READABLE|FMODE_WRITABLE:
-        if (rb_pipe(write_pair) < 0)
-            rb_sys_fail_str(prog);
-        if (rb_pipe(pair) < 0) {
-            int e = errno;
-            close(write_pair[0]);
-            close(write_pair[1]);
-            errno = e;
-            rb_sys_fail_str(prog);
-        }
-        if (eargp) {
-            rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(write_pair[0]));
-            rb_exec_arg_addopt(eargp, INT2FIX(1), INT2FIX(pair[1]));
-        }
-	break;
-      case FMODE_READABLE:
-        if (rb_pipe(pair) < 0)
-            rb_sys_fail_str(prog);
-        if (eargp)
-            rb_exec_arg_addopt(eargp, INT2FIX(1), INT2FIX(pair[1]));
-	break;
-      case FMODE_WRITABLE:
-        if (rb_pipe(pair) < 0)
-            rb_sys_fail_str(prog);
-        if (eargp)
-            rb_exec_arg_addopt(eargp, INT2FIX(0), INT2FIX(pair[0]));
-	break;
-      default:
-        rb_sys_fail_str(prog);
-    }
-    if (eargp) {
-	rb_exec_arg_fixup(eargp);
-	rb_run_exec_options(eargp, &sarg);
-    }
-    while ((pid = (args ?
-		   rb_w32_aspawn(P_NOWAIT, cmd, args) :
-		   rb_w32_spawn(P_NOWAIT, cmd, 0))) == -1) {
-	/* exec failed */
-	switch (errno) {
-	  case EAGAIN:
-#if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
-	  case EWOULDBLOCK:
-#endif
-	    rb_thread_sleep(1);
-	    break;
-	  default:
-	    {
-		int e = errno;
-		if (eargp)
-		    rb_run_exec_options(&sarg, NULL);
-		close(pair[0]);
-		close(pair[1]);
-		if ((fmode & (FMODE_READABLE|FMODE_WRITABLE)) == (FMODE_READABLE|FMODE_WRITABLE)) {
-		    close(write_pair[0]);
-		    close(write_pair[1]);
-		}
-		errno = e;
-		rb_sys_fail_str(prog);
-	    }
-	    break;
-	}
-    }
-
-    RB_GC_GUARD(argbuf);
-
-    if (eargp)
-	rb_run_exec_options(&sarg, NULL);
-    if ((fmode & FMODE_READABLE) && (fmode & FMODE_WRITABLE)) {
-        close(pair[1]);
-        fd = pair[0];
-        close(write_pair[0]);
-        write_fd = write_pair[1];
-    }
-    else if (fmode & FMODE_READABLE) {
-        close(pair[1]);
-        fd = pair[0];
-    }
-    else {
-        close(pair[0]);
-        fd = pair[1];
-    }
 #else
     if (argc) {
 	prog = rb_ary_join(rb_ary_new4(argc, argv), rb_str_new2(" "));
 	cmd = StringValueCStr(prog);
     }
-    if (eargp) {
-	rb_exec_arg_fixup(eargp);
-	rb_run_exec_options(eargp, &sarg);
+    if (!NIL_P(execarg_obj)) {
+	rb_execarg_fixup(execarg_obj);
+	rb_execarg_run_options(eargp, sargp, NULL, 0);
     }
     fp = popen(cmd, modestr);
     if (eargp)
-	rb_run_exec_options(&sarg, NULL);
+	rb_execarg_run_options(sargp, NULL, NULL, 0);
     if (!fp) rb_sys_fail_path(prog);
     fd = fileno(fp);
 #endif
@@ -5745,39 +5696,36 @@ pipe_open(struct rb_exec_arg *eargp, VALUE prog, const char *modestr, int fmode,
     return port;
 }
 
-static VALUE
-pipe_open_v(int argc, VALUE *argv, const char *modestr, int fmode, convconfig_t *convconfig)
+static int
+is_popen_fork(VALUE prog)
 {
-    VALUE prog;
-    struct rb_exec_arg earg;
-    prog = rb_exec_arg_init(argc, argv, FALSE, &earg);
-    return pipe_open(&earg, prog, modestr, fmode, convconfig);
+    if (RSTRING_LEN(prog) == 1 && RSTRING_PTR(prog)[0] == '-') {
+#if !defined(HAVE_FORK)
+	rb_raise(rb_eNotImpError,
+		 "fork() function is unimplemented on this machine");
+#else
+	return TRUE;
+#endif
+    }
+    return FALSE;
 }
 
 static VALUE
 pipe_open_s(VALUE prog, const char *modestr, int fmode, convconfig_t *convconfig)
 {
-    const char *cmd = RSTRING_PTR(prog);
     int argc = 1;
     VALUE *argv = &prog;
-    struct rb_exec_arg earg;
+    VALUE execarg_obj = Qnil;
 
-    if (RSTRING_LEN(prog) == 1 && cmd[0] == '-') {
-#if !defined(HAVE_FORK)
-	rb_raise(rb_eNotImpError,
-		 "fork() function is unimplemented on this machine");
-#endif
-        return pipe_open(0, 0, modestr, fmode, convconfig);
-    }
-
-    rb_exec_arg_init(argc, argv, TRUE, &earg);
-    return pipe_open(&earg, prog, modestr, fmode, convconfig);
+    if (!is_popen_fork(prog))
+	execarg_obj = rb_execarg_new(argc, argv, TRUE);
+    return pipe_open(execarg_obj, modestr, fmode, convconfig);
 }
 
 /*
  *  call-seq:
- *     IO.popen(cmd, mode="r" [, opt])               -> io
- *     IO.popen(cmd, mode="r" [, opt]) {|io| block } -> obj
+ *     IO.popen([env,] cmd, mode="r" [, opt])               -> io
+ *     IO.popen([env,] cmd, mode="r" [, opt]) {|io| block } -> obj
  *
  *  Runs the specified command as a subprocess; the subprocess's
  *  standard input and output will be connected to the returned
@@ -5814,6 +5762,11 @@ pipe_open_s(VALUE prog, const char *modestr, int fmode, convconfig_t *convconfig
  *    # merge standard output and standard error using
  *    # spawn option.  See the document of Kernel.spawn.
  *    IO.popen(["ls", "/", :err=>[:child, :out]]) {|ls_io|
+ *      ls_result_with_error = ls_io.read
+ *    }
+ *
+ *    # spawn options can be mixed with IO options
+ *    IO.popen(["ls", "/"], :err=>[:child, :out]) {|ls_io|
  *      ls_result_with_error = ls_io.read
  *    }
  *
@@ -5861,14 +5814,24 @@ static VALUE
 rb_io_s_popen(int argc, VALUE *argv, VALUE klass)
 {
     const char *modestr;
-    VALUE pname, pmode, port, tmp, opt;
+    VALUE pname, pmode = Qnil, port, tmp, opt = Qnil, env = Qnil, execarg_obj = Qnil;
     int oflags, fmode;
     convconfig_t convconfig;
 
-    argc = rb_scan_args(argc, argv, "11:", &pname, &pmode, &opt);
-
-    rb_io_extract_modeenc(&pmode, 0, opt, &oflags, &fmode, &convconfig);
-    modestr = rb_io_oflags_modestr(oflags);
+    if (argc > 1 && !NIL_P(opt = rb_check_hash_type(argv[argc-1]))) --argc;
+    if (argc > 1 && !NIL_P(env = rb_check_hash_type(argv[0]))) --argc, ++argv;
+    switch (argc) {
+      case 2:
+	pmode = argv[1];
+      case 1:
+	pname = argv[0];
+	break;
+      default:
+	{
+	    int ex = !NIL_P(opt);
+	    rb_error_arity(argc + ex, 1 + ex, 2 + ex);
+	}
+    }
 
     tmp = rb_check_array_type(pname);
     if (!NIL_P(tmp)) {
@@ -5880,13 +5843,25 @@ rb_io_s_popen(int argc, VALUE *argv, VALUE klass)
 #endif
 	tmp = rb_ary_dup(tmp);
 	RBASIC(tmp)->klass = 0;
-	port = pipe_open_v((int)len, RARRAY_PTR(tmp), modestr, fmode, &convconfig);
+	execarg_obj = rb_execarg_new((int)len, RARRAY_PTR(tmp), FALSE);
 	rb_ary_clear(tmp);
     }
     else {
 	SafeStringValue(pname);
-	port = pipe_open_s(pname, modestr, fmode, &convconfig);
+	execarg_obj = Qnil;
+	if (!is_popen_fork(pname))
+	    execarg_obj = rb_execarg_new(1, &pname, TRUE);
     }
+    if (!NIL_P(execarg_obj)) {
+	if (!NIL_P(opt))
+	    opt = rb_execarg_extract_options(execarg_obj, opt);
+	if (!NIL_P(env))
+	    rb_execarg_setenv(execarg_obj, env);
+    }
+    rb_io_extract_modeenc(&pmode, 0, opt, &oflags, &fmode, &convconfig);
+    modestr = rb_io_oflags_modestr(oflags);
+
+    port = pipe_open(execarg_obj, modestr, fmode, &convconfig);
     if (NIL_P(port)) {
 	/* child */
 	if (rb_block_given_p()) {
@@ -5952,27 +5927,29 @@ rb_open_file(int argc, VALUE *argv, VALUE io)
  *
  *  With no associated block, <code>File.open</code> is a synonym for
  *  File.new. If the optional code block is given, it will
- *  be passed the opened +file+ as an argument, and the File object will
- *  automatically be closed when the block terminates.  In this instance,
- *  <code>File.open</code> returns the value of the block.
+ *  be passed the opened +file+ as an argument and the File object will
+ *  automatically be closed when the block terminates.  The value of the block
+ *  will be returned from <code>File.open</code>.
  *
- *  See IO.new for a list of values for the +opt+ parameter.
+ *  If a file is being created, its initial permissions may be set using the
+ *  +perm+ parameter.  See File.new for further discussion.
+ *
+ *  See IO.new for a description of the +mode+ and +opt+ parameters.
  */
 
 /*
  *  Document-method: IO::open
  *
  *  call-seq:
- *     IO.open(fd, mode_string="r" [, opt])               -> io
- *     IO.open(fd, mode_string="r" [, opt]) {|io| block } -> obj
+ *     IO.open(fd, mode="r" [, opt])                -> io
+ *     IO.open(fd, mode="r" [, opt]) { |io| block } -> obj
  *
- *  With no associated block, <code>IO.open</code> is a synonym for IO.new. If
- *  the optional code block is given, it will be passed +io+ as an
- *  argument, and the IO object will automatically be closed when the block
- *  terminates. In this instance, IO.open returns the value of the block.
+ *  With no associated block, <code>IO.open</code> is a synonym for IO.new.  If
+ *  the optional code block is given, it will be passed +io+ as an argument,
+ *  and the IO object will automatically be closed when the block terminates.
+ *  In this instance, IO.open returns the value of the block.
  *
- *  See IO.new for a description of values for the +opt+ parameter.
- *
+ *  See IO.new for a description of the +fd+, +mode+ and +opt+ parameters.
  */
 
 static VALUE
@@ -5995,7 +5972,6 @@ rb_io_s_open(int argc, VALUE *argv, VALUE klass)
  *  <code>Fixnum</code>.
  *
  *     IO.sysopen("testfile")   #=> 3
- *
  */
 
 static VALUE
@@ -6043,72 +6019,58 @@ check_pipe_command(VALUE filename_or_command)
 
 /*
  *  call-seq:
- *     open(path [, mode_enc [, perm]] [, opt])                -> io or nil
- *     open(path [, mode_enc [, perm]] [, opt]) {|io| block }  -> obj
+ *     open(path [, mode [, perm]] [, opt])                -> io or nil
+ *     open(path [, mode [, perm]] [, opt]) {|io| block }  -> obj
  *
- *  Creates an <code>IO</code> object connected to the given stream,
- *  file, or subprocess.
+ *  Creates an IO object connected to the given stream, file, or subprocess.
  *
- *  If <i>path</i> does not start with a pipe character
- *  (``<code>|</code>''), treat it as the name of a file to open using
- *  the specified mode (defaulting to ``<code>r</code>'').
+ *  If +path+ does not start with a pipe character (<code>|</code>), treat it
+ *  as the name of a file to open using the specified mode (defaulting to
+ *  "r").
  *
- *  The mode_enc is
- *  either a string or an integer.  If it is an integer, it must be
- *  bitwise-or of open(2) flags, such as File::RDWR or File::EXCL.
- *  If it is a string, it is either "mode", "mode:ext_enc", or
- *  "mode:ext_enc:int_enc".
- *  The mode is one of the following:
+ *  The +mode+ is either a string or an integer.  If it is an integer, it
+ *  must be bitwise-or of open(2) flags, such as File::RDWR or File::EXCL.  If
+ *  it is a string, it is either "fmode", "fmode:ext_enc", or
+ *  "fmode:ext_enc:int_enc".
  *
- *   r: read (default)
- *   w: write
- *   a: append
+ *  See the documentation of IO.new for full documentation of the +mode+ string
+ *  directives.
  *
- *  The mode can be followed by "b" (means binary-mode), or "+"
- *  (means both reading and writing allowed) or both.
- *  If ext_enc (external encoding) is specified,
- *  read string will be tagged by the encoding in reading,
- *  and output string will be converted
- *  to the specified encoding in writing.
- *  If ext_enc starts with 'BOM|', check whether the input has a BOM. If
- *  there is a BOM, strip it and set external encoding as
- *  what the BOM tells. If there is no BOM, use ext_enc without 'BOM|'.
- *  If two encoding names,
- *  ext_enc and int_enc (external encoding and internal encoding),
- *  are specified, the read string is converted from ext_enc
- *  to int_enc then tagged with the int_enc in read mode,
- *  and in write mode, the output string will be
- *  converted from int_enc to ext_enc before writing.
+ *  If a file is being created, its initial permissions may be set using the
+ *  +perm+ parameter.  See File.new and the open(2) and chmod(2) man pages for
+ *  a description of permissions.
  *
- *  If a file is being created, its initial permissions may be
- *  set using the integer third parameter.
+ *  If a block is specified, it will be invoked with the IO object as a
+ *  parameter, and the IO will be automatically closed when the block
+ *  terminates.  The call returns the value of the block.
  *
- *  If a block is specified, it will be invoked with the
- *  <code>File</code> object as a parameter, and the file will be
- *  automatically closed when the block terminates. The call
- *  returns the value of the block.
+ *  If +path+ starts with a pipe character (<code>"|"</code>), a subprocess is
+ *  created, connected to the caller by a pair of pipes.  The returned IO
+ *  object may be used to write to the standard input and read from the
+ *  standard output of this subprocess.
  *
- *  If <i>path</i> starts with a pipe character, a subprocess is
- *  created, connected to the caller by a pair of pipes. The returned
- *  <code>IO</code> object may be used to write to the standard input
- *  and read from the standard output of this subprocess. If the command
- *  following the ``<code>|</code>'' is a single minus sign, Ruby forks,
- *  and this subprocess is connected to the parent. In the subprocess,
- *  the <code>open</code> call returns <code>nil</code>. If the command
- *  is not ``<code>-</code>'', the subprocess runs the command. If a
- *  block is associated with an <code>open("|-")</code> call, that block
- *  will be run twice---once in the parent and once in the child. The
- *  block parameter will be an <code>IO</code> object in the parent and
- *  <code>nil</code> in the child. The parent's <code>IO</code> object
- *  will be connected to the child's <code>$stdin</code> and
- *  <code>$stdout</code>. The subprocess will be terminated at the end
- *  of the block.
+ *  If the command following the pipe is a single minus sign
+ *  (<code>"|-"</code>), Ruby forks, and this subprocess is connected to the
+ *  parent.  If the command is not <code>"-"</code>, the subprocess runs the
+ *  command.
+ *
+ *  When the subprocess is ruby (opened via <code>"|-"</code>), the +open+
+ *  call returns +nil+.  If a block is associated with the open call, that
+ *  block will run twice --- once in the parent and once in the child.
+ *
+ *  The block parameter will be an IO object in the parent and +nil+ in the
+ *  child. The parent's +IO+ object will be connected to the child's $stdin
+ *  and $stdout.  The subprocess will be terminated at the end of the block.
+ *
+ *  === Examples
+ *
+ *  Reading from "testfile":
  *
  *     open("testfile") do |f|
  *       print f.gets
  *     end
  *
- *  <em>produces:</em>
+ *  Produces:
  *
  *     This is line one
  *
@@ -6118,7 +6080,7 @@ check_pipe_command(VALUE filename_or_command)
  *     print cmd.gets
  *     cmd.close
  *
- *  <em>produces:</em>
+ *  Produces:
  *
  *     Wed Apr  9 08:56:31 CDT 2003
  *
@@ -6132,21 +6094,23 @@ check_pipe_command(VALUE filename_or_command)
  *       puts "Got: #{f.gets}"
  *     end
  *
- *  <em>produces:</em>
+ *  Produces:
  *
  *     Got: in Child
  *
- *  Open a subprocess using a block to receive the I/O object:
+ *  Open a subprocess using a block to receive the IO object:
  *
- *     open("|-") do |f|
- *       if f == nil
- *         puts "in Child"
- *       else
+ *     open "|-" do |f|
+ *       if f then
+ *         # parent process
  *         puts "Got: #{f.gets}"
+ *       else
+ *         # child process
+ *         puts "in Child"
  *       end
  *     end
  *
- *  <em>produces:</em>
+ *  Produces:
  *
  *     Got: in Child
  */
@@ -6416,7 +6380,7 @@ rb_io_init_copy(VALUE dest, VALUE io)
     off_t pos;
 
     io = rb_io_get_io(io);
-    if (dest == io) return dest;
+    if (!OBJ_INIT_COPY(dest, io)) return dest;
     GetOpenFile(io, orig);
     MakeOpenFile(dest, fptr);
 
@@ -6486,7 +6450,7 @@ rb_f_printf(int argc, VALUE *argv)
     VALUE out;
 
     if (argc == 0) return Qnil;
-    if (TYPE(argv[0]) == T_STRING) {
+    if (RB_TYPE_P(argv[0], T_STRING)) {
 	out = rb_stdout;
     }
     else {
@@ -6696,7 +6660,7 @@ rb_io_puts(int argc, VALUE *argv, VALUE out)
 	return Qnil;
     }
     for (i=0; i<argc; i++) {
-	if (TYPE(argv[i]) == T_STRING) {
+	if (RB_TYPE_P(argv[i], T_STRING)) {
 	    line = argv[i];
 	    goto string;
 	}
@@ -6929,59 +6893,116 @@ rb_io_stdio_file(rb_io_t *fptr)
  *  call-seq:
  *     IO.new(fd [, mode] [, opt])   -> io
  *
- *  Returns a new IO object (a stream) for the given IO object or integer file
- *  descriptor and mode string.  See also IO.sysopen and IO.for_fd.
+ *  Returns a new IO object (a stream) for the given integer file descriptor
+ *  +fd+ and +mode+ string.  +opt+ may be used to specify parts of +mode+ in a
+ *  more readable fashion.  See also IO.sysopen and IO.for_fd.
  *
- *  === Parameters
+ *  IO.new is called by various File and IO opening methods such as IO::open,
+ *  Kernel#open, and File::open.
  *
- *  fd:: numeric file descriptor or IO object
- *  mode:: file mode. a string or an integer
- *  opt:: hash for specifying +mode+ by name.
+ *  === Open Mode
  *
- *  ==== Mode
+ *  When +mode+ is an integer it must be combination of the modes defined in
+ *  File::Constants (+File::RDONLY+, +File::WRONLY | File::CREAT+).  See the
+ *  open(2) man page for more information.
  *
- *  When mode is an integer it must be combination of the modes defined in
- *  File::Constants.
+ *  When +mode+ is a string it must be in one of the following forms:
  *
- *  When mode is a string it must be in one of the following forms:
- *  - "fmode",
- *  - "fmode:extern",
- *  - "fmode:extern:intern".
- *  <code>extern</code> is the external encoding name for the IO.
- *  <code>intern</code> is the internal encoding.
- *  <code>fmode</code> must be a file open mode string. See the description of
- *  class IO for mode string directives.
+ *    fmode
+ *    fmode ":" ext_enc
+ *    fmode ":" ext_enc ":" int_enc
+ *    fmode ":" "BOM|UTF-*"
  *
- *  When the mode of original IO is read only, the mode cannot be changed to
- *  be writable.  Similarly, the mode cannot be changed from write only to
- *  readable.
+ *  +fmode+ is an IO open mode string, +ext_enc+ is the external encoding for
+ *  the IO and +int_enc+ is the internal encoding.
+ *
+ *  ==== IO Open Mode
+ *
+ *  Ruby allows the following open modes:
+ *
+ *  "r"  :: Read-only, starts at beginning of file  (default mode).
+ *
+ *  "r+" :: Read-write, starts at beginning of file.
+ *
+ *  "w"  :: Write-only, truncates existing file
+ *          to zero length or creates a new file for writing.
+ *
+ *  "w+" :: Read-write, truncates existing file to zero length
+ *          or creates a new file for reading and writing.
+ *
+ *  "a"  :: Write-only, starts at end of file if file exists,
+ *          otherwise creates a new file for writing.
+ *
+ *  "a+" :: Read-write, starts at end of file if file exists,
+ *          otherwise creates a new file for reading and
+ *          writing.
+ *
+ *  "b"  :: Binary file mode (may appear with
+ *          any of the key letters listed above).
+ *          Suppresses EOL <-> CRLF conversion on Windows. And
+ *          sets external encoding to ASCII-8BIT unless explicitly
+ *          specified.
+ *
+ *  "t"  :: Text file mode (may appear with
+ *          any of the key letters listed above except "b").
+ *
+ *  When the open mode of original IO is read only, the mode cannot be
+ *  changed to be writable.  Similarly, the open mode cannot be changed from
+ *  write only to readable.
  *
  *  When such a change is attempted the error is raised in different locations
  *  according to the platform.
  *
- *  ==== Options
- *  +opt+ can have the following keys
+ *  === IO Encoding
+ *
+ *  When +ext_enc+ is specified, strings read will be tagged by the encoding
+ *  when reading, and strings output will be converted to the specified
+ *  encoding when writing.
+ *
+ *  When +ext_enc+ and +int_enc+ are specified read strings will be converted
+ *  from +ext_enc+ to +int_enc+ upon input, and written strings will be
+ *  converted from +int_enc+ to +ext_enc+ upon output.  See Encoding for
+ *  further details of transcoding on input and output.
+ *
+ *  If "BOM|UTF-8", "BOM|UTF-16LE" or "BOM|UTF16-BE" are used, ruby checks for
+ *  a Unicode BOM in the input document to help determine the encoding.  For
+ *  UTF-16 encodings the file open mode must be binary.  When present, the BOM
+ *  is stripped and the external encoding from the BOM is used.  When the BOM
+ *  is missing the given Unicode encoding is used as +ext_enc+.  (The BOM-set
+ *  encoding option is case insensitive, so "bom|utf-8" is also valid.)
+ *
+ *  === Options
+ *
+ *  +opt+ can be used instead of +mode+ for improved readability.  The
+ *  following keys are supported:
+ *
  *  :mode ::
  *    Same as +mode+ parameter
- *  :external_encoding ::
+ *
+ *  :\external_encoding ::
  *    External encoding for the IO.  "-" is a synonym for the default external
  *    encoding.
- *  :internal_encoding ::
+ *
+ *  :\internal_encoding ::
  *    Internal encoding for the IO.  "-" is a synonym for the default internal
  *    encoding.
  *
  *    If the value is nil no conversion occurs.
+ *
  *  :encoding ::
  *    Specifies external and internal encodings as "extern:intern".
+ *
  *  :textmode ::
  *    If the value is truth value, same as "t" in argument +mode+.
+ *
  *  :binmode ::
  *    If the value is truth value, same as "b" in argument +mode+.
+ *
  *  :autoclose ::
  *    If the value is +false+, the +fd+ will be kept open after this IO
  *    instance gets finalized.
  *
- *  Also +opt+ can have same keys in String#encode for controlling conversion
+ *  Also, +opt+ can have same keys in String#encode for controlling conversion
  *  between the external encoding and the internal encoding.
  *
  *  === Example 1
@@ -6991,7 +7012,7 @@ rb_io_stdio_file(rb_io_t *fptr)
  *    $stderr.puts "Hello"
  *    a.puts "World"
  *
- *  <em>produces:</em>
+ *  Produces:
  *
  *    Hello
  *    World
@@ -7078,20 +7099,14 @@ rb_io_initialize(int argc, VALUE *argv, VALUE io)
  *     File.new(filename, mode="r" [, opt])            -> file
  *     File.new(filename [, mode [, perm]] [, opt])    -> file
  *
- *  Opens the file named by +filename+ according to +mode+ (default is "r")
- *  and returns a new <code>File</code> object.
+ *  Opens the file named by +filename+ according to the given +mode+ and
+ *  returns a new File object.
  *
- *  === Parameters
+ *  See IO.new for a description of +mode+ and +opt+.
  *
- *  See the description of class IO for a description of +mode+.  The file
- *  mode may optionally be specified as a Fixnum by +or+-ing together the
- *  flags (O_RDONLY etc, again described under +IO+).
- *
- *  Optional permission bits may be given in +perm+.  These mode and
- *  permission bits are platform dependent; on Unix systems, see
- *  <code>open(2)</code> for details.
- *
- *  Optional +opt+ parameter is same as in IO.open.
+ *  If a file is being created, permission bits may be given in +perm+.  These
+ *  mode and permission bits are platform dependent; on Unix systems, see
+ *  open(2) and chmod(2) man pages for details.
  *
  *  === Examples
  *
@@ -7264,6 +7279,7 @@ argf_initialize(VALUE argf, VALUE argv)
 static VALUE
 argf_initialize_copy(VALUE argf, VALUE orig)
 {
+    if (!OBJ_INIT_COPY(argf, orig)) return argf;
     ARGF = argf_of(orig);
     ARGF.argv = rb_obj_dup(ARGF.argv);
     if (ARGF.inplace) {
@@ -7327,7 +7343,7 @@ argf_forward(int argc, VALUE *argv, VALUE argf)
 
 #define next_argv() argf_next_argv(argf)
 #define ARGF_GENERIC_INPUT_P() \
-    (ARGF.current_file == rb_stdin && TYPE(ARGF.current_file) != T_FILE)
+    (ARGF.current_file == rb_stdin && !RB_TYPE_P(ARGF.current_file, T_FILE))
 #define ARGF_FORWARD(argc, argv) do {\
     if (ARGF_GENERIC_INPUT_P())\
 	return argf_forward((argc), (argv), argf);\
@@ -8200,10 +8216,10 @@ rb_f_select(int argc, VALUE *argv, VALUE obj)
 
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__APPLE__)
  typedef unsigned long ioctl_req_t;
- #define NUM2IOCTLREQ(num) NUM2ULONG(num)
+# define NUM2IOCTLREQ(num) NUM2ULONG(num)
 #else
  typedef int ioctl_req_t;
- #define NUM2IOCTLREQ(num) NUM2INT(num)
+# define NUM2IOCTLREQ(num) NUM2INT(num)
 #endif
 
 struct ioctl_arg {
@@ -8212,7 +8228,8 @@ struct ioctl_arg {
     long	narg;
 };
 
-static VALUE nogvl_ioctl(void *ptr)
+static VALUE
+nogvl_ioctl(void *ptr)
 {
     struct ioctl_arg *arg = ptr;
 
@@ -8509,7 +8526,8 @@ struct fcntl_arg {
     long	narg;
 };
 
-static VALUE nogvl_fcntl(void *ptr)
+static VALUE
+nogvl_fcntl(void *ptr)
 {
     struct fcntl_arg *arg = ptr;
 
@@ -9716,7 +9734,7 @@ nogvl_copy_stream_read_write(struct copy_stream_struct *stp)
     }
 }
 
-static VALUE
+static void *
 nogvl_copy_stream_func(void *arg)
 {
     struct copy_stream_struct *stp = (struct copy_stream_struct *)arg;
@@ -9735,7 +9753,7 @@ nogvl_copy_stream_func(void *arg)
 #ifdef USE_SENDFILE
   finish:
 #endif
-    return Qnil;
+    return 0;
 }
 
 static VALUE
@@ -9822,13 +9840,13 @@ copy_stream_body(VALUE arg)
     stp->total = 0;
 
     if (stp->src == argf ||
-        !(TYPE(stp->src) == T_FILE ||
-          TYPE(stp->src) == T_STRING ||
+        !(RB_TYPE_P(stp->src, T_FILE) ||
+          RB_TYPE_P(stp->src, T_STRING) ||
           rb_respond_to(stp->src, rb_intern("to_path")))) {
         src_fd = -1;
     }
     else {
-        src_io = TYPE(stp->src) == T_FILE ? stp->src : Qnil;
+        src_io = RB_TYPE_P(stp->src, T_FILE) ? stp->src : Qnil;
         if (NIL_P(src_io)) {
             VALUE args[2];
             int oflags = O_RDONLY;
@@ -9849,13 +9867,13 @@ copy_stream_body(VALUE arg)
     stp->src_fd = src_fd;
 
     if (stp->dst == argf ||
-        !(TYPE(stp->dst) == T_FILE ||
-          TYPE(stp->dst) == T_STRING ||
+        !(RB_TYPE_P(stp->dst, T_FILE) ||
+          RB_TYPE_P(stp->dst, T_STRING) ||
           rb_respond_to(stp->dst, rb_intern("to_path")))) {
         dst_fd = -1;
     }
     else {
-        dst_io = TYPE(stp->dst) == T_FILE ? stp->dst : Qnil;
+        dst_io = RB_TYPE_P(stp->dst, T_FILE) ? stp->dst : Qnil;
         if (NIL_P(dst_io)) {
             VALUE args[3];
             int oflags = O_WRONLY|O_CREAT|O_TRUNC;
@@ -9921,7 +9939,8 @@ copy_stream_body(VALUE arg)
     rb_fd_set(src_fd, &stp->fds);
     rb_fd_set(dst_fd, &stp->fds);
 
-    return rb_thread_blocking_region(nogvl_copy_stream_func, (void*)stp, RUBY_UBF_IO, 0);
+    rb_thread_call_without_gvl(nogvl_copy_stream_func, (void*)stp, RUBY_UBF_IO, 0);
+    return Qnil;
 }
 
 static VALUE
@@ -10600,7 +10619,7 @@ argf_getbyte(VALUE argf)
 
   retry:
     if (!next_argv()) return Qnil;
-    if (TYPE(ARGF.current_file) != T_FILE) {
+    if (!RB_TYPE_P(ARGF.current_file, T_FILE)) {
 	ch = rb_funcall3(ARGF.current_file, rb_intern("getbyte"), 0, 0);
     }
     else {
@@ -10640,7 +10659,7 @@ argf_readchar(VALUE argf)
 
   retry:
     if (!next_argv()) rb_eof_error();
-    if (TYPE(ARGF.current_file) != T_FILE) {
+    if (!RB_TYPE_P(ARGF.current_file, T_FILE)) {
 	ch = rb_funcall3(ARGF.current_file, rb_intern("getc"), 0, 0);
     }
     else {
@@ -11196,91 +11215,59 @@ argf_write(VALUE argf, VALUE str)
  */
 
 /*
- *  Class <code>IO</code> is the basis for all input and output in Ruby.
+ *  The IO class is the basis for all input and output in Ruby.
  *  An I/O stream may be <em>duplexed</em> (that is, bidirectional), and
  *  so may use more than one native operating system stream.
  *
- *  Many of the examples in this section use class <code>File</code>,
- *  the only standard subclass of <code>IO</code>. The two classes are
- *  closely associated.
+ *  Many of the examples in this section use the File class, the only standard
+ *  subclass of IO. The two classes are closely associated.  Like the File
+ *  class, the Socket library subclasses from IO (such as TCPSocket or
+ *  UDPSocket).
  *
- *  As used in this section, <em>portname</em> may take any of the
- *  following forms.
+ *  The Kernel#open method can create an IO (or File) object for these types
+ *  of arguments:
  *
  *  * A plain string represents a filename suitable for the underlying
  *    operating system.
  *
- *  * A string starting with ``<code>|</code>'' indicates a subprocess.
- *    The remainder of the string following the ``<code>|</code>'' is
+ *  * A string starting with <code>"|"</code> indicates a subprocess.
+ *    The remainder of the string following the <code>"|"</code> is
  *    invoked as a process with appropriate input/output channels
  *    connected to it.
  *
- *  * A string equal to ``<code>|-</code>'' will create another Ruby
+ *  * A string equal to <code>"|-"</code> will create another Ruby
  *    instance as a subprocess.
  *
- *  Ruby will convert pathnames between different operating system
- *  conventions if possible. For instance, on a Windows system the
- *  filename ``<code>/gumby/ruby/test.rb</code>'' will be opened as
- *  ``<code>\gumby\ruby\test.rb</code>''. When specifying a
- *  Windows-style filename in a Ruby string, remember to escape the
- *  backslashes:
+ *  The IO may be opened with different file modes (read-only, write-only) and
+ *  encodings for proper conversion.  See IO.new for these options.  See
+ *  Kernel#open for details of the various command formats described above.
  *
- *     "c:\\gumby\\ruby\\test.rb"
+ *  IO.popen, the Open3 library, or  Process#spawn may also be used to
+ *  communicate with subprocesses through an IO.
+ *
+ *  Ruby will convert pathnames between different operating system
+ *  conventions if possible.  For instance, on a Windows system the
+ *  filename <code>"/gumby/ruby/test.rb"</code> will be opened as
+ *  <code>"\gumby\ruby\test.rb"</code>.  When specifying a Windows-style
+ *  filename in a Ruby string, remember to escape the backslashes:
+ *
+ *    "c:\\gumby\\ruby\\test.rb"
  *
  *  Our examples here will use the Unix-style forward slashes;
- *  <code>File::SEPARATOR</code> can be used to get the
- *  platform-specific separator character.
- *
- *  I/O ports may be opened in any one of several different modes, which
- *  are shown in this section as <em>mode</em>. The mode may
- *  either be a Fixnum or a String. If numeric, it should be
- *  one of the operating system specific constants (O_RDONLY,
- *  O_WRONLY, O_RDWR, O_APPEND and so on). See man open(2) for
- *  more information.
- *
- *  If the mode is given as a String, it must be one of the
- *  values listed in the following table.
- *
- *    Mode |  Meaning
- *    -----+--------------------------------------------------------
- *    "r"  |  Read-only, starts at beginning of file  (default mode).
- *    -----+--------------------------------------------------------
- *    "r+" |  Read-write, starts at beginning of file.
- *    -----+--------------------------------------------------------
- *    "w"  |  Write-only, truncates existing file
- *         |  to zero length or creates a new file for writing.
- *    -----+--------------------------------------------------------
- *    "w+" |  Read-write, truncates existing file to zero length
- *         |  or creates a new file for reading and writing.
- *    -----+--------------------------------------------------------
- *    "a"  |  Write-only, starts at end of file if file exists,
- *         |  otherwise creates a new file for writing.
- *    -----+--------------------------------------------------------
- *    "a+" |  Read-write, starts at end of file if file exists,
- *         |  otherwise creates a new file for reading and
- *         |  writing.
- *    -----+--------------------------------------------------------
- *     "b" |  Binary file mode (may appear with
- *         |  any of the key letters listed above).
- *         |  Suppresses EOL <-> CRLF conversion on Windows. And
- *         |  sets external encoding to ASCII-8BIT unless explicitly
- *         |  specified.
- *    -----+--------------------------------------------------------
- *     "t" |  Text file mode (may appear with
- *         |  any of the key letters listed above except "b").
- *
+ *  File::ALT_SEPARATOR can be used to get the platform-specific separator
+ *  character.
  *
  *  The global constant ARGF (also accessible as $<) provides an
  *  IO-like stream which allows access to all files mentioned on the
- *  command line (or STDIN if no files are mentioned). ARGF provides
- *  the methods <code>#path</code> and <code>#filename</code> to access
- *  the name of the file currently being read.
+ *  command line (or STDIN if no files are mentioned). ARGF#path and its alias
+ *  ARGF#filename are provided to access the name of the file currently being
+ *  read.
  *
  *  == io/console
  *
  *  The io/console extension provides methods for interacting with the
- *  console.  The console can be accessed from <code>IO.console</code> or
- *  the standard input/output/error IO objects.
+ *  console.  The console can be accessed from IO.console or the standard
+ *  input/output/error IO objects.
  *
  *  Requiring io/console adds the following methods:
  *

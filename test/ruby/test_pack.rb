@@ -496,6 +496,10 @@ class TestPack < Test::Unit::TestCase
     assert_equal("M86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A\n!80``\n", ["a"*46].pack("u0"))
     assert_equal("M86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A\n!80``\n", ["a"*46].pack("u1"))
     assert_equal("M86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A\n!80``\n", ["a"*46].pack("u2"))
+    assert_equal(<<EXPECTED, ["a"*80].pack("u68"))
+_86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A86%A
+186%A86%A86%A86%A86%A86$`
+EXPECTED
 
     assert_equal([""], "".unpack("u"))
     assert_equal(["a"], "!80``\n".unpack("u"))
@@ -572,6 +576,15 @@ class TestPack < Test::Unit::TestCase
     assert_equal([""], "=\r\n".unpack("M"))
     assert_equal([""], "=\r\n".unpack("M"))
     assert_equal(["\xC6\xF7"], "=C6=F7".unpack('M*'))
+
+    assert_equal(["pre123after"], "pre=31=32=33after".unpack("M"))
+    assert_equal(["preafter"], "pre=\nafter".unpack("M"))
+    assert_equal(["preafter"], "pre=\r\nafter".unpack("M"))
+    assert_equal(["pre="], "pre=".unpack("M"))
+    assert_equal(["pre=\r"], "pre=\r".unpack("M"))
+    assert_equal(["pre=hoge"], "pre=hoge".unpack("M"))
+    assert_equal(["pre==31after"], "pre==31after".unpack("M"))
+    assert_equal(["pre===31after"], "pre===31after".unpack("M"))
   end
 
   def test_pack_unpack_P2
@@ -610,18 +623,6 @@ class TestPack < Test::Unit::TestCase
     assert_equal([0x40000000], "\204\200\200\200\000".unpack("w"), [0x40000000])
     assert_equal([0xffffffff], "\217\377\377\377\177".unpack("w"), [0xffffffff])
     assert_equal([0x100000000], "\220\200\200\200\000".unpack("w"), [0x100000000])
-  end
-
-
-  def test_pack_unpack_M
-    assert_equal(["pre123after"], "pre=31=32=33after".unpack("M"))
-    assert_equal(["preafter"], "pre=\nafter".unpack("M"))
-    assert_equal(["preafter"], "pre=\r\nafter".unpack("M"))
-    assert_equal(["pre="], "pre=".unpack("M"))
-    assert_equal(["pre=\r"], "pre=\r".unpack("M"))
-    assert_equal(["pre=hoge"], "pre=hoge".unpack("M"))
-    assert_equal(["pre==31after"], "pre==31after".unpack("M"))
-    assert_equal(["pre===31after"], "pre===31after".unpack("M"))
   end
 
   def test_modify_under_safe4

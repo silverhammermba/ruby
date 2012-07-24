@@ -150,6 +150,40 @@ rb_num_to_uint(VALUE val, unsigned int *ret)
     return NUMERR_TYPE;
 }
 
+#define method_basic_p(klass) rb_method_basic_definition_p(klass, mid)
+
+static inline int
+positive_int_p(VALUE num)
+{
+    const ID mid = '>';
+
+    if (FIXNUM_P(num)) {
+	if (method_basic_p(rb_cFixnum))
+	    return (SIGNED_VALUE)num > 0;
+    }
+    else if (RB_TYPE_P(num, T_BIGNUM)) {
+	if (method_basic_p(rb_cBignum))
+	    return RBIGNUM_POSITIVE_P(num);
+    }
+    return RTEST(rb_funcall(num, mid, 1, INT2FIX(0)));
+}
+
+static inline int
+negative_int_p(VALUE num)
+{
+    const ID mid = '<';
+
+    if (FIXNUM_P(num)) {
+	if (method_basic_p(rb_cFixnum))
+	    return (SIGNED_VALUE)num < 0;
+    }
+    else if (RB_TYPE_P(num, T_BIGNUM)) {
+	if (method_basic_p(rb_cBignum))
+	    return RBIGNUM_NEGATIVE_P(num);
+    }
+    return RTEST(rb_funcall(num, mid, 1, INT2FIX(0)));
+}
+
 /*
  *  call-seq:
  *     num.coerce(numeric)  ->  array
@@ -405,10 +439,10 @@ num_remainder(VALUE x, VALUE y)
     VALUE z = rb_funcall(x, '%', 1, y);
 
     if ((!rb_equal(z, INT2FIX(0))) &&
-	((RTEST(rb_funcall(x, '<', 1, INT2FIX(0))) &&
-	  RTEST(rb_funcall(y, '>', 1, INT2FIX(0)))) ||
-	 (RTEST(rb_funcall(x, '>', 1, INT2FIX(0))) &&
-	  RTEST(rb_funcall(y, '<', 1, INT2FIX(0)))))) {
+	((negative_int_p(x) &&
+	  positive_int_p(y)) ||
+	 (positive_int_p(x) &&
+	  negative_int_p(y)))) {
 	return rb_funcall(z, '-', 1, y);
     }
     return z;
@@ -504,7 +538,7 @@ num_int_p(VALUE num)
 static VALUE
 num_abs(VALUE num)
 {
-    if (RTEST(rb_funcall(num, '<', 1, INT2FIX(0)))) {
+    if (negative_int_p(num)) {
 	return rb_funcall(num, rb_intern("-@"), 0);
     }
     return num;
@@ -628,7 +662,7 @@ flo_to_s(VALUE flt)
 	    buf[decpt] = '.';
 	    rb_str_cat(s, buf, digs + 1);
 	}
-	else if (decpt - digs < float_dig) {
+	else if (decpt <= DBL_DIG) {
 	    long len;
 	    char *ptr;
 	    rb_str_cat(s, buf, digs);
@@ -1020,11 +1054,8 @@ flo_eq(VALUE x, VALUE y)
 
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = (double)FIX2LONG(y);
-	break;
       case T_BIGNUM:
-	b = rb_big2dbl(y);
-	break;
+        return rb_integer_float_eq(y, x);
       case T_FLOAT:
 	b = RFLOAT_VALUE(y);
 #if defined(_MSC_VER) && _MSC_VER < 1300
@@ -1090,16 +1121,13 @@ flo_cmp(VALUE x, VALUE y)
     if (isnan(a)) return Qnil;
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = (double)FIX2LONG(y);
-	break;
-
       case T_BIGNUM:
-	if (isinf(a)) {
-	    if (a > 0.0) return INT2FIX(1);
-	    else return INT2FIX(-1);
-	}
-	b = rb_big2dbl(y);
-	break;
+      {
+        VALUE rel = rb_integer_float_cmp(y, x);
+        if (FIXNUM_P(rel))
+            return INT2FIX(-FIX2INT(rel));
+        return rel;
+      }
 
       case T_FLOAT:
 	b = RFLOAT_VALUE(y);
@@ -1135,12 +1163,13 @@ flo_gt(VALUE x, VALUE y)
     a = RFLOAT_VALUE(x);
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = (double)FIX2LONG(y);
-	break;
-
       case T_BIGNUM:
-	b = rb_big2dbl(y);
-	break;
+      {
+        VALUE rel = rb_integer_float_cmp(y, x);
+        if (FIXNUM_P(rel))
+            return -FIX2INT(rel) > 0 ? Qtrue : Qfalse;
+        return Qfalse;
+      }
 
       case T_FLOAT:
 	b = RFLOAT_VALUE(y);
@@ -1174,12 +1203,13 @@ flo_ge(VALUE x, VALUE y)
     a = RFLOAT_VALUE(x);
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = (double)FIX2LONG(y);
-	break;
-
       case T_BIGNUM:
-	b = rb_big2dbl(y);
-	break;
+      {
+        VALUE rel = rb_integer_float_cmp(y, x);
+        if (FIXNUM_P(rel))
+            return -FIX2INT(rel) >= 0 ? Qtrue : Qfalse;
+        return Qfalse;
+      }
 
       case T_FLOAT:
 	b = RFLOAT_VALUE(y);
@@ -1212,12 +1242,13 @@ flo_lt(VALUE x, VALUE y)
     a = RFLOAT_VALUE(x);
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = (double)FIX2LONG(y);
-	break;
-
       case T_BIGNUM:
-	b = rb_big2dbl(y);
-	break;
+      {
+        VALUE rel = rb_integer_float_cmp(y, x);
+        if (FIXNUM_P(rel))
+            return -FIX2INT(rel) < 0 ? Qtrue : Qfalse;
+        return Qfalse;
+      }
 
       case T_FLOAT:
 	b = RFLOAT_VALUE(y);
@@ -1251,12 +1282,13 @@ flo_le(VALUE x, VALUE y)
     a = RFLOAT_VALUE(x);
     switch (TYPE(y)) {
       case T_FIXNUM:
-	b = (double)FIX2LONG(y);
-	break;
-
       case T_BIGNUM:
-	b = rb_big2dbl(y);
-	break;
+      {
+        VALUE rel = rb_integer_float_cmp(y, x);
+        if (FIXNUM_P(rel))
+            return -FIX2INT(rel) <= 0 ? Qtrue : Qfalse;
+        return Qfalse;
+      }
 
       case T_FLOAT:
 	b = RFLOAT_VALUE(y);
@@ -1503,7 +1535,7 @@ int_round_0(VALUE num, int ndigits)
     h = rb_funcall(f, '/', 1, INT2FIX(2));
     r = rb_funcall(num, '%', 1, f);
     n = rb_funcall(num, '-', 1, r);
-    op = RTEST(rb_funcall(num, '<', 1, INT2FIX(0))) ? rb_intern("<=") : '<';
+    op = negative_int_p(num) ? rb_intern("<=") : '<';
     if (!RTEST(rb_funcall(r, op, 1, h))) {
 	n = rb_funcall(n, '+', 1, f);
     }
@@ -1801,7 +1833,7 @@ num_step(int argc, VALUE *argv, VALUE from)
 	VALUE i = from;
 	ID cmp;
 
-	if (RTEST(rb_funcall(step, '>', 1, INT2FIX(0)))) {
+	if (positive_int_p(step)) {
 	    cmp = '>';
 	}
 	else {
@@ -1905,11 +1937,11 @@ check_int(SIGNED_VALUE num)
 }
 
 static void
-check_uint(VALUE num, VALUE sign)
+check_uint(VALUE num, int sign)
 {
     static const VALUE mask = ~(VALUE)UINT_MAX;
 
-    if (RTEST(sign)) {
+    if (sign) {
 	/* minus */
 	if ((num & mask) != mask || (num & ~mask) <= INT_MAX)
 #define VALUE_MSBMASK   ((VALUE)1 << ((sizeof(VALUE) * CHAR_BIT) - 1))
@@ -1945,7 +1977,7 @@ rb_num2uint(VALUE val)
 {
     VALUE num = rb_num2ulong(val);
 
-    check_uint(num, rb_funcall(val, '<', 1, INT2FIX(0)));
+    check_uint(num, negative_int_p(val));
     return (unsigned long)num;
 }
 
@@ -1959,7 +1991,7 @@ rb_fix2uint(VALUE val)
     }
     num = FIX2ULONG(val);
 
-    check_uint(num, rb_funcall(val, '<', 1, INT2FIX(0)));
+    check_uint(num, negative_int_p(val));
     return num;
 }
 #else
@@ -1992,11 +2024,11 @@ check_short(SIGNED_VALUE num)
 }
 
 static void
-check_ushort(VALUE num, VALUE sign)
+check_ushort(VALUE num, int sign)
 {
     static const VALUE mask = ~(VALUE)USHRT_MAX;
 
-    if (RTEST(sign)) {
+    if (sign) {
 	/* minus */
 	if ((num & mask) != mask || (num & ~mask) <= SHRT_MAX)
 #define VALUE_MSBMASK   ((VALUE)1 << ((sizeof(VALUE) * CHAR_BIT) - 1))
@@ -2032,7 +2064,7 @@ rb_num2ushort(VALUE val)
 {
     VALUE num = rb_num2ulong(val);
 
-    check_ushort(num, rb_funcall(val, '<', 1, INT2FIX(0)));
+    check_ushort(num, negative_int_p(val));
     return (unsigned long)num;
 }
 
@@ -2046,7 +2078,7 @@ rb_fix2ushort(VALUE val)
     }
     num = FIX2ULONG(val);
 
-    check_ushort(num, rb_funcall(val, '<', 1, INT2FIX(0)));
+    check_ushort(num, negative_int_p(val));
     return num;
 }
 
@@ -2867,7 +2899,7 @@ fix_pow(VALUE x, VALUE y)
     switch (TYPE(y)) {
       case T_BIGNUM:
 
-	if (rb_funcall(y, '<', 1, INT2FIX(0)))
+	if (negative_int_p(y))
 	    return rb_funcall(rb_rational_raw1(x), rb_intern("**"), 1, y);
 
 	if (a == 0) return INT2FIX(0);
@@ -2915,7 +2947,7 @@ fix_equal(VALUE x, VALUE y)
       case T_BIGNUM:
 	return rb_big_eq(y, x);
       case T_FLOAT:
-	return (double)FIX2LONG(x) == RFLOAT_VALUE(y) ? Qtrue : Qfalse;
+        return rb_integer_float_eq(x, y);
       default:
 	return num_equal(x, y);
     }
@@ -2943,7 +2975,7 @@ fix_cmp(VALUE x, VALUE y)
       case T_BIGNUM:
 	return rb_big_cmp(rb_int2big(FIX2LONG(x)), y);
       case T_FLOAT:
-	return rb_dbl_cmp((double)FIX2LONG(x), RFLOAT_VALUE(y));
+        return rb_integer_float_cmp(x, y);
       default:
 	return rb_num_coerce_cmp(x, y, rb_intern("<=>"));
     }
@@ -2968,7 +3000,7 @@ fix_gt(VALUE x, VALUE y)
       case T_BIGNUM:
 	return FIX2INT(rb_big_cmp(rb_int2big(FIX2LONG(x)), y)) > 0 ? Qtrue : Qfalse;
       case T_FLOAT:
-	return (double)FIX2LONG(x) > RFLOAT_VALUE(y) ? Qtrue : Qfalse;
+        return rb_integer_float_cmp(x, y) == INT2FIX(1) ? Qtrue : Qfalse;
       default:
 	return rb_num_coerce_relop(x, y, '>');
     }
@@ -2993,7 +3025,10 @@ fix_ge(VALUE x, VALUE y)
       case T_BIGNUM:
 	return FIX2INT(rb_big_cmp(rb_int2big(FIX2LONG(x)), y)) >= 0 ? Qtrue : Qfalse;
       case T_FLOAT:
-	return (double)FIX2LONG(x) >= RFLOAT_VALUE(y) ? Qtrue : Qfalse;
+        {
+          VALUE rel = rb_integer_float_cmp(x, y);
+          return rel == INT2FIX(1) || rel == INT2FIX(0) ? Qtrue : Qfalse;
+        }
       default:
 	return rb_num_coerce_relop(x, y, rb_intern(">="));
     }
@@ -3018,7 +3053,7 @@ fix_lt(VALUE x, VALUE y)
       case T_BIGNUM:
 	return FIX2INT(rb_big_cmp(rb_int2big(FIX2LONG(x)), y)) < 0 ? Qtrue : Qfalse;
       case T_FLOAT:
-	return (double)FIX2LONG(x) < RFLOAT_VALUE(y) ? Qtrue : Qfalse;
+        return rb_integer_float_cmp(x, y) == INT2FIX(-1) ? Qtrue : Qfalse;
       default:
 	return rb_num_coerce_relop(x, y, '<');
     }
@@ -3043,7 +3078,10 @@ fix_le(VALUE x, VALUE y)
       case T_BIGNUM:
 	return FIX2INT(rb_big_cmp(rb_int2big(FIX2LONG(x)), y)) <= 0 ? Qtrue : Qfalse;
       case T_FLOAT:
-	return (double)FIX2LONG(x) <= RFLOAT_VALUE(y) ? Qtrue : Qfalse;
+        {
+          VALUE rel = rb_integer_float_cmp(x, y);
+          return rel == INT2FIX(-1) || rel == INT2FIX(0) ? Qtrue : Qfalse;
+        }
       default:
 	return rb_num_coerce_relop(x, y, rb_intern("<="));
     }

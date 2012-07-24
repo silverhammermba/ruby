@@ -433,6 +433,8 @@ module Net
         end
         conn = BufferedSocket.new(sock.accept)
         conn.read_timeout = @read_timeout
+        sock.shutdown(Socket::SHUT_WR) rescue nil
+        sock.read rescue nil
         sock.close
       end
       return conn
@@ -481,13 +483,19 @@ module Net
     def retrbinary(cmd, blocksize, rest_offset = nil) # :yield: data
       synchronize do
         with_binary(true) do
-          conn = transfercmd(cmd, rest_offset)
-          loop do
-            data = conn.read(blocksize)
-            break if data == nil
-            yield(data)
+          begin
+            conn = transfercmd(cmd, rest_offset)
+            loop do
+              data = conn.read(blocksize)
+              break if data == nil
+              yield(data)
+            end
+            conn.shutdown(Socket::SHUT_WR)
+            conn.read_timeout = 1
+            conn.read
+          ensure
+            conn.close if conn
           end
-          conn.close
           voidresp
         end
       end
@@ -502,13 +510,19 @@ module Net
     def retrlines(cmd) # :yield: line
       synchronize do
         with_binary(false) do
-          conn = transfercmd(cmd)
-          loop do
-            line = conn.gets
-            break if line == nil
-            yield(line.sub(/\r?\n\z/, ""), !line.match(/\n\z/).nil?)
+          begin
+            conn = transfercmd(cmd)
+            loop do
+              line = conn.gets
+              break if line == nil
+              yield(line.sub(/\r?\n\z/, ""), !line.match(/\n\z/).nil?)
+            end
+            conn.shutdown(Socket::SHUT_WR)
+            conn.read_timeout = 1
+            conn.read
+          ensure
+            conn.close if conn
           end
-          conn.close
           voidresp
         end
       end

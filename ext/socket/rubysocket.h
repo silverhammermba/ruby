@@ -3,6 +3,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/io.h"
+#include "ruby/thread.h"
 #include "ruby/util.h"
 #include "internal.h"
 #include <stdio.h>
@@ -116,6 +117,10 @@
 # define IS_IP_FAMILY(af) ((af) == AF_INET)
 #endif
 
+#ifndef IN6_IS_ADDR_UNIQUE_LOCAL
+# define IN6_IS_ADDR_UNIQUE_LOCAL(a) (((a)->s6_addr[0] == 0xfc) || ((a)->s6_addr[0] == 0xfd))
+#endif
+
 #ifndef HAVE_SOCKADDR_STORAGE
 /*
  * RFC 2553: protocol-independent placeholder for socket addresses
@@ -139,7 +144,7 @@ struct sockaddr_storage {
 };
 #endif
 
-#if defined __APPLE__ && defined __MACH__
+#ifdef __APPLE__
 /*
  * CMSG_ macros are broken on 64bit darwin, because __DARWIN_ALIGN
  * aligns up to __darwin_size_t which is 64bit, but CMSG_DATA is

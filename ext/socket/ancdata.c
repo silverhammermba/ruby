@@ -196,7 +196,7 @@ ancillary_s_unix_rights(int argc, VALUE *argv, VALUE klass)
 
     for (i = 0 ; i < argc; i++) {
         VALUE obj = argv[i];
-        if (TYPE(obj) != T_FILE) {
+        if (!RB_TYPE_P(obj, T_FILE)) {
             rb_raise(rb_eTypeError, "IO expected");
         }
         rb_ary_push(ary, obj);
@@ -1110,11 +1110,11 @@ struct sendmsg_args_struct {
     int flags;
 };
 
-static VALUE
+static void *
 nogvl_sendmsg_func(void *ptr)
 {
     struct sendmsg_args_struct *args = ptr;
-    return sendmsg(args->fd, args->msg, args->flags);
+    return (void *)sendmsg(args->fd, args->msg, args->flags);
 }
 
 static ssize_t
@@ -1124,7 +1124,7 @@ rb_sendmsg(int fd, const struct msghdr *msg, int flags)
     args.fd = fd;
     args.msg = msg;
     args.flags = flags;
-    return rb_thread_blocking_region(nogvl_sendmsg_func, &args, RUBY_UBF_IO, 0);
+    return (ssize_t)rb_thread_call_without_gvl(nogvl_sendmsg_func, &args, RUBY_UBF_IO, 0);
 }
 
 static VALUE
@@ -1368,12 +1368,12 @@ rsock_recvmsg(int socket, struct msghdr *message, int flags)
     return recvmsg(socket, message, flags);
 }
 
-static VALUE
+static void *
 nogvl_recvmsg_func(void *ptr)
 {
     struct recvmsg_args_struct *args = ptr;
     int flags = args->flags;
-    return rsock_recvmsg(args->fd, args->msg, flags);
+    return (void *)rsock_recvmsg(args->fd, args->msg, flags);
 }
 
 static ssize_t
@@ -1383,7 +1383,7 @@ rb_recvmsg(int fd, struct msghdr *msg, int flags)
     args.fd = fd;
     args.msg = msg;
     args.flags = flags;
-    return rb_thread_blocking_region(nogvl_recvmsg_func, &args, RUBY_UBF_IO, 0);
+    return (ssize_t)rb_thread_call_without_gvl(nogvl_recvmsg_func, &args, RUBY_UBF_IO, 0);
 }
 
 #if defined(HAVE_ST_MSG_CONTROL)
@@ -1496,7 +1496,7 @@ bsock_recvmsg_internal(int argc, VALUE *argv, VALUE sock, int nonblock)
     rb_secure(4);
 
     vopts = Qnil;
-    if (0 < argc && TYPE(argv[argc-1]) == T_HASH)
+    if (0 < argc && RB_TYPE_P(argv[argc-1], T_HASH))
         vopts = argv[--argc];
 
     rb_scan_args(argc, argv, "03", &vmaxdatlen, &vflags, &vmaxctllen);

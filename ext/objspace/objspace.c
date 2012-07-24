@@ -60,7 +60,9 @@ memsize_of(VALUE obj)
 	break;
       case T_MODULE:
       case T_CLASS:
-	size += st_memsize(RCLASS_M_TBL(obj));
+	if (RCLASS_M_TBL(obj)) {
+	    size += st_memsize(RCLASS_M_TBL(obj));
+	}
 	if (RCLASS_IV_TBL(obj)) {
 	    size += st_memsize(RCLASS_IV_TBL(obj));
 	}
@@ -300,7 +302,7 @@ count_objects_size(int argc, VALUE *argv, VALUE os)
     VALUE hash;
 
     if (rb_scan_args(argc, argv, "01", &hash) == 1) {
-        if (TYPE(hash) != T_HASH)
+        if (!RB_TYPE_P(hash, T_HASH))
             rb_raise(rb_eTypeError, "non-hash given");
     }
 
@@ -404,7 +406,7 @@ count_nodes(int argc, VALUE *argv, VALUE os)
     VALUE hash;
 
     if (rb_scan_args(argc, argv, "01", &hash) == 1) {
-        if (TYPE(hash) != T_HASH)
+        if (!RB_TYPE_P(hash, T_HASH))
             rb_raise(rb_eTypeError, "non-hash given");
     }
 
@@ -609,7 +611,7 @@ count_tdata_objects(int argc, VALUE *argv, VALUE self)
     VALUE hash;
 
     if (rb_scan_args(argc, argv, "01", &hash) == 1) {
-        if (TYPE(hash) != T_HASH)
+        if (!RB_TYPE_P(hash, T_HASH))
             rb_raise(rb_eTypeError, "non-hash given");
     }
 

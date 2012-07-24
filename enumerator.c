@@ -373,6 +373,7 @@ enumerator_init_copy(VALUE obj, VALUE orig)
 {
     struct enumerator *ptr0, *ptr1;
 
+    if (!OBJ_INIT_COPY(obj, orig)) return obj;
     ptr0 = enumerator_ptr(orig);
     if (ptr0->fib) {
 	/* Fibers cannot be copied */
@@ -1146,6 +1147,8 @@ generator_init_copy(VALUE obj, VALUE orig)
 {
     struct generator *ptr0, *ptr1;
 
+    if (!OBJ_INIT_COPY(obj, orig)) return obj;
+
     ptr0 = generator_ptr(orig);
 
     TypedData_Get_Struct(obj, struct generator, &generator_data_type, ptr1);
@@ -1369,7 +1372,7 @@ static VALUE
 lazy_flat_map_func(VALUE val, VALUE m, int argc, VALUE *argv)
 {
     VALUE result = rb_yield_values2(argc - 1, &argv[1]);
-    if (TYPE(result) == T_ARRAY) {
+    if (RB_TYPE_P(result, T_ARRAY)) {
 	long i;
 	for (i = 0; i < RARRAY_LEN(result); i++) {
 	    rb_funcall(argv[0], id_yield, 1, RARRAY_PTR(result)[i]);
@@ -1533,6 +1536,7 @@ lazy_take_func(VALUE val, VALUE args, int argc, VALUE *argv)
 
     rb_funcall2(argv[0], id_yield, argc - 1, argv + 1);
     if (--memo->u3.cnt == 0) {
+	memo->u3.cnt = memo->u2.argc;
 	return Qundef;
     }
     else {
@@ -1557,7 +1561,7 @@ lazy_take(VALUE obj, VALUE n)
 	argv[2] = INT2NUM(0);
 	argc = 3;
     }
-    memo = NEW_MEMO(0, 0, len);
+    memo = NEW_MEMO(0, len, len);
     return lazy_set_method(rb_block_call(rb_cLazy, id_new, argc, argv,
 					 lazy_take_func, (VALUE) memo),
 			   rb_ary_new3(1, n));

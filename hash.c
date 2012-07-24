@@ -45,7 +45,7 @@ rb_any_cmp(VALUE a, VALUE b)
 	return a != b;
     }
     if (RB_TYPE_P(a, T_STRING) && RBASIC(a)->klass == rb_cString &&
-	TYPE(b) == T_STRING && RBASIC(b)->klass == rb_cString) {
+	RB_TYPE_P(b, T_STRING) && RBASIC(b)->klass == rb_cString) {
 	return rb_str_hash_cmp(a, b);
     }
     if (a == Qundef || b == Qundef) return -1;
@@ -393,8 +393,13 @@ rb_hash_s_create(int argc, VALUE *argv, VALUE klass)
 		VALUE v = rb_check_array_type(RARRAY_PTR(tmp)[i]);
 		VALUE key, val = Qnil;
 
-		if (NIL_P(v)) continue;
+		if (NIL_P(v)) {
+		    rb_raise(rb_eArgError, "wrong element type (expected array)");
+		}
 		switch (RARRAY_LEN(v)) {
+		  default:
+		    rb_raise(rb_eArgError, "invalid number of elements (%ld for 1..2)",
+			     RARRAY_LEN(v));
 		  case 2:
 		    val = RARRAY_PTR(v)[1];
 		  case 1:

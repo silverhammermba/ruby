@@ -88,6 +88,10 @@ class TestSyntax < Test::Unit::TestCase
     assert_equal({}, o.kw, bug5989)
     assert_equal({foo: 1}, o.kw(foo: 1), bug5989)
     assert_equal({foo: 1, bar: 2}, o.kw(foo: 1, bar: 2), bug5989)
+    EnvUtil.under_gc_stress do
+      eval("def o.m(k: 0) k end")
+    end
+    assert_equal(42, o.m(k: 42), '[ruby-core:45744]')
   end
 
   def test_keyword_splat
@@ -106,7 +110,8 @@ class TestSyntax < Test::Unit::TestCase
   end
 
   def test_warn_grouped_expression
-    assert_warn("test:2: warning: (...) interpreted as grouped expression\n") do
+    bug5214 = '[ruby-core:39050]'
+    assert_warn("", bug5214) do
       assert_valid_syntax("foo \\\n(\n  true)", "test") {$VERBOSE = true}
     end
   end
@@ -174,6 +179,11 @@ class TestSyntax < Test::Unit::TestCase
   def test_do_block_in_cmdarg_begin
     bug6419 = '[ruby-dev:45631]'
     assert_valid_syntax("p begin 1.times do 1 end end", __FILE__, bug6419)
+  end
+
+  def test_reserved_method_no_args
+    bug6403 = '[ruby-dev:45626]'
+    assert_valid_syntax("def self; :foo; end", __FILE__, bug6403)
   end
 
   private

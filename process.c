@@ -13,6 +13,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/io.h"
+#include "ruby/thread.h"
 #include "ruby/util.h"
 #include "internal.h"
 #include "vm_core.h"
@@ -62,6 +63,11 @@
 #endif
 
 #include <sys/stat.h>
+#if defined(__native_client__) && defined(NACL_NEWLIB)
+# include "nacl/stat.h"
+# include "nacl/unistd.h"
+#endif
+
 
 #ifdef HAVE_SYS_TIMES_H
 #include <sys/times.h>
@@ -73,6 +79,8 @@
 #ifdef HAVE_GRP_H
 #include <grp.h>
 #endif
+
+#define numberof(array) (int)(sizeof(array)/sizeof((array)[0]))
 
 #if defined(HAVE_TIMES) || defined(_WIN32)
 static VALUE rb_cProcessTms;
@@ -97,10 +105,6 @@ static VALUE rb_cProcessTms;
 #define WSTOPSIG        WEXITSTATUS
 #endif
 
-#if defined(__APPLE__) && ( defined(__MACH__) || defined(__DARWIN__) ) && !defined(__MacOS_X__)
-#define __MacOS_X__ 1
-#endif
-
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__)
 #define HAVE_44BSD_SETUID 1
 #define HAVE_44BSD_SETGID 1
@@ -120,7 +124,7 @@ int setreuid(rb_uid_t ruid, rb_uid_t euid);
 int setregid(rb_gid_t rgid, rb_gid_t egid);
 #endif
 
-#if defined(HAVE_44BSD_SETUID) || defined(__MacOS_X__)
+#if defined(HAVE_44BSD_SETUID) || defined(__APPLE__)
 #if !defined(USE_SETREUID) && !defined(BROKEN_SETREUID)
 #define OBSOLETE_SETREUID 1
 #endif
@@ -625,7 +629,7 @@ struct waitpid_arg {
 };
 #endif
 
-static VALUE
+static void *
 rb_waitpid_blocking(void *data)
 {
     rb_pid_t result;
@@ -641,7 +645,7 @@ rb_waitpid_blocking(void *data)
     result = wait4(arg->pid, arg->st, arg->flags, NULL);
 #endif
 
-    return (VALUE)result;
+    return (void *)(VALUE)result;
 }
 
 rb_pid_t
@@ -655,11 +659,11 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
     arg.pid = pid;
     arg.st = st;
     arg.flags = flags;
-    result = (rb_pid_t)rb_thread_blocking_region(rb_waitpid_blocking, &arg,
-						 RUBY_UBF_PROCESS, 0);
+    result = (rb_pid_t)(VALUE)rb_thread_call_without_gvl(rb_waitpid_blocking, &arg,
+							 RUBY_UBF_PROCESS, 0);
     if (result < 0) {
 	if (errno == EINTR) {
-            RUBY_VM_CHECK_INTS();
+            RUBY_VM_CHECK_INTS(GET_THREAD());
             goto retry;
         }
 	return (rb_pid_t)-1;
@@ -688,8 +692,8 @@ rb_waitpid(rb_pid_t pid, int *st, int flags)
     }
 
     for (;;) {
-	result = (rb_pid_t)rb_thread_blocking_region(rb_waitpid_blocking,
-						     st, RUBY_UBF_PROCESS, 0);
+	result = (rb_pid_t)(VALUE)rb_thread_blocking_region(rb_waitpid_blocking,
+							    st, RUBY_UBF_PROCESS, 0);
 	if (result < 0) {
 	    if (errno == EINTR) {
 		rb_thread_schedule();
@@ -977,10 +981,6 @@ proc_detach(VALUE obj, VALUE pid)
     return rb_detach_process(NUM2PIDT(pid));
 }
 
-#ifndef HAVE_STRING_H
-char *strtok();
-#endif
-
 static int forked_child = 0;
 
 #ifdef SIGPIPE
@@ -988,12 +988,15 @@ static RETSIGTYPE (*saved_sigpipe_handler)(int) = 0;
 #endif
 
 #ifdef SIGPIPE
-static RETSIGTYPE sig_do_nothing(int sig)
+static RETSIGTYPE
+sig_do_nothing(int sig)
 {
 }
 #endif
 
-static void before_exec(void)
+/* This function should be async-signal-safe.  Actually it is. */
+static void
+before_exec_async_signal_safe(void)
 {
 #ifdef SIGPIPE
     /*
@@ -1002,33 +1005,57 @@ static void before_exec(void)
      * child process interaction might fail. (e.g. ruby -e "system 'yes | ls'")
      * [ruby-dev:12261]
      */
-    saved_sigpipe_handler = signal(SIGPIPE, sig_do_nothing);
+    saved_sigpipe_handler = signal(SIGPIPE, sig_do_nothing); /* async-signal-safe */
 #endif
+}
 
+static void
+before_exec_non_async_signal_safe(void)
+{
     if (!forked_child) {
 	/*
 	 * On Mac OS X 10.5.x (Leopard) or earlier, exec() may return ENOTSUPP
 	 * if the process have multiple threads. Therefore we have to kill
-	 * internal threads temporary. [ruby-core: 10583]
+	 * internal threads temporary. [ruby-core:10583]
 	 */
 	rb_thread_stop_timer_thread(0);
     }
 }
 
-static void after_exec(void)
+static void
+before_exec(void)
+{
+    before_exec_non_async_signal_safe();
+    before_exec_async_signal_safe();
+}
+
+/* This function should be async-signal-safe.  Actually it is. */
+static void
+after_exec_async_signal_safe(void)
+{
+#ifdef SIGPIPE
+    signal(SIGPIPE, saved_sigpipe_handler); /* async-signal-safe */
+#endif
+}
+
+static void
+after_exec_non_async_signal_safe(void)
 {
     rb_thread_reset_timer_thread();
     rb_thread_start_timer_thread();
 
-#ifdef SIGPIPE
-    signal(SIGPIPE, saved_sigpipe_handler);
-#endif
-
     forked_child = 0;
 }
 
+static void
+after_exec(void)
+{
+    after_exec_async_signal_safe();
+    after_exec_non_async_signal_safe();
+}
+
 #define before_fork() before_exec()
-#define after_fork() (GET_THREAD()->thrown_errinfo = 0, after_exec())
+#define after_fork() (rb_threadptr_async_errinfo_clear(GET_THREAD()), after_exec())
 
 #include "dln.h"
 
@@ -1042,44 +1069,49 @@ security(const char *str)
     }
 }
 
-#ifdef HAVE_FORK
-#define try_with_sh(prog, argv) ((saved_errno == ENOEXEC) ? exec_with_sh((prog), (argv)) : (void)0)
+#if defined(HAVE_FORK) && !defined(__native_client__)
+
+/* try_with_sh and exec_with_sh should be async-signal-safe. Actually it is.*/
+#define try_with_sh(prog, argv, envp) ((saved_errno == ENOEXEC) ? exec_with_sh((prog), (argv), (envp)) : (void)0)
 static void
-exec_with_sh(const char *prog, char **argv)
+exec_with_sh(const char *prog, char **argv, char **envp)
 {
     *argv = (char *)prog;
     *--argv = (char *)"sh";
-    execv("/bin/sh", argv);
+    if (envp)
+        execve("/bin/sh", argv, envp); /* async-signal-safe */
+    else
+        execv("/bin/sh", argv); /* async-signal-safe */
 }
-#define ARGV_COUNT(n) ((n)+1)
+
 #else
-#define try_with_sh(prog, argv) (void)0
-#define ARGV_COUNT(n) (n)
+#define try_with_sh(prog, argv, envp) (void)0
 #endif
-#define ARGV_SIZE(n) (sizeof(char*) * ARGV_COUNT(n))
-#define ALLOC_ARGV(n, v) ALLOCV_N(char*, (v), ARGV_COUNT(n))
-#define ALLOC_ARGV_WITH_STR(n, v, s, l) \
-    (char **)(((s) = ALLOCV_N(char, (v), ARGV_SIZE(n) + (l)) + ARGV_SIZE(n)) - ARGV_SIZE(n))
 
+/* This function should be async-signal-safe.  Actually it is. */
 static int
-proc_exec_v(char **argv, const char *prog)
+proc_exec_cmd(const char *prog, VALUE argv_str, VALUE envp_str)
 {
-    char fbuf[MAXPATHLEN];
-#if defined(__EMX__) || defined(OS2)
+#ifdef __native_client__
+    rb_notimplement();
+    UNREACHABLE;
+#else
+    char **argv;
+    char **envp;
+# if defined(__EMX__) || defined(OS2)
     char **new_argv = NULL;
-#endif
+# endif
 
-    if (!prog)
-	prog = argv[0];
-    prog = dln_find_exe_r(prog, 0, fbuf, sizeof(fbuf));
+    argv = ARGVSTR2ARGV(argv_str);
+
     if (!prog) {
 	errno = ENOENT;
 	return -1;
     }
 
-#if defined(__EMX__) || defined(OS2)
+# if defined(__EMX__) || defined(OS2)
     {
-#define COMMAND "cmd.exe"
+#  define COMMAND "cmd.exe"
 	char *extension;
 
 	if ((extension = strrchr(prog, '.')) != NULL && STRCASECMP(extension, ".bat") == 0) {
@@ -1104,22 +1136,50 @@ proc_exec_v(char **argv, const char *prog)
 	    }
 	}
     }
-#endif /* __EMX__ */
-    before_exec();
-    execv(prog, argv);
-    preserving_errno(try_with_sh(prog, argv); after_exec());
-#if defined(__EMX__) || defined(OS2)
+# endif /* __EMX__ */
+    envp = envp_str ? (char **)RSTRING_PTR(envp_str) : NULL;
+    if (envp_str)
+        execve(prog, argv, envp); /* async-signal-safe */
+    else
+        execv(prog, argv); /* async-signal-safe */
+    preserving_errno(try_with_sh(prog, argv, envp)); /* try_with_sh() is async-signal-safe. */
+# if defined(__EMX__) || defined(OS2)
     if (new_argv) {
 	xfree(new_argv[0]);
 	xfree(new_argv);
     }
+# endif
+    return -1;
 #endif
+}
+
+/* deprecated */
+static int
+proc_exec_v(char **argv, const char *prog)
+{
+    char fbuf[MAXPATHLEN];
+
+    if (!prog)
+        prog = argv[0];
+    prog = dln_find_exe_r(prog, 0, fbuf, sizeof(fbuf));
+    if (!prog) {
+        errno = ENOENT;
+        return -1;
+    }
+    before_exec();
+    execv(prog, argv);
+    preserving_errno(try_with_sh(prog, argv, 0); after_exec());
     return -1;
 }
 
+/* deprecated */
 int
 rb_proc_exec_n(int argc, VALUE *argv, const char *prog)
 {
+#define ARGV_COUNT(n) ((n)+1)
+#define ARGV_SIZE(n) (sizeof(char*) * ARGV_COUNT(n))
+#define ALLOC_ARGV(n, v) ALLOCV_N(char*, (v), ARGV_COUNT(n))
+
     char **args;
     int i;
     int ret = -1;
@@ -1135,91 +1195,108 @@ rb_proc_exec_n(int argc, VALUE *argv, const char *prog)
     }
     ALLOCV_END(v);
     return ret;
+
+#undef ARGV_COUNT
+#undef ARGV_SIZE
+#undef ALLOC_ARGV
+}
+
+/* This function should be async-signal-safe.  Actually it is. */
+static int
+proc_exec_sh(const char *str, VALUE envp_str)
+{
+#ifdef __native_client__
+    rb_notimplement();
+    UNREACHABLE;
+#else
+    const char *s;
+
+    s = str;
+    while (*s == ' ' || *s == '\t' || *s == '\n')
+	s++;
+
+    if (!*s) {
+        errno = ENOENT;
+        return -1;
+    }
+
+#ifdef _WIN32
+    rb_w32_spawn(P_OVERLAY, (char *)str, 0);
+    return -1;
+#else
+#if defined(__CYGWIN32__) || defined(__EMX__)
+    {
+        char fbuf[MAXPATHLEN];
+        char *shell = dln_find_exe_r("sh", 0, fbuf, sizeof(fbuf));
+        int status = -1;
+        if (shell)
+            execl(shell, "sh", "-c", str, (char *) NULL);
+        else
+            status = system(str);
+        if (status != -1)
+            exit(status);
+    }
+#else
+    if (envp_str)
+        execle("/bin/sh", "sh", "-c", str, (char *)NULL, (char **)RSTRING_PTR(envp_str)); /* async-signal-safe */
+    else
+        execl("/bin/sh", "sh", "-c", str, (char *)NULL); /* async-signal-safe */
+#endif
+    return -1;
+#endif	/* _WIN32 */
+#endif
 }
 
 int
 rb_proc_exec(const char *str)
 {
-#ifndef _WIN32
-    const char *s = str;
-    char *ss, *t;
-    char **argv, **a;
-    VALUE v;
-    int ret = -1;
-#endif
-
-    while (*str && ISSPACE(*str))
-	str++;
-
-#ifdef _WIN32
+    int ret;
     before_exec();
-    rb_w32_spawn(P_OVERLAY, (char *)str, 0);
-    after_exec();
-    return -1;
-#else
-    for (s=str; *s; s++) {
-	if (ISSPACE(*s)) {
-	    const char *p, *nl = NULL;
-	    for (p = s; ISSPACE(*p); p++) {
-		if (*p == '\n') nl = p;
-	    }
-	    if (!*p) break;
-	    if (nl) s = nl;
-	}
-	if (*s != ' ' && !ISALPHA(*s) && strchr("*?{}[]<>()~&|\\$;'`\"\n",*s)) {
-#if defined(__CYGWIN32__) || defined(__EMX__)
-	    char fbuf[MAXPATHLEN];
-	    char *shell = dln_find_exe_r("sh", 0, fbuf, sizeof(fbuf));
-	    int status = -1;
-	    before_exec();
-	    if (shell)
-		execl(shell, "sh", "-c", str, (char *) NULL);
-	    else
-		status = system(str);
-	    after_exec();
-	    if (status != -1)
-		exit(status);
-#else
-	    before_exec();
-	    execl("/bin/sh", "sh", "-c", str, (char *)NULL);
-	    preserving_errno(after_exec());
-#endif
-	    return -1;
-	}
-    }
-    a = argv = ALLOC_ARGV_WITH_STR((s-str)/2+2, v, ss, s-str+1);
-    memcpy(ss, str, s-str);
-    ss[s-str] = '\0';
-    if ((*a++ = strtok(ss, " \t")) != 0) {
-	while ((t = strtok(NULL, " \t")) != 0) {
-	    *a++ = t;
-	}
-	*a = NULL;
-    }
-    if (argv[0]) {
-	ret = proc_exec_v(argv, 0);
-    }
-    else {
-	errno = ENOENT;
-    }
-    ALLOCV_END(v);
+    ret = proc_exec_sh(str, Qfalse);
+    preserving_errno(after_exec());
     return ret;
-#endif	/* _WIN32 */
 }
 
-enum {
-    EXEC_OPTION_PGROUP,
-    EXEC_OPTION_RLIMIT,
-    EXEC_OPTION_UNSETENV_OTHERS,
-    EXEC_OPTION_ENV,
-    EXEC_OPTION_CHDIR,
-    EXEC_OPTION_UMASK,
-    EXEC_OPTION_DUP2,
-    EXEC_OPTION_CLOSE,
-    EXEC_OPTION_OPEN,
-    EXEC_OPTION_DUP2_CHILD,
-    EXEC_OPTION_CLOSE_OTHERS,
-    EXEC_OPTION_NEW_PGROUP
+static void
+mark_exec_arg(void *ptr)
+{
+    struct rb_execarg *eargp = ptr;
+    if (eargp->use_shell)
+        rb_gc_mark(eargp->invoke.sh.shell_script);
+    else {
+        rb_gc_mark(eargp->invoke.cmd.command_name);
+        rb_gc_mark(eargp->invoke.cmd.command_abspath);
+        rb_gc_mark(eargp->invoke.cmd.argv_str);
+        rb_gc_mark(eargp->invoke.cmd.argv_buf);
+    }
+    rb_gc_mark(eargp->redirect_fds);
+    rb_gc_mark(eargp->envp_str);
+    rb_gc_mark(eargp->envp_buf);
+    rb_gc_mark(eargp->dup2_tmpbuf);
+    rb_gc_mark(eargp->rlimit_limits);
+    rb_gc_mark(eargp->fd_dup2);
+    rb_gc_mark(eargp->fd_close);
+    rb_gc_mark(eargp->fd_open);
+    rb_gc_mark(eargp->fd_dup2_child);
+    rb_gc_mark(eargp->env_modification);
+    rb_gc_mark(eargp->chdir_dir);
+}
+
+static void
+free_exec_arg(void *ptr)
+{
+    xfree(ptr);
+}
+
+static size_t
+memsize_exec_arg(const void *ptr)
+{
+    return ptr ? sizeof(struct rb_execarg) : 0;
+}
+
+static const rb_data_type_t exec_arg_data_type = {
+  "exec_arg",
+  {mark_exec_arg, free_exec_arg, memsize_exec_arg},
 };
 
 #if defined(_WIN32)
@@ -1237,10 +1314,10 @@ enum {
 
 #if USE_SPAWNV
 #if defined(_WIN32)
-#define proc_spawn_v(argv, prog) rb_w32_aspawn(P_NOWAIT, (prog), (argv))
+#define proc_spawn_cmd_internal(argv, prog) rb_w32_aspawn(P_NOWAIT, (prog), (argv))
 #else
 static rb_pid_t
-proc_spawn_v(char **argv, char *prog)
+proc_spawn_cmd_internal(char **argv, char *prog)
 {
     char fbuf[MAXPATHLEN];
     rb_pid_t status;
@@ -1267,64 +1344,38 @@ proc_spawn_v(char **argv, char *prog)
 #endif
 
 static rb_pid_t
-proc_spawn_n(int argc, VALUE *argv, VALUE prog, VALUE options)
+proc_spawn_cmd(char **argv, VALUE prog, struct rb_execarg *eargp)
 {
-    char **args;
-    int i;
-    VALUE v;
     rb_pid_t pid = -1;
 
-    args = ALLOC_ARGV(argc + 1, v);
-    for (i = 0; i < argc; i++) {
-	args[i] = RSTRING_PTR(argv[i]);
-    }
-    args[i] = (char*) 0;
-    if (args[0]) {
+    if (argv[0]) {
 #if defined(_WIN32)
 	DWORD flags = 0;
-	if (RTEST(rb_ary_entry(options, EXEC_OPTION_NEW_PGROUP))) {
+	if (eargp->new_pgroup_given && eargp->new_pgroup_flag) {
 	    flags = CREATE_NEW_PROCESS_GROUP;
 	}
-	pid = rb_w32_aspawn_flags(P_NOWAIT, prog ? RSTRING_PTR(prog) : 0, args, flags);
+	pid = rb_w32_aspawn_flags(P_NOWAIT, prog ? RSTRING_PTR(prog) : 0, argv, flags);
 #else
-	pid = proc_spawn_v(args, prog ? RSTRING_PTR(prog) : 0);
+	pid = proc_spawn_cmd_internal(argv, prog ? RSTRING_PTR(prog) : 0);
 #endif
     }
-    ALLOCV_END(v);
     return pid;
 }
 
 #if defined(_WIN32)
-#define proc_spawn(str) rb_w32_spawn(P_NOWAIT, (str), 0)
+#define proc_spawn_sh(str) rb_w32_spawn(P_NOWAIT, (str), 0)
 #else
 static rb_pid_t
-proc_spawn(char *str)
+proc_spawn_sh(char *str)
 {
     char fbuf[MAXPATHLEN];
-    char *s, *t;
-    char **argv, **a;
     rb_pid_t status;
-    VALUE v;
 
-    for (s = str; *s; s++) {
-	if (*s != ' ' && !ISALPHA(*s) && strchr("*?{}[]<>()~&|\\$;'`\"\n",*s)) {
-	    char *shell = dln_find_exe_r("sh", 0, fbuf, sizeof(fbuf));
-	    before_exec();
-	    status = spawnl(P_NOWAIT, (shell ? shell : "/bin/sh"), "sh", "-c", str, (char*)NULL);
-	    rb_last_status_set(status == -1 ? 127 : status, 0);
-	    after_exec();
-	    return status;
-	}
-    }
-    a = argv = ALLOC_ARGV_WITH_STR((s - str) / 2 + 2, v, s, s - str + 1);
-    strcpy(s, str);
-    if (*a++ = strtok(s, " \t")) {
-	while (t = strtok(NULL, " \t"))
-	    *a++ = t;
-	*a = NULL;
-    }
-    status = argv[0] ? proc_spawn_v(argv, 0) : -1;
-    ALLOCV_END(v);
+    char *shell = dln_find_exe_r("sh", 0, fbuf, sizeof(fbuf));
+    before_exec();
+    status = spawnl(P_NOWAIT, (shell ? shell : "/bin/sh"), "sh", "-c", str, (char*)NULL);
+    rb_last_status_set(status == -1 ? 127 : status, 0);
+    after_exec();
     return status;
 }
 #endif
@@ -1378,94 +1429,11 @@ check_exec_redirect_fd(VALUE v, int iskey)
     return INT2FIX(fd);
 }
 
-static void
-check_exec_redirect(VALUE key, VALUE val, VALUE options)
+static VALUE
+check_exec_redirect1(VALUE ary, VALUE key, VALUE param)
 {
-    int index;
-    VALUE ary, param;
-    VALUE path, flags, perm;
-    ID id;
-
-    switch (TYPE(val)) {
-      case T_SYMBOL:
-        id = SYM2ID(val);
-        if (id == rb_intern("close")) {
-            index = EXEC_OPTION_CLOSE;
-            param = Qnil;
-        }
-        else if (id == rb_intern("in")) {
-            index = EXEC_OPTION_DUP2;
-            param = INT2FIX(0);
-        }
-        else if (id == rb_intern("out")) {
-            index = EXEC_OPTION_DUP2;
-            param = INT2FIX(1);
-        }
-        else if (id == rb_intern("err")) {
-            index = EXEC_OPTION_DUP2;
-            param = INT2FIX(2);
-        }
-        else {
-            rb_raise(rb_eArgError, "wrong exec redirect symbol: %s",
-                                   rb_id2name(id));
-        }
-        break;
-
-      case T_FILE:
-        val = check_exec_redirect_fd(val, 0);
-        /* fall through */
-      case T_FIXNUM:
-        index = EXEC_OPTION_DUP2;
-        param = val;
-        break;
-
-      case T_ARRAY:
-        path = rb_ary_entry(val, 0);
-        if (RARRAY_LEN(val) == 2 && SYMBOL_P(path) &&
-            SYM2ID(path) == rb_intern("child")) {
-            index = EXEC_OPTION_DUP2_CHILD;
-            param = check_exec_redirect_fd(rb_ary_entry(val, 1), 0);
-        }
-        else {
-            index = EXEC_OPTION_OPEN;
-            FilePathValue(path);
-            flags = rb_ary_entry(val, 1);
-            if (NIL_P(flags))
-                flags = INT2NUM(O_RDONLY);
-            else if (RB_TYPE_P(flags, T_STRING))
-                flags = INT2NUM(rb_io_modestr_oflags(StringValueCStr(flags)));
-            else
-                flags = rb_to_int(flags);
-            perm = rb_ary_entry(val, 2);
-            perm = NIL_P(perm) ? INT2FIX(0644) : rb_to_int(perm);
-            param = hide_obj(rb_ary_new3(3, hide_obj(rb_str_dup(path)),
-                                            flags, perm));
-        }
-        break;
-
-      case T_STRING:
-        index = EXEC_OPTION_OPEN;
-        path = val;
-        FilePathValue(path);
-        if (RB_TYPE_P(key, T_FILE))
-            key = check_exec_redirect_fd(key, 1);
-        if (FIXNUM_P(key) && (FIX2INT(key) == 1 || FIX2INT(key) == 2))
-            flags = INT2NUM(O_WRONLY|O_CREAT|O_TRUNC);
-        else
-            flags = INT2NUM(O_RDONLY);
-        perm = INT2FIX(0644);
-        param = hide_obj(rb_ary_new3(3, hide_obj(rb_str_dup(path)),
-                                        flags, perm));
-        break;
-
-      default:
-        rb_raise(rb_eArgError, "wrong exec redirect action");
-    }
-
-    ary = rb_ary_entry(options, index);
-    if (NIL_P(ary)) {
+    if (ary == Qfalse) {
         ary = hide_obj(rb_ary_new());
-        rb_ary_store(options, index, ary);
     }
     if (!RB_TYPE_P(key, T_ARRAY)) {
         VALUE fd = check_exec_redirect_fd(key, !NIL_P(param));
@@ -1480,6 +1448,92 @@ check_exec_redirect(VALUE key, VALUE val, VALUE options)
             n++;
         }
     }
+    return ary;
+}
+
+static void
+check_exec_redirect(VALUE key, VALUE val, struct rb_execarg *eargp)
+{
+    VALUE param;
+    VALUE path, flags, perm;
+    ID id;
+
+    switch (TYPE(val)) {
+      case T_SYMBOL:
+        id = SYM2ID(val);
+        if (id == rb_intern("close")) {
+            param = Qnil;
+            eargp->fd_close = check_exec_redirect1(eargp->fd_close, key, param);
+        }
+        else if (id == rb_intern("in")) {
+            param = INT2FIX(0);
+            eargp->fd_dup2 = check_exec_redirect1(eargp->fd_dup2, key, param);
+        }
+        else if (id == rb_intern("out")) {
+            param = INT2FIX(1);
+            eargp->fd_dup2 = check_exec_redirect1(eargp->fd_dup2, key, param);
+        }
+        else if (id == rb_intern("err")) {
+            param = INT2FIX(2);
+            eargp->fd_dup2 = check_exec_redirect1(eargp->fd_dup2, key, param);
+        }
+        else {
+            rb_raise(rb_eArgError, "wrong exec redirect symbol: %s",
+                                   rb_id2name(id));
+        }
+        break;
+
+      case T_FILE:
+        val = check_exec_redirect_fd(val, 0);
+        /* fall through */
+      case T_FIXNUM:
+        param = val;
+        eargp->fd_dup2 = check_exec_redirect1(eargp->fd_dup2, key, param);
+        break;
+
+      case T_ARRAY:
+        path = rb_ary_entry(val, 0);
+        if (RARRAY_LEN(val) == 2 && SYMBOL_P(path) &&
+            SYM2ID(path) == rb_intern("child")) {
+            param = check_exec_redirect_fd(rb_ary_entry(val, 1), 0);
+            eargp->fd_dup2_child = check_exec_redirect1(eargp->fd_dup2_child, key, param);
+        }
+        else {
+            FilePathValue(path);
+            flags = rb_ary_entry(val, 1);
+            if (NIL_P(flags))
+                flags = INT2NUM(O_RDONLY);
+            else if (RB_TYPE_P(flags, T_STRING))
+                flags = INT2NUM(rb_io_modestr_oflags(StringValueCStr(flags)));
+            else
+                flags = rb_to_int(flags);
+            perm = rb_ary_entry(val, 2);
+            perm = NIL_P(perm) ? INT2FIX(0644) : rb_to_int(perm);
+            param = hide_obj(rb_ary_new3(3, hide_obj(rb_str_dup(path)),
+                                            flags, perm));
+            eargp->fd_open = check_exec_redirect1(eargp->fd_open, key, param);
+        }
+        break;
+
+      case T_STRING:
+        path = val;
+        FilePathValue(path);
+        if (RB_TYPE_P(key, T_FILE))
+            key = check_exec_redirect_fd(key, 1);
+        if (FIXNUM_P(key) && (FIX2INT(key) == 1 || FIX2INT(key) == 2))
+            flags = INT2NUM(O_WRONLY|O_CREAT|O_TRUNC);
+        else
+            flags = INT2NUM(O_RDONLY);
+        perm = INT2FIX(0644);
+        param = hide_obj(rb_ary_new3(3, hide_obj(rb_str_dup(path)),
+                                        flags, perm));
+        eargp->fd_open = check_exec_redirect1(eargp->fd_open, key, param);
+        break;
+
+      default:
+        rb_raise(rb_eArgError, "wrong exec redirect action");
+    }
+
 }
 
 #if defined(HAVE_SETRLIMIT) && defined(NUM2RLIM)
@@ -1487,9 +1541,10 @@ static int rlimit_type_by_lname(const char *name);
 #endif
 
 int
-rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
+rb_execarg_addopt(VALUE execarg_obj, VALUE key, VALUE val)
 {
-    VALUE options = e->options;
+    struct rb_execarg *eargp = rb_execarg_get(execarg_obj);
+
     ID id;
 #if defined(HAVE_SETRLIMIT) && defined(NUM2RLIM)
     int rtype;
@@ -1502,43 +1557,44 @@ rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
         id = SYM2ID(key);
 #ifdef HAVE_SETPGID
         if (id == rb_intern("pgroup")) {
-            if (!NIL_P(rb_ary_entry(options, EXEC_OPTION_PGROUP))) {
+            pid_t pgroup;
+            if (eargp->pgroup_given) {
                 rb_raise(rb_eArgError, "pgroup option specified twice");
             }
             if (!RTEST(val))
-                val = Qfalse;
+                pgroup = -1; /* asis(-1) means "don't call setpgid()". */
             else if (val == Qtrue)
-                val = INT2FIX(0);
+                pgroup = 0; /* new process group. */
             else {
-                pid_t pgroup = NUM2PIDT(val);
+                pgroup = NUM2PIDT(val);
                 if (pgroup < 0) {
                     rb_raise(rb_eArgError, "negative process group ID : %ld", (long)pgroup);
                 }
-                val = PIDT2NUM(pgroup);
             }
-            rb_ary_store(options, EXEC_OPTION_PGROUP, val);
+            eargp->pgroup_given = 1;
+            eargp->pgroup_pgid = pgroup;
         }
         else
 #endif
 #ifdef _WIN32
         if (id == rb_intern("new_pgroup")) {
-            if (!NIL_P(rb_ary_entry(options, EXEC_OPTION_NEW_PGROUP))) {
+            if (eargp->new_pgroup_given) {
                 rb_raise(rb_eArgError, "new_pgroup option specified twice");
             }
-            val = RTEST(val) ? Qtrue : Qfalse;
-            rb_ary_store(options, EXEC_OPTION_NEW_PGROUP, val);
+            eargp->new_pgroup_given = 1;
+            eargp->new_pgroup_flag = RTEST(val) ? 1 : 0;
         }
         else
 #endif
 #if defined(HAVE_SETRLIMIT) && defined(NUM2RLIM)
         if (strncmp("rlimit_", rb_id2name(id), 7) == 0 &&
             (rtype = rlimit_type_by_lname(rb_id2name(id)+7)) != -1) {
-            VALUE ary = rb_ary_entry(options, EXEC_OPTION_RLIMIT);
+            VALUE ary = eargp->rlimit_limits;
             VALUE tmp, softlim, hardlim;
-            if (NIL_P(ary)) {
-                ary = hide_obj(rb_ary_new());
-                rb_ary_store(options, EXEC_OPTION_RLIMIT, ary);
-            }
+            if (eargp->rlimit_limits == Qfalse)
+                ary = eargp->rlimit_limits = hide_obj(rb_ary_new());
+            else
+                ary = eargp->rlimit_limits;
             tmp = rb_check_array_type(val);
             if (!NIL_P(tmp)) {
                 if (RARRAY_LEN(tmp) == 1)
@@ -1560,33 +1616,34 @@ rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
         else
 #endif
         if (id == rb_intern("unsetenv_others")) {
-            if (!NIL_P(rb_ary_entry(options, EXEC_OPTION_UNSETENV_OTHERS))) {
+            if (eargp->unsetenv_others_given) {
                 rb_raise(rb_eArgError, "unsetenv_others option specified twice");
             }
-            val = RTEST(val) ? Qtrue : Qfalse;
-            rb_ary_store(options, EXEC_OPTION_UNSETENV_OTHERS, val);
+            eargp->unsetenv_others_given = 1;
+            eargp->unsetenv_others_do = RTEST(val) ? 1 : 0;
         }
         else if (id == rb_intern("chdir")) {
-            if (!NIL_P(rb_ary_entry(options, EXEC_OPTION_CHDIR))) {
+            if (eargp->chdir_given) {
                 rb_raise(rb_eArgError, "chdir option specified twice");
             }
             FilePathValue(val);
-            rb_ary_store(options, EXEC_OPTION_CHDIR,
-                                  hide_obj(rb_str_dup(val)));
+            eargp->chdir_given = 1;
+            eargp->chdir_dir = hide_obj(rb_str_dup(val));
         }
         else if (id == rb_intern("umask")) {
 	    mode_t cmask = NUM2MODET(val);
-            if (!NIL_P(rb_ary_entry(options, EXEC_OPTION_UMASK))) {
+            if (eargp->umask_given) {
                 rb_raise(rb_eArgError, "umask option specified twice");
             }
-            rb_ary_store(options, EXEC_OPTION_UMASK, LONG2NUM(cmask));
+            eargp->umask_given = 1;
+            eargp->umask_mask = cmask;
         }
         else if (id == rb_intern("close_others")) {
-            if (!NIL_P(rb_ary_entry(options, EXEC_OPTION_CLOSE_OTHERS))) {
+            if (eargp->close_others_given) {
                 rb_raise(rb_eArgError, "close_others option specified twice");
             }
-            val = RTEST(val) ? Qtrue : Qfalse;
-            rb_ary_store(options, EXEC_OPTION_CLOSE_OTHERS, val);
+            eargp->close_others_given = 1;
+            eargp->close_others_do = RTEST(val) ? 1 : 0;
         }
         else if (id == rb_intern("in")) {
             key = INT2FIX(0);
@@ -1601,8 +1658,7 @@ rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
             goto redirect;
         }
         else {
-            rb_raise(rb_eArgError, "wrong exec option symbol: %s",
-                                   rb_id2name(id));
+	    return ST_STOP;
         }
         break;
 
@@ -1610,14 +1666,21 @@ rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
       case T_FILE:
       case T_ARRAY:
 redirect:
-        check_exec_redirect(key, val, options);
+        check_exec_redirect(key, val, eargp);
         break;
 
       default:
-        rb_raise(rb_eArgError, "wrong exec option");
+	return ST_STOP;
     }
 
+    RB_GC_GUARD(execarg_obj);
     return ST_CONTINUE;
+}
+
+int
+rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
+{
+    return rb_execarg_addopt(e->execarg_obj, key, val);
 }
 
 static int
@@ -1625,46 +1688,76 @@ check_exec_options_i(st_data_t st_key, st_data_t st_val, st_data_t arg)
 {
     VALUE key = (VALUE)st_key;
     VALUE val = (VALUE)st_val;
-    struct rb_exec_arg *e = (struct rb_exec_arg *)arg;
-    return rb_exec_arg_addopt(e, key, val);
+    VALUE execarg_obj = (VALUE)arg;
+    if (rb_execarg_addopt(execarg_obj, key, val) != ST_CONTINUE) {
+	if (SYMBOL_P(key))
+	    rb_raise(rb_eArgError, "wrong exec option symbol: %"PRIsVALUE,
+		     key);
+	rb_raise(rb_eArgError, "wrong exec option");
+    }
+    return ST_CONTINUE;
 }
 
-static VALUE
-check_exec_fds(VALUE options)
+static int
+check_exec_options_i_extract(st_data_t st_key, st_data_t st_val, st_data_t arg)
 {
-    VALUE h = rb_hash_new();
-    VALUE ary;
-    int index, maxhint = -1;
+    VALUE key = (VALUE)st_key;
+    VALUE val = (VALUE)st_val;
+    VALUE *args = (VALUE *)arg;
+    VALUE execarg_obj = args[0];
+    if (rb_execarg_addopt(execarg_obj, key, val) != ST_CONTINUE) {
+	VALUE nonopts = args[1];
+	if (NIL_P(nonopts)) args[1] = nonopts = rb_hash_new();
+	rb_hash_aset(nonopts, key, val);
+    }
+    return ST_CONTINUE;
+}
+
+static int
+check_exec_fds_1(struct rb_execarg *eargp, VALUE h, int maxhint, VALUE ary)
+{
     long i;
 
-    for (index = EXEC_OPTION_DUP2; index <= EXEC_OPTION_DUP2_CHILD; index++) {
-        ary = rb_ary_entry(options, index);
-        if (NIL_P(ary))
-            continue;
+    if (ary != Qfalse) {
         for (i = 0; i < RARRAY_LEN(ary); i++) {
             VALUE elt = RARRAY_PTR(ary)[i];
             int fd = FIX2INT(RARRAY_PTR(elt)[0]);
             if (RTEST(rb_hash_lookup(h, INT2FIX(fd)))) {
                 rb_raise(rb_eArgError, "fd %d specified twice", fd);
             }
-            if (index == EXEC_OPTION_OPEN || index == EXEC_OPTION_DUP2)
+            if (ary == eargp->fd_open || ary == eargp->fd_dup2)
                 rb_hash_aset(h, INT2FIX(fd), Qtrue);
-            else if (index == EXEC_OPTION_DUP2_CHILD)
+            else if (ary == eargp->fd_dup2_child)
                 rb_hash_aset(h, INT2FIX(fd), RARRAY_PTR(elt)[1]);
-            else /* index == EXEC_OPTION_CLOSE */
+            else /* ary == eargp->fd_close */
                 rb_hash_aset(h, INT2FIX(fd), INT2FIX(-1));
             if (maxhint < fd)
                 maxhint = fd;
-            if (index == EXEC_OPTION_DUP2 || index == EXEC_OPTION_DUP2_CHILD) {
+            if (ary == eargp->fd_dup2 || ary == eargp->fd_dup2_child) {
                 fd = FIX2INT(RARRAY_PTR(elt)[1]);
                 if (maxhint < fd)
                     maxhint = fd;
             }
         }
     }
+    return maxhint;
+}
 
-    ary = rb_ary_entry(options, EXEC_OPTION_DUP2_CHILD);
-    if (!NIL_P(ary)) {
+static VALUE
+check_exec_fds(struct rb_execarg *eargp)
+{
+    VALUE h = rb_hash_new();
+    VALUE ary;
+    int maxhint = -1;
+    long i;
+
+    maxhint = check_exec_fds_1(eargp, h, maxhint, eargp->fd_dup2);
+    maxhint = check_exec_fds_1(eargp, h, maxhint, eargp->fd_close);
+    maxhint = check_exec_fds_1(eargp, h, maxhint, eargp->fd_open);
+    maxhint = check_exec_fds_1(eargp, h, maxhint, eargp->fd_dup2_child);
+
+    if (eargp->fd_dup2_child) {
+        ary = eargp->fd_dup2_child;
         for (i = 0; i < RARRAY_LEN(ary); i++) {
             VALUE elt = RARRAY_PTR(ary)[i];
             int newfd = FIX2INT(RARRAY_PTR(elt)[0]);
@@ -1694,18 +1787,28 @@ check_exec_fds(VALUE options)
         }
     }
 
-    if (rb_ary_entry(options, EXEC_OPTION_CLOSE_OTHERS) != Qfalse) {
-        rb_ary_store(options, EXEC_OPTION_CLOSE_OTHERS, INT2FIX(maxhint));
-    }
+    eargp->close_others_maxhint = maxhint;
     return h;
 }
 
 static void
-rb_check_exec_options(VALUE opthash, struct rb_exec_arg *e)
+rb_check_exec_options(VALUE opthash, VALUE execarg_obj)
 {
     if (RHASH_EMPTY_P(opthash))
         return;
-    st_foreach(RHASH_TBL(opthash), check_exec_options_i, (st_data_t)e);
+    st_foreach(RHASH_TBL(opthash), check_exec_options_i, (st_data_t)execarg_obj);
+}
+
+VALUE
+rb_execarg_extract_options(VALUE execarg_obj, VALUE opthash)
+{
+    VALUE args[2];
+    if (RHASH_EMPTY_P(opthash))
+        return Qnil;
+    args[0] = execarg_obj;
+    args[1] = Qnil;
+    st_foreach(RHASH_TBL(opthash), check_exec_options_i_extract, (st_data_t)args);
+    return args[1];
 }
 
 static int
@@ -1758,12 +1861,12 @@ rb_check_argv(int argc, VALUE *argv)
 	argv[0] = RARRAY_PTR(tmp)[1];
 	SafeStringValue(prog);
 	StringValueCStr(prog);
-	prog = rb_str_new4(prog);
+	prog = rb_str_new_frozen(prog);
 	name = RSTRING_PTR(prog);
     }
     for (i = 0; i < argc; i++) {
 	SafeStringValue(argv[i]);
-	argv[i] = rb_str_new4(argv[i]);
+	argv[i] = rb_str_new_frozen(argv[i]);
 	StringValueCStr(argv[i]);
     }
     security(name ? name : RSTRING_PTR(argv[0]));
@@ -1771,12 +1874,12 @@ rb_check_argv(int argc, VALUE *argv)
 }
 
 static VALUE
-rb_exec_getargs(int *argc_p, VALUE **argv_p, int accept_shell, VALUE *env_ret, VALUE *opthash_ret, struct rb_exec_arg *e)
+rb_exec_getargs(int *argc_p, VALUE **argv_p, int accept_shell, VALUE *env_ret, VALUE *opthash_ret)
 {
     VALUE hash, prog;
 
     if (0 < *argc_p) {
-        hash = rb_check_convert_type((*argv_p)[*argc_p-1], T_HASH, "Hash", "to_hash");
+        hash = rb_check_hash_type((*argv_p)[*argc_p-1]);
         if (!NIL_P(hash)) {
             *opthash_ret = hash;
             (*argc_p)--;
@@ -1784,7 +1887,7 @@ rb_exec_getargs(int *argc_p, VALUE **argv_p, int accept_shell, VALUE *env_ret, V
     }
 
     if (0 < *argc_p) {
-        hash = rb_check_convert_type((*argv_p)[0], T_HASH, "Hash", "to_hash");
+        hash = rb_check_hash_type((*argv_p)[0]);
         if (!NIL_P(hash)) {
             *env_ret = hash;
             (*argc_p)--;
@@ -1802,43 +1905,338 @@ rb_exec_getargs(int *argc_p, VALUE **argv_p, int accept_shell, VALUE *env_ret, V
     return prog;
 }
 
-static void
-rb_exec_fillarg(VALUE prog, int argc, VALUE *argv, VALUE env, VALUE opthash, struct rb_exec_arg *e)
+#ifndef _WIN32
+struct string_part {
+    const char *ptr;
+    size_t len;
+};
+
+static int
+compare_posix_sh(const void *key, const void *el)
 {
-    VALUE options;
-    MEMZERO(e, struct rb_exec_arg, 1);
-    options = hide_obj(rb_ary_new());
-    e->options = options;
+    const struct string_part *word = key;
+    int ret = strncmp(word->ptr, el, word->len);
+    if (!ret && ((const char *)el)[word->len]) ret = -1;
+    return ret;
+}
+#endif
+
+static void
+rb_exec_fillarg(VALUE prog, int argc, VALUE *argv, VALUE env, VALUE opthash, VALUE execarg_obj)
+{
+    struct rb_execarg *eargp = rb_execarg_get(execarg_obj);
+    char fbuf[MAXPATHLEN];
+
+    MEMZERO(eargp, struct rb_execarg, 1);
 
     if (!NIL_P(opthash)) {
-        rb_check_exec_options(opthash, e);
+        rb_check_exec_options(opthash, execarg_obj);
     }
     if (!NIL_P(env)) {
         env = rb_check_exec_env(env);
-        rb_ary_store(options, EXEC_OPTION_ENV, env);
+        eargp->env_modification = env;
     }
 
-    e->argc = argc;
-    e->argv = argv;
-    e->prog = prog ? RSTRING_PTR(prog) : 0;
-    e->progname = prog;
+    eargp->use_shell = argc == 0;
+    if (eargp->use_shell)
+        eargp->invoke.sh.shell_script = prog;
+    else
+        eargp->invoke.cmd.command_name = prog;
+
+#ifndef _WIN32
+    if (eargp->use_shell) {
+	static const char posix_sh_cmds[][9] = {
+	    "!",		/* reserved */
+	    ".",		/* special built-in */
+	    "break",		/* special built-in */
+	    "case",		/* reserved */
+	    "colon",		/* special built-in */
+	    "continue",		/* special built-in */
+	    "do",		/* reserved */
+	    "done",		/* reserved */
+	    "elif",		/* reserved */
+	    "else",		/* reserved */
+	    "esac",		/* reserved */
+	    "eval",		/* special built-in */
+	    "exec",		/* special built-in */
+	    "exit",		/* special built-in */
+	    "export",		/* special built-in */
+	    "fi",		/* reserved */
+	    "for",		/* reserved */
+	    "if",		/* reserved */
+	    "in",		/* reserved */
+	    "readonly",		/* special built-in */
+	    "return",		/* special built-in */
+	    "set",		/* special built-in */
+	    "shift",		/* special built-in */
+	    "then",		/* reserved */
+	    "times",		/* special built-in */
+	    "trap",		/* special built-in */
+	    "unset",		/* special built-in */
+	    "until",		/* reserved */
+	    "while",		/* reserved */
+	};
+	const char *p;
+	struct string_part first = {0, 0};
+        int has_meta = 0;
+        /*
+         * meta characters:
+         *
+         * *    Pathname Expansion
+         * ?    Pathname Expansion
+         * {}   Grouping Commands
+         * []   Pathname Expansion
+         * <>   Redirection
+         * ()   Grouping Commands
+         * ~    Tilde Expansion
+         * &    AND Lists, Asynchronous Lists
+         * |    OR Lists, Pipelines
+         * \    Escape Character
+         * $    Parameter Expansion
+         * ;    Sequential Lists
+         * '    Single-Quotes
+         * `    Command Substitution
+         * "    Double-Quotes
+         * \n   Lists
+         *
+         * #    Comment
+         * =    Assignment preceding command name
+         * %    (used in Parameter Expansion)
+         */
+        for (p = RSTRING_PTR(prog); *p; p++) {
+	    if (*p == ' ' || *p == '\t') {
+		if (first.ptr && !first.len) first.len = p - first.ptr;
+	    }
+	    else {
+		if (!first.ptr) first.ptr = p;
+	    }
+            if (!has_meta && strchr("*?{}[]<>()~&|\\$;'`\"\n#", *p))
+                has_meta = 1;
+	    if (!first.len) {
+		if (*p == '=') {
+		    has_meta = 1;
+		}
+		else if (*p == '/') {
+		    first.len = 0x100; /* longer than any posix_sh_cmds */
+		}
+	    }
+	    if (has_meta)
+                break;
+        }
+	if (!has_meta && first.ptr) {
+	    if (!first.len) first.len = p - first.ptr;
+	    if (first.len > 0 && first.len <= sizeof(posix_sh_cmds[0]) &&
+		bsearch(&first, posix_sh_cmds, numberof(posix_sh_cmds), sizeof(posix_sh_cmds[0]), compare_posix_sh))
+		has_meta = 1;
+	}
+	if (!has_meta) {
+            /* avoid shell since no shell meta charactor found. */
+            eargp->use_shell = 0;
+        }
+        if (!eargp->use_shell) {
+            VALUE argv_buf;
+            argv_buf = hide_obj(rb_str_buf_new(0));
+            p = RSTRING_PTR(prog);
+            while (*p) {
+                while (*p == ' ' || *p == '\t')
+                    p++;
+                if (*p) {
+		    const char *w = p;
+                    while (*p && *p != ' ' && *p != '\t')
+                        p++;
+                    rb_str_buf_cat(argv_buf, w, p-w);
+                    rb_str_buf_cat(argv_buf, "", 1); /* append '\0' */
+                }
+            }
+            eargp->invoke.cmd.argv_buf = argv_buf;
+            eargp->invoke.cmd.command_name = hide_obj(rb_str_new_cstr(RSTRING_PTR(argv_buf)));
+        }
+    }
+#endif
+
+    if (!eargp->use_shell) {
+	const char *abspath;
+        abspath = dln_find_exe_r(RSTRING_PTR(eargp->invoke.cmd.command_name), 0, fbuf, sizeof(fbuf));
+	if (abspath)
+	    eargp->invoke.cmd.command_abspath = rb_str_new_cstr(abspath);
+	else
+	    eargp->invoke.cmd.command_abspath = Qnil;
+    }
+
+    if (!eargp->use_shell && !eargp->invoke.cmd.argv_buf) {
+        int i;
+        VALUE argv_buf;
+        argv_buf = rb_str_buf_new(0);
+        hide_obj(argv_buf);
+        for (i = 0; i < argc; i++) {
+            rb_str_buf_cat2(argv_buf, StringValueCStr(argv[i]));
+            rb_str_buf_cat(argv_buf, "", 1); /* append '\0' */
+        }
+        eargp->invoke.cmd.argv_buf = argv_buf;
+    }
+
+    if (!eargp->use_shell) {
+        const char *p, *ep, *null=NULL;
+        VALUE argv_str;
+        argv_str = hide_obj(rb_str_buf_new(sizeof(char*) * (argc + 2)));
+        rb_str_buf_cat(argv_str, (char *)&null, sizeof(null)); /* place holder for /bin/sh of try_with_sh. */
+        p = RSTRING_PTR(eargp->invoke.cmd.argv_buf);
+        ep = p + RSTRING_LEN(eargp->invoke.cmd.argv_buf);
+        while (p < ep) {
+            rb_str_buf_cat(argv_str, (char *)&p, sizeof(p));
+            p += strlen(p) + 1;
+        }
+        rb_str_buf_cat(argv_str, (char *)&null, sizeof(null)); /* terminator for execve.  */
+        eargp->invoke.cmd.argv_str = argv_str;
+    }
+    RB_GC_GUARD(execarg_obj);
+}
+
+VALUE
+rb_execarg_new(int argc, VALUE *argv, int accept_shell)
+{
+    VALUE execarg_obj;
+    struct rb_execarg *eargp;
+    execarg_obj = TypedData_Make_Struct(rb_cData, struct rb_execarg, &exec_arg_data_type, eargp);
+    hide_obj(execarg_obj);
+    rb_execarg_init(argc, argv, accept_shell, execarg_obj);
+    return execarg_obj;
+}
+
+struct rb_execarg
+*rb_execarg_get(VALUE execarg_obj)
+{
+    struct rb_execarg *eargp;
+    TypedData_Get_Struct(execarg_obj, struct rb_execarg, &exec_arg_data_type, eargp);
+    return eargp;
+}
+
+VALUE
+rb_execarg_init(int argc, VALUE *argv, int accept_shell, VALUE execarg_obj)
+{
+    struct rb_execarg *eargp = rb_execarg_get(execarg_obj);
+    VALUE prog, ret;
+    VALUE env = Qnil, opthash = Qnil;
+    prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
+    rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
+    ret = eargp->use_shell ? eargp->invoke.sh.shell_script : eargp->invoke.cmd.command_name;
+    RB_GC_GUARD(execarg_obj);
+    return ret;
 }
 
 VALUE
 rb_exec_arg_init(int argc, VALUE *argv, int accept_shell, struct rb_exec_arg *e)
 {
-    VALUE prog;
-    VALUE env = Qnil, opthash = Qnil;
-    prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash, e);
-    rb_exec_fillarg(prog, argc, argv, env, opthash, e);
-    return prog;
+    return rb_execarg_init(argc, argv, accept_shell, e->execarg_obj);
+}
+
+void
+rb_execarg_setenv(VALUE execarg_obj, VALUE env)
+{
+    struct rb_execarg *eargp = rb_execarg_get(execarg_obj);
+    env = !NIL_P(env) ? rb_check_exec_env(env) : Qfalse;
+    eargp->env_modification = env;
+}
+
+static int
+fill_envp_buf_i(st_data_t st_key, st_data_t st_val, st_data_t arg)
+{
+    VALUE key = (VALUE)st_key;
+    VALUE val = (VALUE)st_val;
+    VALUE envp_buf = (VALUE)arg;
+
+    rb_str_buf_cat2(envp_buf, StringValueCStr(key));
+    rb_str_buf_cat2(envp_buf, "=");
+    rb_str_buf_cat2(envp_buf, StringValueCStr(val));
+    rb_str_buf_cat(envp_buf, "", 1); /* append '\0' */
+
+    return ST_CONTINUE;
+}
+
+
+static long run_exec_dup2_tmpbuf_size(long n);
+
+void
+rb_execarg_fixup(VALUE execarg_obj)
+{
+    struct rb_execarg *eargp = rb_execarg_get(execarg_obj);
+    int unsetenv_others;
+    VALUE envopts;
+    VALUE ary;
+
+    eargp->redirect_fds = check_exec_fds(eargp);
+
+    ary = eargp->fd_dup2;
+    if (ary != Qfalse) {
+        size_t len = run_exec_dup2_tmpbuf_size(RARRAY_LEN(ary));
+        VALUE tmpbuf = hide_obj(rb_str_new(0, len));
+        rb_str_set_len(tmpbuf, len);
+        eargp->dup2_tmpbuf = tmpbuf;
+    }
+
+    unsetenv_others = eargp->unsetenv_others_given && eargp->unsetenv_others_do;
+    envopts = eargp->env_modification;
+    if (unsetenv_others || envopts != Qfalse) {
+        VALUE envtbl, envp_str, envp_buf;
+        char *p, *ep;
+        if (unsetenv_others) {
+            envtbl = rb_hash_new();
+        }
+        else {
+            envtbl = rb_const_get(rb_cObject, rb_intern("ENV"));
+            envtbl = rb_convert_type(envtbl, T_HASH, "Hash", "to_hash");
+        }
+        hide_obj(envtbl);
+        if (envopts != Qfalse) {
+            st_table *stenv = RHASH_TBL(envtbl);
+            long i;
+            for (i = 0; i < RARRAY_LEN(envopts); i++) {
+                VALUE pair = RARRAY_PTR(envopts)[i];
+                VALUE key = RARRAY_PTR(pair)[0];
+                VALUE val = RARRAY_PTR(pair)[1];
+                if (NIL_P(val)) {
+                    st_data_t stkey = (st_data_t)key;
+                    st_delete(stenv, &stkey, NULL);
+                }
+                else {
+                    st_insert(stenv, (st_data_t)key, (st_data_t)val);
+                }
+            }
+        }
+        envp_buf = rb_str_buf_new(0);
+        hide_obj(envp_buf);
+        st_foreach(RHASH_TBL(envtbl), fill_envp_buf_i, (st_data_t)envp_buf);
+        envp_str = rb_str_buf_new(sizeof(char*) * (RHASH_SIZE(envtbl) + 1));
+        hide_obj(envp_str);
+        p = RSTRING_PTR(envp_buf);
+        ep = p + RSTRING_LEN(envp_buf);
+        while (p < ep) {
+            rb_str_buf_cat(envp_str, (char *)&p, sizeof(p));
+            p += strlen(p) + 1;
+        }
+        p = NULL;
+        rb_str_buf_cat(envp_str, (char *)&p, sizeof(p));
+        eargp->envp_str = envp_str;
+        eargp->envp_buf = envp_buf;
+
+        /*
+        char **tmp_envp = (char **)RSTRING_PTR(envp_str);
+        while (*tmp_envp) {
+            printf("%s\n", *tmp_envp);
+            tmp_envp++;
+        }
+        */
+    }
+    RB_GC_GUARD(execarg_obj);
 }
 
 void
 rb_exec_arg_fixup(struct rb_exec_arg *e)
 {
-    e->redirect_fds = check_exec_fds(e->options);
+    rb_execarg_fixup(e->execarg_obj);
 }
+
+static int rb_exec_without_timer_thread(const struct rb_execarg *eargp, char *errmsg, size_t errmsg_buflen);
 
 /*
  *  call-seq:
@@ -1876,6 +2274,13 @@ rb_exec_arg_fixup(struct rb_exec_arg *e)
  *  Raises SystemCallError if the command couldn't execute (typically
  *  <code>Errno::ENOENT</code> when it was not found).
  *
+ *  This method modifies process attributes according to _options_
+ *  (details described in <code>spawn</code>)
+ *  before <code>exec(2)</code> system call.
+ *  The modified attributes may be retained when <code>exec(2)</code> system call fails.
+ *  For example, hard resource limits is not restorable.
+ *  If it is not acceptable, consider to create a child process using <code>spawn</code> or <code>system</code>.
+ *
  *     exec "echo *"       # echoes list of files in current directory
  *     # never get here
  *
@@ -1887,19 +2292,25 @@ rb_exec_arg_fixup(struct rb_exec_arg *e)
 VALUE
 rb_f_exec(int argc, VALUE *argv)
 {
-    struct rb_exec_arg earg;
+    VALUE execarg_obj, fail_str;
+    struct rb_execarg *eargp;
 #define CHILD_ERRMSG_BUFLEN 80
     char errmsg[CHILD_ERRMSG_BUFLEN] = { '\0' };
 
-    rb_exec_arg_init(argc, argv, TRUE, &earg);
-    if (NIL_P(rb_ary_entry(earg.options, EXEC_OPTION_CLOSE_OTHERS)))
-        rb_exec_arg_addopt(&earg, ID2SYM(rb_intern("close_others")), Qtrue);
-    rb_exec_arg_fixup(&earg);
+    execarg_obj = rb_execarg_new(argc, argv, TRUE);
+    eargp = rb_execarg_get(execarg_obj);
+    rb_execarg_fixup(execarg_obj);
+    fail_str = eargp->use_shell ? eargp->invoke.sh.shell_script : eargp->invoke.cmd.command_name;
 
-    rb_exec_err(&earg, errmsg, sizeof(errmsg));
+#ifdef __APPLE__
+    rb_exec_without_timer_thread(eargp, errmsg, sizeof(errmsg));
+#else
+    rb_exec_async_signal_safe(eargp, errmsg, sizeof(errmsg));
+#endif
+    RB_GC_GUARD(execarg_obj);
     if (errmsg[0])
         rb_sys_fail(errmsg);
-    rb_sys_fail_str(earg.progname);
+    rb_sys_fail_str(fail_str);
     return Qnil;		/* dummy */
 }
 
@@ -1975,9 +2386,9 @@ redirect_open(const char *pathname, int flags, mode_t perm)
 #endif
 
 static int
-save_redirect_fd(int fd, VALUE save, char *errmsg, size_t errmsg_buflen)
+save_redirect_fd(int fd, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
 {
-    if (!NIL_P(save)) {
+    if (sargp) {
         VALUE newary;
         int save_fd = redirect_dup(fd);
         if (save_fd == -1) {
@@ -1987,45 +2398,23 @@ save_redirect_fd(int fd, VALUE save, char *errmsg, size_t errmsg_buflen)
             return -1;
         }
         rb_update_max_fd(save_fd);
-        newary = rb_ary_entry(save, EXEC_OPTION_DUP2);
-        if (NIL_P(newary)) {
+        newary = sargp->fd_dup2;
+        if (newary == Qfalse) {
             newary = hide_obj(rb_ary_new());
-            rb_ary_store(save, EXEC_OPTION_DUP2, newary);
+            sargp->fd_dup2 = newary;
         }
         rb_ary_push(newary,
                     hide_obj(rb_assoc_new(INT2FIX(fd), INT2FIX(save_fd))));
 
-        newary = rb_ary_entry(save, EXEC_OPTION_CLOSE);
-        if (NIL_P(newary)) {
+        newary = sargp->fd_close;
+        if (newary == Qfalse) {
             newary = hide_obj(rb_ary_new());
-            rb_ary_store(save, EXEC_OPTION_CLOSE, newary);
+            sargp->fd_close = newary;
         }
         rb_ary_push(newary, hide_obj(rb_assoc_new(INT2FIX(save_fd), Qnil)));
     }
 
     return 0;
-}
-
-static VALUE
-save_env_i(VALUE i, VALUE ary, int argc, VALUE *argv)
-{
-    rb_ary_push(ary, hide_obj(rb_ary_dup(argv[0])));
-    return Qnil;
-}
-
-static void
-save_env(VALUE save)
-{
-    if (!NIL_P(save) && NIL_P(rb_ary_entry(save, EXEC_OPTION_ENV))) {
-        VALUE env = rb_const_get(rb_cObject, rb_intern("ENV"));
-        if (RTEST(env)) {
-            VALUE ary = hide_obj(rb_ary_new());
-            rb_block_call(env, rb_intern("each"), 0, 0, save_env_i,
-                          (VALUE)ary);
-            rb_ary_store(save, EXEC_OPTION_ENV, ary);
-        }
-        rb_ary_store(save, EXEC_OPTION_UNSETENV_OTHERS, Qtrue);
-    }
 }
 
 static int
@@ -2040,25 +2429,30 @@ intrcmp(const void *a, const void *b)
     return *(int*)b - *(int*)a;
 }
 
+struct run_exec_dup2_fd_pair {
+    int oldfd;
+    int newfd;
+    long older_index;
+    long num_newer;
+};
+
+static long
+run_exec_dup2_tmpbuf_size(long n)
+{
+    return sizeof(struct run_exec_dup2_fd_pair) * n;
+}
+
+/* This function should be async-signal-safe when sargp is NULL.  Hopefully it is. */
 static int
-run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
+run_exec_dup2(VALUE ary, VALUE tmpbuf, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
 {
     long n, i;
     int ret;
     int extra_fd = -1;
-    struct fd_pair {
-        int oldfd;
-        int newfd;
-        long older_index;
-        long num_newer;
-    } *pairs = 0;
+    struct run_exec_dup2_fd_pair *pairs = 0;
 
     n = RARRAY_LEN(ary);
-    pairs = (struct fd_pair *)malloc(sizeof(struct fd_pair) * n);
-    if (pairs == NULL) {
-        ERRMSG("malloc");
-        return -1;
-    }
+    pairs = (struct run_exec_dup2_fd_pair *)RSTRING_PTR(tmpbuf);
 
     /* initialize oldfd and newfd: O(n) */
     for (i = 0; i < n; i++) {
@@ -2069,17 +2463,17 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
     }
 
     /* sort the table by oldfd: O(n log n) */
-    if (!RTEST(save))
-        qsort(pairs, n, sizeof(struct fd_pair), intcmp);
+    if (!sargp)
+        qsort(pairs, n, sizeof(struct run_exec_dup2_fd_pair), intcmp); /* hopefully async-signal-safe */
     else
-        qsort(pairs, n, sizeof(struct fd_pair), intrcmp);
+        qsort(pairs, n, sizeof(struct run_exec_dup2_fd_pair), intrcmp);
 
     /* initialize older_index and num_newer: O(n log n) */
     for (i = 0; i < n; i++) {
         int newfd = pairs[i].newfd;
-        struct fd_pair key, *found;
+        struct run_exec_dup2_fd_pair key, *found;
         key.oldfd = newfd;
-        found = bsearch(&key, pairs, n, sizeof(struct fd_pair), intcmp);
+        found = bsearch(&key, pairs, n, sizeof(struct run_exec_dup2_fd_pair), intcmp); /* hopefully async-signal-safe */
         pairs[i].num_newer = 0;
         if (found) {
             while (pairs < found && (found-1)->oldfd == newfd)
@@ -2096,14 +2490,14 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
     for (i = 0; i < n; i++) {
         long j = i;
         while (j != -1 && pairs[j].oldfd != -1 && pairs[j].num_newer == 0) {
-            if (save_redirect_fd(pairs[j].newfd, save, errmsg, errmsg_buflen) < 0)
+            if (save_redirect_fd(pairs[j].newfd, sargp, errmsg, errmsg_buflen) < 0) /* async-signal-safe */
                 goto fail;
-            ret = redirect_dup2(pairs[j].oldfd, pairs[j].newfd);
+            ret = redirect_dup2(pairs[j].oldfd, pairs[j].newfd); /* async-signal-safe */
             if (ret == -1) {
                 ERRMSG("dup2");
                 goto fail;
             }
-            rb_update_max_fd(pairs[j].newfd);
+            rb_update_max_fd(pairs[j].newfd); /* async-signal-safe but don't need to call it in a child process. */
             pairs[j].oldfd = -1;
             j = pairs[j].older_index;
             if (j != -1)
@@ -2119,14 +2513,14 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
         if (pairs[i].oldfd == pairs[i].newfd) { /* self cycle */
 #ifdef F_GETFD
             int fd = pairs[i].oldfd;
-            ret = fcntl(fd, F_GETFD);
+            ret = fcntl(fd, F_GETFD); /* async-signal-safe */
             if (ret == -1) {
                 ERRMSG("fcntl(F_GETFD)");
                 goto fail;
             }
             if (ret & FD_CLOEXEC) {
                 ret &= ~FD_CLOEXEC;
-                ret = fcntl(fd, F_SETFD, ret);
+                ret = fcntl(fd, F_SETFD, ret); /* async-signal-safe */
                 if (ret == -1) {
                     ERRMSG("fcntl(F_SETFD)");
                     goto fail;
@@ -2137,7 +2531,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
             continue;
         }
         if (extra_fd == -1) {
-            extra_fd = redirect_dup(pairs[i].oldfd);
+            extra_fd = redirect_dup(pairs[i].oldfd); /* async-signal-safe */
             if (extra_fd == -1) {
                 ERRMSG("dup");
                 goto fail;
@@ -2145,7 +2539,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
             rb_update_max_fd(extra_fd);
         }
         else {
-            ret = redirect_dup2(pairs[i].oldfd, extra_fd);
+            ret = redirect_dup2(pairs[i].oldfd, extra_fd); /* async-signal-safe */
             if (ret == -1) {
                 ERRMSG("dup2");
                 goto fail;
@@ -2156,7 +2550,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
         j = pairs[i].older_index;
         pairs[i].older_index = -1;
         while (j != -1) {
-            ret = redirect_dup2(pairs[j].oldfd, pairs[j].newfd);
+            ret = redirect_dup2(pairs[j].oldfd, pairs[j].newfd); /* async-signal-safe */
             if (ret == -1) {
                 ERRMSG("dup2");
                 goto fail;
@@ -2167,21 +2561,20 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
         }
     }
     if (extra_fd != -1) {
-        ret = redirect_close(extra_fd);
+        ret = redirect_close(extra_fd); /* async-signal-safe */
         if (ret == -1) {
             ERRMSG("close");
             goto fail;
         }
     }
 
-    free(pairs);
     return 0;
 
   fail:
-    free(pairs);
     return -1;
 }
 
+/* This function should be async-signal-safe.  Actually it is. */
 static int
 run_exec_close(VALUE ary, char *errmsg, size_t errmsg_buflen)
 {
@@ -2191,7 +2584,7 @@ run_exec_close(VALUE ary, char *errmsg, size_t errmsg_buflen)
     for (i = 0; i < RARRAY_LEN(ary); i++) {
         VALUE elt = RARRAY_PTR(ary)[i];
         int fd = FIX2INT(RARRAY_PTR(elt)[0]);
-        ret = redirect_close(fd);
+        ret = redirect_close(fd); /* async-signal-safe */
         if (ret == -1) {
             ERRMSG("close");
             return -1;
@@ -2200,8 +2593,9 @@ run_exec_close(VALUE ary, char *errmsg, size_t errmsg_buflen)
     return 0;
 }
 
+/* This function should be async-signal-safe when sargp is NULL.  Actually it is. */
 static int
-run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
+run_exec_open(VALUE ary, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
 {
     long i;
     int ret;
@@ -2214,7 +2608,7 @@ run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
         int flags = NUM2INT(RARRAY_PTR(param)[1]);
         int perm = NUM2INT(RARRAY_PTR(param)[2]);
         int need_close = 1;
-        int fd2 = redirect_open(path, flags, perm);
+        int fd2 = redirect_open(path, flags, perm); /* async-signal-safe */
         if (fd2 == -1) {
             ERRMSG("open");
             return -1;
@@ -2227,9 +2621,9 @@ run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
                 need_close = 0;
             }
             else {
-                if (save_redirect_fd(fd, save, errmsg, errmsg_buflen) < 0)
+                if (save_redirect_fd(fd, sargp, errmsg, errmsg_buflen) < 0) /* async-signal-safe */
                     return -1;
-                ret = redirect_dup2(fd2, fd);
+                ret = redirect_dup2(fd2, fd); /* async-signal-safe */
                 if (ret == -1) {
                     ERRMSG("dup2");
                     return -1;
@@ -2239,7 +2633,7 @@ run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
             i++;
         }
         if (need_close) {
-            ret = redirect_close(fd2);
+            ret = redirect_close(fd2); /* async-signal-safe */
             if (ret == -1) {
                 ERRMSG("close");
                 return -1;
@@ -2249,8 +2643,9 @@ run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
     return 0;
 }
 
+/* This function should be async-signal-safe when sargp is NULL.  Actually it is. */
 static int
-run_exec_dup2_child(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
+run_exec_dup2_child(VALUE ary, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
 {
     long i;
     int ret;
@@ -2260,9 +2655,9 @@ run_exec_dup2_child(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
         int newfd = FIX2INT(RARRAY_PTR(elt)[0]);
         int oldfd = FIX2INT(RARRAY_PTR(elt)[1]);
 
-        if (save_redirect_fd(newfd, save, errmsg, errmsg_buflen) < 0)
+        if (save_redirect_fd(newfd, sargp, errmsg, errmsg_buflen) < 0) /* async-signal-safe */
             return -1;
-        ret = redirect_dup2(oldfd, newfd);
+        ret = redirect_dup2(oldfd, newfd); /* async-signal-safe */
         if (ret == -1) {
             ERRMSG("dup2");
             return -1;
@@ -2273,41 +2668,49 @@ run_exec_dup2_child(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
 }
 
 #ifdef HAVE_SETPGID
+/* This function should be async-signal-safe when sargp is NULL.  Actually it is. */
 static int
-run_exec_pgroup(VALUE obj, VALUE save, char *errmsg, size_t errmsg_buflen)
+run_exec_pgroup(const struct rb_execarg *eargp, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
 {
     /*
      * If FD_CLOEXEC is available, rb_fork waits the child's execve.
      * So setpgid is done in the child when rb_fork is returned in the parent.
      * No race condition, even without setpgid from the parent.
-     * (Is there an environment which has setpgid but FD_CLOEXEC?)
+     * (Is there an environment which has setpgid but no FD_CLOEXEC?)
      */
     int ret;
     pid_t pgroup;
-    if (!NIL_P(save)) {
+
+    pgroup = eargp->pgroup_pgid;
+    if (pgroup == -1)
+        return 0;
+
+    if (sargp) {
         /* maybe meaningless with no fork environment... */
-        rb_ary_store(save, EXEC_OPTION_PGROUP, PIDT2NUM(getpgrp()));
+        sargp->pgroup_given = 1;
+        sargp->pgroup_pgid = getpgrp();
     }
-    pgroup = NUM2PIDT(obj);
+
     if (pgroup == 0) {
-        pgroup = getpid();
+        pgroup = getpid(); /* async-signal-safe */
     }
-    ret = setpgid(getpid(), pgroup);
+    ret = setpgid(getpid(), pgroup); /* async-signal-safe */
     if (ret == -1) ERRMSG("setpgid");
     return ret;
 }
 #endif
 
 #if defined(HAVE_SETRLIMIT) && defined(RLIM2NUM)
+/* This function should be async-signal-safe when sargp is NULL.  Hopefully it is. */
 static int
-run_exec_rlimit(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
+run_exec_rlimit(VALUE ary, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
 {
     long i;
     for (i = 0; i < RARRAY_LEN(ary); i++) {
         VALUE elt = RARRAY_PTR(ary)[i];
         int rtype = NUM2INT(RARRAY_PTR(elt)[0]);
         struct rlimit rlim;
-        if (!NIL_P(save)) {
+        if (sargp) {
             VALUE tmp, newary;
             if (getrlimit(rtype, &rlim) == -1) {
                 ERRMSG("getrlimit");
@@ -2316,16 +2719,15 @@ run_exec_rlimit(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
             tmp = hide_obj(rb_ary_new3(3, RARRAY_PTR(elt)[0],
                                        RLIM2NUM(rlim.rlim_cur),
                                        RLIM2NUM(rlim.rlim_max)));
-            newary = rb_ary_entry(save, EXEC_OPTION_RLIMIT);
-            if (NIL_P(newary)) {
-                newary = hide_obj(rb_ary_new());
-                rb_ary_store(save, EXEC_OPTION_RLIMIT, newary);
-            }
+            if (sargp->rlimit_limits == Qfalse)
+                newary = sargp->rlimit_limits = hide_obj(rb_ary_new());
+            else 
+                newary = sargp->rlimit_limits;
             rb_ary_push(newary, tmp);
         }
         rlim.rlim_cur = NUM2RLIM(RARRAY_PTR(elt)[1]);
         rlim.rlim_max = NUM2RLIM(RARRAY_PTR(elt)[2]);
-        if (setrlimit(rtype, &rlim) == -1) {
+        if (setrlimit(rtype, &rlim) == -1) { /* hopefully async-signal-safe */
             ERRMSG("setrlimit");
             return -1;
         }
@@ -2334,51 +2736,70 @@ run_exec_rlimit(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
 }
 #endif
 
-int
-rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char *errmsg, size_t errmsg_buflen)
+#if !defined(HAVE_FORK)
+static VALUE
+save_env_i(VALUE i, VALUE ary, int argc, VALUE *argv)
 {
-    VALUE options = e->options;
-    VALUE soptions = Qnil;
+    rb_ary_push(ary, hide_obj(rb_ary_dup(argv[0])));
+    return Qnil;
+}
+
+static void
+save_env(struct rb_execarg *sargp)
+{
+    if (!sargp)
+        return;
+    if (sargp->env_modification == Qfalse) {
+        VALUE env = rb_const_get(rb_cObject, rb_intern("ENV"));
+        if (RTEST(env)) {
+            VALUE ary = hide_obj(rb_ary_new());
+            rb_block_call(env, rb_intern("each"), 0, 0, save_env_i,
+                          (VALUE)ary);
+            sargp->env_modification = ary;
+        }
+        sargp->unsetenv_others_given = 1;
+        sargp->unsetenv_others_do = 1;
+    }
+}
+#endif
+
+/* This function should be async-signal-safe when sargp is NULL.  Hopefully it is. */
+int
+rb_execarg_run_options(const struct rb_execarg *eargp, struct rb_execarg *sargp, char *errmsg, size_t errmsg_buflen)
+{
     VALUE obj;
 
-    if (!RTEST(options))
-        return 0;
-
-    if (s) {
-        s->argc = 0;
-        s->argv = NULL;
-        s->prog = NULL;
-        s->options = soptions = hide_obj(rb_ary_new());
-        s->redirect_fds = Qnil;
-	s->progname = Qnil;
+    if (sargp) {
+        /* assume that sargp is always NULL on fork-able environments */
+        MEMZERO(sargp, struct rb_execarg, 1);
+        sargp->redirect_fds = Qnil;
     }
 
 #ifdef HAVE_SETPGID
-    obj = rb_ary_entry(options, EXEC_OPTION_PGROUP);
-    if (RTEST(obj)) {
-        if (run_exec_pgroup(obj, soptions, errmsg, errmsg_buflen) == -1)
+    if (eargp->pgroup_given) {
+        if (run_exec_pgroup(eargp, sargp, errmsg, errmsg_buflen) == -1) /* async-signal-safe */
             return -1;
     }
 #endif
 
 #if defined(HAVE_SETRLIMIT) && defined(RLIM2NUM)
-    obj = rb_ary_entry(options, EXEC_OPTION_RLIMIT);
-    if (!NIL_P(obj)) {
-        if (run_exec_rlimit(obj, soptions, errmsg, errmsg_buflen) == -1)
+    obj = eargp->rlimit_limits;
+    if (obj != Qfalse) {
+        if (run_exec_rlimit(obj, sargp, errmsg, errmsg_buflen) == -1) /* hopefully async-signal-safe */
             return -1;
     }
 #endif
 
-    obj = rb_ary_entry(options, EXEC_OPTION_UNSETENV_OTHERS);
-    if (RTEST(obj)) {
-        save_env(soptions);
+#if !defined(HAVE_FORK)
+    if (eargp->unsetenv_others_given && eargp->unsetenv_others_do) {
+        save_env(sargp);
         rb_env_clear();
     }
 
-    obj = rb_ary_entry(options, EXEC_OPTION_ENV);
-    if (!NIL_P(obj)) {
+    obj = eargp->env_modification;
+    if (obj != Qfalse) {
         long i;
-        save_env(soptions);
+        save_env(sargp);
         for (i = 0; i < RARRAY_LEN(obj); i++) {
             VALUE pair = RARRAY_PTR(obj)[i];
             VALUE key = RARRAY_PTR(pair)[0];
@@ -2389,61 +2810,71 @@ rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char
                 ruby_setenv(StringValueCStr(key), StringValueCStr(val));
         }
     }
+#endif
 
-    obj = rb_ary_entry(options, EXEC_OPTION_UMASK);
-    if (!NIL_P(obj)) {
-        mode_t mask = NUM2MODET(obj);
-        mode_t oldmask = umask(mask); /* never fail */
-        if (!NIL_P(soptions))
-            rb_ary_store(soptions, EXEC_OPTION_UMASK, MODET2NUM(oldmask));
+    if (eargp->umask_given) {
+        mode_t mask = eargp->umask_mask;
+        mode_t oldmask = umask(mask); /* never fail */ /* async-signal-safe */
+        if (sargp) {
+            sargp->umask_given = 1;
+            sargp->umask_mask = oldmask;
+        }
     }
 
-    obj = rb_ary_entry(options, EXEC_OPTION_DUP2);
-    if (!NIL_P(obj)) {
-        if (run_exec_dup2(obj, soptions, errmsg, errmsg_buflen) == -1)
+    obj = eargp->fd_dup2;
+    if (obj != Qfalse) {
+        if (run_exec_dup2(obj, eargp->dup2_tmpbuf, sargp, errmsg, errmsg_buflen) == -1) /* hopefully async-signal-safe */
             return -1;
     }
 
-    obj = rb_ary_entry(options, EXEC_OPTION_CLOSE);
-    if (!NIL_P(obj)) {
-        if (!NIL_P(soptions))
+    obj = eargp->fd_close;
+    if (obj != Qfalse) {
+        if (sargp)
             rb_warn("cannot close fd before spawn");
         else {
-            if (run_exec_close(obj, errmsg, errmsg_buflen) == -1)
+            if (run_exec_close(obj, errmsg, errmsg_buflen) == -1) /* async-signal-safe */
                 return -1;
         }
     }
 
 #ifdef HAVE_FORK
-    obj = rb_ary_entry(options, EXEC_OPTION_CLOSE_OTHERS);
-    if (obj != Qfalse) {
-        rb_close_before_exec(3, FIX2INT(obj), e->redirect_fds);
+    if (!eargp->close_others_given || eargp->close_others_do) {
+        rb_close_before_exec(3, eargp->close_others_maxhint, eargp->redirect_fds); /* async-signal-safe */
     }
 #endif
 
-    obj = rb_ary_entry(options, EXEC_OPTION_OPEN);
-    if (!NIL_P(obj)) {
-        if (run_exec_open(obj, soptions, errmsg, errmsg_buflen) == -1)
+    obj = eargp->fd_open;
+    if (obj != Qfalse) {
+        if (run_exec_open(obj, sargp, errmsg, errmsg_buflen) == -1) /* async-signal-safe */
             return -1;
     }
 
-    obj = rb_ary_entry(options, EXEC_OPTION_DUP2_CHILD);
-    if (!NIL_P(obj)) {
-        if (run_exec_dup2_child(obj, soptions, errmsg, errmsg_buflen) == -1)
+    obj = eargp->fd_dup2_child;
+    if (obj != Qfalse) {
+        if (run_exec_dup2_child(obj, sargp, errmsg, errmsg_buflen) == -1) /* async-signal-safe */
             return -1;
     }
 
-    obj = rb_ary_entry(options, EXEC_OPTION_CHDIR);
-    if (!NIL_P(obj)) {
-        if (!NIL_P(soptions)) {
+    if (eargp->chdir_given) {
+        if (sargp) {
             char *cwd = my_getcwd();
-            rb_ary_store(soptions, EXEC_OPTION_CHDIR,
-                         hide_obj(rb_str_new2(cwd)));
+            sargp->chdir_given = 1;
+            sargp->chdir_dir = hide_obj(rb_str_new2(cwd));
             xfree(cwd);
         }
-        if (chdir(RSTRING_PTR(obj)) == -1) {
+        if (chdir(RSTRING_PTR(eargp->chdir_dir)) == -1) { /* async-signal-safe */
             ERRMSG("chdir");
             return -1;
+        }
+    }
+
+    if (sargp) {
+        VALUE ary = sargp->fd_dup2;
+        if (ary != Qfalse) {
+            size_t len = run_exec_dup2_tmpbuf_size(RARRAY_LEN(ary));
+            VALUE tmpbuf = hide_obj(rb_str_new(0, len));
+            rb_str_set_len(tmpbuf, len);
+            sargp->dup2_tmpbuf = tmpbuf;
         }
     }
 
@@ -2451,29 +2882,65 @@ rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char
 }
 
 int
+rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char *errmsg, size_t errmsg_buflen)
+{
+    return rb_execarg_run_options(rb_execarg_get(e->execarg_obj), rb_execarg_get(s->execarg_obj), errmsg, errmsg_buflen);
+}
+
+int
 rb_run_exec_options(const struct rb_exec_arg *e, struct rb_exec_arg *s)
 {
-    return rb_run_exec_options_err(e, s, NULL, 0);
+    return rb_execarg_run_options(rb_execarg_get(e->execarg_obj), rb_execarg_get(s->execarg_obj), NULL, 0);
+}
+
+/* This function should be async-signal-safe.  Hopefully it is. */
+int
+rb_exec_async_signal_safe(const struct rb_execarg *eargp, char *errmsg, size_t errmsg_buflen)
+{
+#if !defined(HAVE_FORK)
+    struct rb_execarg sarg, *const sargp = &sarg;
+#else
+    struct rb_execarg *const sargp = NULL;
+#endif
+
+    before_exec_async_signal_safe(); /* async-signal-safe */
+
+    if (rb_execarg_run_options(eargp, sargp, errmsg, errmsg_buflen) < 0) { /* hopefully async-signal-safe */
+        goto failure;
+    }
+
+    if (eargp->use_shell) {
+	proc_exec_sh(RSTRING_PTR(eargp->invoke.sh.shell_script), eargp->envp_str); /* async-signal-safe */
+    }
+    else {
+	char *abspath = NULL;
+	if (!NIL_P(eargp->invoke.cmd.command_abspath))
+	    abspath = RSTRING_PTR(eargp->invoke.cmd.command_abspath);
+	proc_exec_cmd(abspath, eargp->invoke.cmd.argv_str, eargp->envp_str); /* async-signal-safe */
+    }
+#if !defined(HAVE_FORK)
+    preserving_errno(rb_execarg_run_options(sargp, NULL, errmsg, errmsg_buflen));
+#endif
+
+failure:
+    preserving_errno(after_exec_async_signal_safe()); /* async-signal-safe */
+    return -1;
+}
+
+static int
+rb_exec_without_timer_thread(const struct rb_execarg *eargp, char *errmsg, size_t errmsg_buflen)
+{
+    int ret;
+    before_exec_non_async_signal_safe(); /* async-signal-safe if forked_child is true */
+    ret = rb_exec_async_signal_safe(eargp, errmsg, errmsg_buflen); /* hopefully async-signal-safe */
+    preserving_errno(after_exec_non_async_signal_safe()); /* not async-signal-safe because it calls rb_thread_start_timer_thread.  */
+    return ret;
 }
 
 int
 rb_exec_err(const struct rb_exec_arg *e, char *errmsg, size_t errmsg_buflen)
 {
-    int argc = e->argc;
-    VALUE *argv = e->argv;
-    const char *prog = e->prog;
-
-    if (rb_run_exec_options_err(e, NULL, errmsg, errmsg_buflen) < 0) {
-        return -1;
-    }
-
-    if (argc == 0) {
-	rb_proc_exec(prog);
-    }
-    else {
-	rb_proc_exec_n(argc, argv, prog);
-    }
-    return -1;
+    return rb_exec_without_timer_thread(rb_execarg_get(e->execarg_obj), errmsg, errmsg_buflen);
 }
 
 int
@@ -2481,33 +2948,33 @@ rb_exec(const struct rb_exec_arg *e)
 {
 #if !defined FD_CLOEXEC && !defined HAVE_SPAWNV
     char errmsg[80] = { '\0' };
-    int ret = rb_exec_err(e, errmsg, sizeof(errmsg));
+    int ret = rb_exec_without_timer_thread(rb_execarg_get(e->execarg_obj), errmsg, sizeof(errmsg));
     preserving_errno(
 	if (errmsg[0]) {
 	    fprintf(stderr, "%s\n", errmsg);
 	}
 	else {
 	    fprintf(stderr, "%s:%d: command not found: %s\n",
-		    rb_sourcefile(), rb_sourceline(), e->prog);
+		    rb_sourcefile(), rb_sourceline(),
+                    RSTRING_PTR(e->use_shell ? e->invoke.sh.shell_script : e->invoke.cmd.command_name));
 	}
     );
     return ret;
 #else
-    return rb_exec_err(e, NULL, 0);
+    return rb_exec_without_timer_thread(rb_execarg_get(e->execarg_obj), NULL, 0);
 #endif
 }
 
 #ifdef HAVE_FORK
+/* This function should be async-signal-safe.  Hopefully it is. */
 static int
 rb_exec_atfork(void* arg, char *errmsg, size_t errmsg_buflen)
 {
-    rb_thread_atfork_before_exec();
-    return rb_exec_err(arg, errmsg, errmsg_buflen);
+    return rb_exec_async_signal_safe(arg, errmsg, errmsg_buflen); /* hopefully async-signal-safe */
 }
 #endif
 
 #ifdef HAVE_FORK
-#ifdef FD_CLOEXEC
 #if SIZEOF_INT == SIZEOF_LONG
 #define proc_syswait (VALUE (*)(VALUE))rb_syswait
 #else
@@ -2517,7 +2984,6 @@ proc_syswait(VALUE pid)
     rb_syswait((int)pid);
     return Qnil;
 }
-#endif
 #endif
 
 static int
@@ -2586,7 +3052,9 @@ chfunc_protect(VALUE arg)
  * process.
  *
  * If +status+ is given, protects from any exceptions and sets the
- * jump status to it.
+ * jump status to it, and returns -1.  If failed to fork new process
+ * but no exceptions occurred, sets 0 to it.  Otherwise, if forked
+ * successfully, the value of +status+ is undetermined.
  *
  * In the child process, just returns 0 if +chfunc+ is +NULL+.
  * Otherwise +chfunc+ will be called with +charg+, and then the child
@@ -2604,40 +3072,36 @@ chfunc_protect(VALUE arg)
  *
  * +chfunc+ must not raise any exceptions.
  */
-rb_pid_t
-rb_fork_err(int *status, int (*chfunc)(void*, char *, size_t), void *charg, VALUE fds,
-        char *errmsg, size_t errmsg_buflen)
+
+static rb_pid_t
+retry_fork(int *status, int *ep, int chfunc_is_async_signal_safe)
 {
     rb_pid_t pid;
-    int err, state = 0;
-#ifdef FD_CLOEXEC
-    int ep[2];
-    VALUE io = Qnil;
-#endif
+    int state = 0;
 
 #define prefork() (		\
 	rb_io_flush(rb_stdout), \
 	rb_io_flush(rb_stderr)	\
 	)
-    prefork();
 
-#ifdef FD_CLOEXEC
-    if (chfunc) {
-	if (pipe_nocrash(ep, fds)) return -1;
-	if (fcntl(ep[1], F_SETFD, FD_CLOEXEC)) {
-	    preserving_errno((close(ep[0]), close(ep[1])));
-	    return -1;
-	}
-    }
-#endif
-    for (; before_fork(), (pid = fork()) < 0; prefork()) {
-	after_fork();
+    while (1) {
+        prefork();
+        if (!chfunc_is_async_signal_safe)
+            before_fork();
+        pid = fork();
+        if (pid == 0) /* fork succeed, child process */
+            return pid;
+        if (!chfunc_is_async_signal_safe)
+            preserving_errno(after_fork());
+        if (0 < pid) /* fork succeed, parent process */
+            return pid;
+        /* fork failed */
 	switch (errno) {
 	  case EAGAIN:
 #if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
 	  case EWOULDBLOCK:
 #endif
-	    if (!status && !chfunc) {
+	    if (!status && !ep) {
 		rb_thread_sleep(1);
 		continue;
 	    }
@@ -2646,94 +3110,162 @@ rb_fork_err(int *status, int (*chfunc)(void*, char *, size_t), void *charg, VALU
 		if (status) *status = state;
 		if (!state) continue;
 	    }
+            /* fall through */
 	  default:
-#ifdef FD_CLOEXEC
-	    if (chfunc) {
+	    if (ep) {
 		preserving_errno((close(ep[0]), close(ep[1])));
 	    }
-#endif
 	    if (state && !status) rb_jump_tag(state);
 	    return -1;
 	}
     }
-    if (!pid) {
-        forked_child = 1;
-	if (chfunc) {
-	    struct chfunc_protect_t arg;
-	    arg.chfunc = chfunc;
-	    arg.arg = charg;
-	    arg.errmsg = errmsg;
-	    arg.buflen = errmsg_buflen;
-#ifdef FD_CLOEXEC
-	    close(ep[0]);
-#endif
-	    if (!(int)rb_protect(chfunc_protect, (VALUE)&arg, &state)) _exit(EXIT_SUCCESS);
-#ifdef FD_CLOEXEC
-	    if (write(ep[1], &state, sizeof(state)) == sizeof(state) && state) {
-		VALUE errinfo = rb_errinfo();
-		io = rb_io_fdopen(ep[1], O_WRONLY|O_BINARY, NULL);
-		rb_marshal_dump(errinfo, io);
-		rb_io_flush(io);
-	    }
-	    err = errno;
-	    if (write(ep[1], &err, sizeof(err)) < 0) err = errno;
-            if (errmsg && 0 < errmsg_buflen) {
-                errmsg[errmsg_buflen-1] = '\0';
-                errmsg_buflen = strlen(errmsg);
-		if (errmsg_buflen > 0 &&write(ep[1], errmsg, errmsg_buflen) < 0)
-		    err = errno;
-            }
-	    if (!NIL_P(io)) rb_io_close(io);
-#endif
-#if EXIT_SUCCESS == 127
-	    _exit(EXIT_FAILURE);
-#else
-	    _exit(127);
-#endif
-	}
-    }
-    after_fork();
-#ifdef FD_CLOEXEC
-    if (pid && chfunc) {
-	ssize_t size;
-	VALUE exc = Qnil;
-	close(ep[1]);
-	if ((read(ep[0], &state, sizeof(state))) == sizeof(state) && state) {
-	    io = rb_io_fdopen(ep[0], O_RDONLY|O_BINARY, NULL);
-	    exc = rb_marshal_load(io);
-	    rb_set_errinfo(exc);
-	}
-#define READ_FROM_CHILD(ptr, len) \
-	(NIL_P(io) ? read(ep[0], (ptr), (len)) : rb_io_bufread(io, (ptr), (len)))
-	if ((size = READ_FROM_CHILD(&err, sizeof(err))) < 0) {
-	    err = errno;
-	}
-        if (size == sizeof(err) &&
-            errmsg && 0 < errmsg_buflen) {
-	    ssize_t ret = READ_FROM_CHILD(errmsg, errmsg_buflen-1);
-            if (0 <= ret) {
-                errmsg[ret] = '\0';
-            }
+}
+
+static void
+send_child_error(int fd, int state, char *errmsg, size_t errmsg_buflen, int chfunc_is_async_signal_safe)
+{
+    VALUE io = Qnil;
+    int err;
+
+    if (!chfunc_is_async_signal_safe) {
+        if (write(fd, &state, sizeof(state)) == sizeof(state) && state) {
+            VALUE errinfo = rb_errinfo();
+            io = rb_io_fdopen(fd, O_WRONLY|O_BINARY, NULL);
+            rb_marshal_dump(errinfo, io);
+            rb_io_flush(io);
         }
-	if (NIL_P(io))
-	    close(ep[0]);
-	else
-	    rb_io_close(io);
-	if (state || size) {
-	    if (status) {
-		*status = state;
-		rb_protect(proc_syswait, (VALUE)pid, status);
-	    }
-	    else {
-		rb_syswait(pid);
-		if (state) rb_exc_raise(exc);
-	    }
-	    errno = err;
+    }
+    err = errno;
+    if (write(fd, &err, sizeof(err)) < 0) err = errno;
+    if (errmsg && 0 < errmsg_buflen) {
+        errmsg[errmsg_buflen-1] = '\0';
+        errmsg_buflen = strlen(errmsg);
+        if (errmsg_buflen > 0 && write(fd, errmsg, errmsg_buflen) < 0)
+            err = errno;
+    }
+    if (!NIL_P(io)) rb_io_close(io);
+}
+
+static int
+recv_child_error(int fd, int *statep, VALUE *excp, int *errp, char *errmsg, size_t errmsg_buflen, int chfunc_is_async_signal_safe)
+{
+    int err, state = 0;
+    VALUE io = Qnil;
+    ssize_t size;
+    VALUE exc = Qnil;
+    if (!chfunc_is_async_signal_safe) {
+        if ((read(fd, &state, sizeof(state))) == sizeof(state) && state) {
+            io = rb_io_fdopen(fd, O_RDONLY|O_BINARY, NULL);
+            exc = rb_marshal_load(io);
+            rb_set_errinfo(exc);
+        }
+        if (!*statep && state) *statep = state;
+        *excp = exc;
+    }
+#define READ_FROM_CHILD(ptr, len) \
+    (NIL_P(io) ? read(fd, (ptr), (len)) : rb_io_bufread(io, (ptr), (len)))
+    if ((size = READ_FROM_CHILD(&err, sizeof(err))) < 0) {
+        err = errno;
+    }
+    *errp = err;
+    if (size == sizeof(err) &&
+        errmsg && 0 < errmsg_buflen) {
+        ssize_t ret = READ_FROM_CHILD(errmsg, errmsg_buflen-1);
+        if (0 <= ret) {
+            errmsg[ret] = '\0';
+        }
+    }
+    if (NIL_P(io))
+        close(fd);
+    else
+        rb_io_close(io);
+    return size != 0;
+}
+
+static rb_pid_t
+rb_fork_internal(int *status, int (*chfunc)(void*, char *, size_t), void *charg,
+        int chfunc_is_async_signal_safe, VALUE fds,
+        char *errmsg, size_t errmsg_buflen)
+{
+    rb_pid_t pid;
+    int err, state = 0;
+    int ep[2];
+    VALUE exc = Qnil;
+    int error_occured;
+
+    if (status) *status = 0;
+
+    if (!chfunc) {
+        pid = retry_fork(status, NULL, FALSE);
+        if (pid < 0)
+            return pid;
+        if (!pid) {
+            forked_child = 1;
+            after_fork();
+        }
+        return pid;
+    }
+    else {
+	if (pipe_nocrash(ep, fds)) return -1;
+	if (fcntl(ep[1], F_SETFD, FD_CLOEXEC)) {
+	    preserving_errno((close(ep[0]), close(ep[1])));
 	    return -1;
 	}
-    }
+        pid = retry_fork(status, ep, chfunc_is_async_signal_safe);
+        if (pid < 0)
+            return pid;
+        if (!pid) {
+            int ret;
+            forked_child = 1;
+            close(ep[0]);
+            if (chfunc_is_async_signal_safe)
+                ret = chfunc(charg, errmsg, errmsg_buflen);
+            else {
+                struct chfunc_protect_t arg;
+                arg.chfunc = chfunc;
+                arg.arg = charg;
+                arg.errmsg = errmsg;
+                arg.buflen = errmsg_buflen;
+                ret = (int)rb_protect(chfunc_protect, (VALUE)&arg, &state);
+            }
+            if (!ret) _exit(EXIT_SUCCESS);
+            send_child_error(ep[1], state, errmsg, errmsg_buflen, chfunc_is_async_signal_safe);
+#if EXIT_SUCCESS == 127
+            _exit(EXIT_FAILURE);
+#else
+            _exit(127);
 #endif
-    return pid;
+        }
+        close(ep[1]);
+        error_occured = recv_child_error(ep[0], &state, &exc, &err, errmsg, errmsg_buflen, chfunc_is_async_signal_safe);
+        if (state || error_occured) {
+            if (status) {
+                rb_protect(proc_syswait, (VALUE)pid, status);
+                if (state) *status = state;
+            }
+            else {
+                rb_syswait(pid);
+                if (state) rb_exc_raise(exc);
+            }
+            errno = err;
+            return -1;
+        }
+        return pid;
+    }
+}
+
+rb_pid_t
+rb_fork_err(int *status, int (*chfunc)(void*, char *, size_t), void *charg, VALUE fds,
+        char *errmsg, size_t errmsg_buflen)
+{
+    return rb_fork_internal(status, chfunc, charg, FALSE, fds, errmsg, errmsg_buflen);
+}
+
+rb_pid_t
+rb_fork_async_signal_safe(int *status, int (*chfunc)(void*, char *, size_t), void *charg, VALUE fds,
+        char *errmsg, size_t errmsg_buflen)
+{
+    return rb_fork_internal(status, chfunc, charg, TRUE, fds, errmsg, errmsg_buflen);
 }
 
 struct chfunc_wrapper_t {
@@ -2755,12 +3287,18 @@ rb_fork(int *status, int (*chfunc)(void*), void *charg, VALUE fds)
         struct chfunc_wrapper_t warg;
         warg.chfunc = chfunc;
         warg.arg = charg;
-        return rb_fork_err(status, chfunc_wrapper, &warg, fds, NULL, 0);
+        return rb_fork_internal(status, chfunc_wrapper, &warg, FALSE, fds, NULL, 0);
     }
     else {
-        return rb_fork_err(status, NULL, NULL, fds, NULL, 0);
+        return rb_fork_internal(status, NULL, NULL, FALSE, fds, NULL, 0);
     }
 
+}
+
+rb_pid_t
+rb_fork_ruby(int *status)
+{
+    return rb_fork_internal(status, NULL, NULL, FALSE, Qnil, NULL, 0);
 }
 
 #endif
@@ -2796,7 +3334,7 @@ rb_f_fork(VALUE obj)
 
     rb_secure(2);
 
-    switch (pid = rb_fork(0, 0, 0, Qnil)) {
+    switch (pid = rb_fork_ruby(NULL)) {
       case 0:
 	rb_thread_atfork();
 	if (rb_block_given_p()) {
@@ -2988,82 +3526,83 @@ rb_syswait(rb_pid_t pid)
     rb_waitpid(pid, &status, 0);
 }
 
-static VALUE
-rb_exec_arg_prepare(struct rb_exec_arg *earg, int argc, VALUE *argv, int default_close_others)
-{
-    VALUE prog = rb_exec_arg_init(argc, argv, TRUE, earg);
-    if (NIL_P(rb_ary_entry(earg->options, EXEC_OPTION_CLOSE_OTHERS))) {
-        VALUE v = default_close_others ? Qtrue : Qfalse;
-        rb_exec_arg_addopt(earg, ID2SYM(rb_intern("close_others")), v);
-    }
-    rb_exec_arg_fixup(earg);
-    return prog;
-}
-
 static rb_pid_t
-rb_spawn_process(struct rb_exec_arg *earg, VALUE prog, char *errmsg, size_t errmsg_buflen)
+rb_spawn_process(struct rb_execarg *eargp, char *errmsg, size_t errmsg_buflen)
 {
     rb_pid_t pid;
 #if !USE_SPAWNV
     int status;
 #endif
 #if !defined HAVE_FORK || USE_SPAWNV
-    struct rb_exec_arg sarg;
-    int argc;
-    VALUE *argv;
+    VALUE prog;
+    struct rb_execarg sarg;
 #endif
 
 #if defined HAVE_FORK && !USE_SPAWNV
-    pid = rb_fork_err(&status, rb_exec_atfork, earg, earg->redirect_fds, errmsg, errmsg_buflen);
+    pid = rb_fork_async_signal_safe(&status, rb_exec_atfork, eargp, eargp->redirect_fds, errmsg, errmsg_buflen);
 #else
-    if (rb_run_exec_options_err(earg, &sarg, errmsg, errmsg_buflen) < 0) {
+    prog = eargp->use_shell ? eargp->invoke.sh.shell_script : eargp->invoke.cmd.command_name;
+
+    if (rb_execarg_run_options(eargp, &sarg, errmsg, errmsg_buflen) < 0) {
         return -1;
     }
 
-    argc = earg->argc;
-    argv = earg->argv;
-    if (prog && argc) argv[0] = prog;
+    if (prog && !eargp->use_shell) {
+        char **argv = ARGVSTR2ARGV(eargp->invoke.cmd.argv_str);
+        argv[0] = RSTRING_PTR(prog);
+    }
 # if defined HAVE_SPAWNV
-    if (!argc) {
-	pid = proc_spawn(RSTRING_PTR(prog));
+    if (eargp->use_shell) {
+	pid = proc_spawn_sh(RSTRING_PTR(prog));
     }
     else {
-	pid = proc_spawn_n(argc, argv, prog, earg->options);
+        char **argv = ARGVSTR2ARGV(eargp->invoke.cmd.argv_str);
+	pid = proc_spawn_cmd(argv, prog, eargp);
     }
 #  if defined(_WIN32)
     if (pid == -1)
 	rb_last_status_set(0x7f << 8, 0);
 #  endif
 # else
-    if (argc) prog = rb_ary_join(rb_ary_new4(argc, argv), rb_str_new2(" "));
+    if (!eargp->use_shell) {
+        char **argv = ARGVSTR2ARGV(eargp->invoke.cmd.argv_str);
+        int argc = ARGVSTR2ARGC(eargp->invoke.cmd.argv_str);
+        prog = rb_ary_join(rb_ary_new4(argc, argv), rb_str_new2(" "));
+    }
     status = system(StringValuePtr(prog));
     rb_last_status_set((status & 0xff) << 8, 0);
 # endif
 
-    rb_run_exec_options_err(&sarg, NULL, errmsg, errmsg_buflen);
+    rb_execarg_run_options(&sarg, NULL, errmsg, errmsg_buflen);
 #endif
     return pid;
 }
 
 static rb_pid_t
-rb_spawn_internal(int argc, VALUE *argv, int default_close_others,
-                  char *errmsg, size_t errmsg_buflen)
+rb_spawn_internal(int argc, VALUE *argv, char *errmsg, size_t errmsg_buflen)
 {
-    struct rb_exec_arg earg;
-    VALUE prog = rb_exec_arg_prepare(&earg, argc, argv, default_close_others);
-    return rb_spawn_process(&earg, prog, errmsg, errmsg_buflen);
+    VALUE execarg_obj;
+    struct rb_execarg *eargp;
+    rb_pid_t ret;
+
+    execarg_obj = rb_execarg_new(argc, argv, TRUE);
+    eargp = rb_execarg_get(execarg_obj);
+    rb_execarg_fixup(execarg_obj);
+    ret = rb_spawn_process(eargp, errmsg, errmsg_buflen);
+    RB_GC_GUARD(execarg_obj);
+    return ret;
 }
 
 rb_pid_t
 rb_spawn_err(int argc, VALUE *argv, char *errmsg, size_t errmsg_buflen)
 {
-    return rb_spawn_internal(argc, argv, TRUE, errmsg, errmsg_buflen);
+    return rb_spawn_internal(argc, argv, errmsg, errmsg_buflen);
 }
 
 rb_pid_t
 rb_spawn(int argc, VALUE *argv)
 {
-    return rb_spawn_internal(argc, argv, TRUE, NULL, 0);
+    return rb_spawn_internal(argc, argv, NULL, 0);
 }
 
 /*
@@ -3114,7 +3653,7 @@ rb_f_system(int argc, VALUE *argv)
 
     chfunc = signal(SIGCHLD, SIG_DFL);
 #endif
-    pid = rb_spawn_internal(argc, argv, TRUE, NULL, 0);
+    pid = rb_spawn_internal(argc, argv, NULL, 0);
 #if defined(HAVE_FORK) || defined(HAVE_SPAWNV)
     if (pid > 0) {
 	rb_syswait(pid);
@@ -3342,6 +3881,9 @@ rb_f_system(int argc, VALUE *argv)
  *
  *  :close_others is true by default for spawn and IO.popen.
  *
+ *  Note that fds which close-on-exec flag is already set are closed
+ *  regardless of :close_others option.
+ *
  *  So IO.pipe and spawn can be used as IO.popen.
  *
  *    # similar to r = IO.popen(command)
@@ -3382,13 +3924,21 @@ rb_f_spawn(int argc, VALUE *argv)
 {
     rb_pid_t pid;
     char errmsg[CHILD_ERRMSG_BUFLEN] = { '\0' };
-    struct rb_exec_arg earg;
+    VALUE execarg_obj, fail_str;
+    struct rb_execarg *eargp;
 
-    pid = rb_spawn_process(&earg, rb_exec_arg_prepare(&earg, argc, argv, TRUE), errmsg, sizeof(errmsg));
+    execarg_obj = rb_execarg_new(argc, argv, TRUE);
+    eargp = rb_execarg_get(execarg_obj);
+    rb_execarg_fixup(execarg_obj);
+    fail_str = eargp->use_shell ? eargp->invoke.sh.shell_script : eargp->invoke.cmd.command_name;
+
+    pid = rb_spawn_process(eargp, errmsg, sizeof(errmsg));
+    RB_GC_GUARD(execarg_obj);
+
     if (pid == -1) {
 	const char *prog = errmsg;
 	if (!prog[0]) {
-	    rb_sys_fail_str(earg.progname);
+	    rb_sys_fail_str(fail_str);
 	}
 	rb_sys_fail(prog);
     }
@@ -4763,7 +5313,8 @@ proc_setgid(VALUE obj, VALUE id)
  */
 #define RB_MAX_GROUPS (65536)
 static int _maxgroups = -1;
-static int get_sc_ngroups_max(void)
+static int
+get_sc_ngroups_max(void)
 {
 #ifdef _SC_NGROUPS_MAX
     return (int)sysconf(_SC_NGROUPS_MAX);
@@ -4773,7 +5324,8 @@ static int get_sc_ngroups_max(void)
     return -1;
 #endif
 }
-static int maxgroups(void)
+static int
+maxgroups(void)
 {
     if (_maxgroups < 0) {
 	_maxgroups = get_sc_ngroups_max();
@@ -4998,7 +5550,7 @@ rb_daemon(int nochdir, int noclose)
 #else
     int n;
 
-    switch (rb_fork(0, 0, 0, Qnil)) {
+    switch (rb_fork_ruby(NULL)) {
       case -1:
 	rb_sys_fail("daemon");
       case 0:
@@ -5010,7 +5562,7 @@ rb_daemon(int nochdir, int noclose)
     proc_setsid();
 
     /* must not be process-leader */
-    switch (rb_fork(0, 0, 0, Qnil)) {
+    switch (rb_fork_ruby(NULL)) {
       case -1:
 	return -1;
       case 0:

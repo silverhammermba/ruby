@@ -120,18 +120,18 @@ typedef char ruby_check_sizeof_voidp[SIZEOF_VOIDP == sizeof(void*) ? 1 : -1];
 
 #if defined PRIdPTR && !defined PRI_VALUE_PREFIX
 #define PRIdVALUE PRIdPTR
-#define PRIiVALUE PRIiPTR
 #define PRIoVALUE PRIoPTR
 #define PRIuVALUE PRIuPTR
 #define PRIxVALUE PRIxPTR
 #define PRIXVALUE PRIXPTR
+#define PRIsVALUE PRIiPTR
 #else
 #define PRIdVALUE PRI_VALUE_PREFIX"d"
-#define PRIiVALUE PRI_VALUE_PREFIX"i"
 #define PRIoVALUE PRI_VALUE_PREFIX"o"
 #define PRIuVALUE PRI_VALUE_PREFIX"u"
 #define PRIxVALUE PRI_VALUE_PREFIX"x"
 #define PRIXVALUE PRI_VALUE_PREFIX"X"
+#define PRIsVALUE PRI_VALUE_PREFIX"i"
 #endif
 #ifndef PRI_VALUE_PREFIX
 # define PRI_VALUE_PREFIX ""
@@ -1080,6 +1080,7 @@ VALUE rb_define_module_under(VALUE, const char*);
 
 void rb_include_module(VALUE,VALUE);
 void rb_extend_object(VALUE,VALUE);
+void rb_prepend_module(VALUE,VALUE);
 
 struct rb_global_variable;
 
@@ -1228,21 +1229,6 @@ NORETURN(void rb_throw(const char*,VALUE));
 NORETURN(void rb_throw_obj(VALUE,VALUE));
 
 VALUE rb_require(const char*);
-
-#ifdef __ia64
-void ruby_init_stack(volatile VALUE*, void*);
-#define ruby_init_stack(addr) ruby_init_stack((addr), rb_ia64_bsp())
-#else
-void ruby_init_stack(volatile VALUE*);
-#endif
-#define RUBY_INIT_STACK \
-    VALUE variable_in_this_stack_frame; \
-    ruby_init_stack(&variable_in_this_stack_frame);
-void ruby_init(void);
-void *ruby_options(int, char**);
-int ruby_run_node(void *);
-int ruby_exec_node(void *);
-int ruby_executable_node(void *n, int *status);
 
 RUBY_EXTERN VALUE rb_mKernel;
 RUBY_EXTERN VALUE rb_mComparable;
@@ -1400,14 +1386,6 @@ rb_special_const_p(VALUE obj)
 static char *dln_libs_to_be_linked[] = { EXTLIB, 0 };
 #endif
 
-#if (defined(__APPLE__) || defined(__NeXT__)) && defined(__MACH__)
-#define RUBY_GLOBAL_SETUP /* use linker option to link startup code with ObjC support */
-#else
-#define RUBY_GLOBAL_SETUP
-#endif
-
-void ruby_sysinit(int *, char ***);
-
 #define RUBY_VM 1 /* YARV */
 #define HAVE_NATIVETHREAD
 int ruby_native_thread_p(void);
@@ -1487,12 +1465,78 @@ unsigned long ruby_strtoul(const char *str, char **endptr, int base);
 PRINTF_ARGS(int ruby_snprintf(char *str, size_t n, char const *fmt, ...), 3, 4);
 int ruby_vsnprintf(char *str, size_t n, char const *fmt, va_list ap);
 
-#if defined __GNUC__ && __GNUC__ >= 4
-#pragma GCC visibility pop
-#endif
-
 #ifndef RUBY_DONT_SUBST
 #include "ruby/subst.h"
+#endif
+
+/**
+ * @defgroup embed CRuby Embedding APIs
+ * CRuby interpreter APIs. These are APIs to embed MRI interpreter into your
+ * program.
+ * These functions are not a part of Ruby extention library API.
+ * Extension libraries of Ruby should not depend on these functions.
+ * @{
+ */
+
+/** @defgroup ruby1 ruby(1) implementation
+ * A part of the implementation of ruby(1) command.
+ * Other programs that embed Ruby interpreter do not always need to use these
+ * functions.
+ * @{
+ */
+
+void ruby_sysinit(int *argc, char ***argv);
+void ruby_init(void);
+void* ruby_options(int argc, char** argv);
+int ruby_executable_node(void *n, int *status);
+int ruby_run_node(void *n);
+
+/* version.c */
+void ruby_show_version(void);
+void ruby_show_copyright(void);
+
+
+/*! A convenience macro to call ruby_init_stack(). Must be placed just after
+ *  variable declarations */
+#define RUBY_INIT_STACK \
+    VALUE variable_in_this_stack_frame; \
+    ruby_init_stack(&variable_in_this_stack_frame);
+/*! @} */
+
+#ifdef __ia64
+void ruby_init_stack(volatile VALUE*, void*);
+#define ruby_init_stack(addr) ruby_init_stack((addr), rb_ia64_bsp())
+#else
+void ruby_init_stack(volatile VALUE*);
+#endif
+#define Init_stack(addr) ruby_init_stack(addr)
+
+int ruby_setup(void);
+int ruby_cleanup(volatile int);
+
+void ruby_finalize(void);
+NORETURN(void ruby_stop(int));
+
+void ruby_set_stack_size(size_t);
+int ruby_stack_check(void);
+size_t ruby_stack_length(VALUE**);
+
+int ruby_exec_node(void *n);
+
+void ruby_script(const char* name);
+void ruby_set_script_name(VALUE name);
+
+void ruby_prog_init(void);
+void ruby_set_argv(int, char**);
+void *ruby_process_options(int, char**);
+void ruby_init_loadpath(void);
+void ruby_incpush(const char*);
+void ruby_sig_finalize(void);
+
+/*! @} */
+
+#if defined __GNUC__ && __GNUC__ >= 4
+#pragma GCC visibility pop
 #endif
 
 #if defined(__cplusplus)

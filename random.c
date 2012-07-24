@@ -462,10 +462,12 @@ random_init(int argc, VALUE *argv, VALUE obj)
     rb_random_t *rnd = get_rnd(obj);
 
     if (argc == 0) {
+	rb_check_frozen(obj);
 	vseed = random_seed();
     }
     else {
 	rb_scan_args(argc, argv, "01", &vseed);
+	rb_check_copyable(obj, vseed);
     }
     rnd->seed = rand_init(&rnd->mt, vseed);
     return obj;
@@ -596,9 +598,14 @@ random_get_seed(VALUE obj)
 static VALUE
 random_copy(VALUE obj, VALUE orig)
 {
-    rb_random_t *rnd1 = get_rnd(obj);
-    rb_random_t *rnd2 = get_rnd(orig);
-    struct MT *mt = &rnd1->mt;
+    rb_random_t *rnd1, *rnd2;
+    struct MT *mt;
+
+    if (!OBJ_INIT_COPY(obj, orig)) return obj;
+
+    rnd1 = get_rnd(obj);
+    rnd2 = get_rnd(orig);
+    mt = &rnd1->mt;
 
     *rnd1 = *rnd2;
     mt->next = mt->state + numberof(mt->state) - mt->left + 1;
@@ -681,6 +688,7 @@ random_load(VALUE obj, VALUE dump)
     VALUE *ary;
     unsigned long x;
 
+    rb_check_copyable(obj, dump);
     Check_Type(dump, T_ARRAY);
     ary = RARRAY_PTR(dump);
     switch (RARRAY_LEN(dump)) {
@@ -906,7 +914,7 @@ rb_random_int32(VALUE obj)
     rb_random_t *rnd = try_get_rnd(obj);
     if (!rnd) {
 #if SIZEOF_LONG * CHAR_BIT > 32
-	VALUE lim = ULONG2NUM(0x100000000);
+	VALUE lim = ULONG2NUM(0x100000000UL);
 #elif defined HAVE_LONG_LONG
 	VALUE lim = ULL2NUM((LONG_LONG)0xffffffff+1);
 #else
@@ -924,7 +932,10 @@ rb_random_real(VALUE obj)
     if (!rnd) {
 	VALUE v = rb_funcall2(obj, id_rand, 0, 0);
 	double d = NUM2DBL(v);
-	if (d < 0.0 || d >= 1.0) {
+	if (d < 0.0) {
+	    rb_raise(rb_eRangeError, "random number too small %g", d);
+	}
+	else if (d >= 1.0) {
 	    rb_raise(rb_eRangeError, "random number too big %g", d);
 	}
 	return d;

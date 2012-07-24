@@ -16,6 +16,7 @@ PLATFORM_DIR = @PLATFORM_DIR@
 
 CC = @CC@
 CPP = @CPP@
+LD = @LD@
 YACC = bison
 PURIFY =
 AUTOCONF = autoconf
@@ -70,6 +71,8 @@ DLDFLAGS = @LIBRUBY_DLDFLAGS@ $(XLDFLAGS) $(ARCH_FLAG)
 SOLIBS = @SOLIBS@
 MAINLIBS = @MAINLIBS@
 ARCHMINIOBJS = @MINIOBJS@
+ENCOBJS = @ENCOBJS@
+EXTOBJS = @EXTOBJS@
 BUILTIN_ENCOBJS = @BUILTIN_ENCOBJS@
 BUILTIN_TRANSSRCS = @BUILTIN_TRANSSRCS@
 BUILTIN_TRANSOBJS = @BUILTIN_TRANSOBJS@
@@ -81,12 +84,15 @@ RUBY_INSTALL_NAME=@RUBY_INSTALL_NAME@
 RUBY_SO_NAME=@RUBY_SO_NAME@
 RUBY_RELEASE_DATE=@RUBY_RELEASE_DATE@
 EXEEXT = @EXEEXT@
+LIBEXT = @LIBEXT@
 PROGRAM=$(RUBY_INSTALL_NAME)$(EXEEXT)
 RUBY = $(RUBY_INSTALL_NAME)
 MINIRUBY = @MINIRUBY@\
 	$(MINIRUBYOPT)
 RUNRUBY = @RUNRUBY@ $(RUNRUBYOPT) -- $(RUN_OPTS)
 XRUBY = @XRUBY@
+BTESTRUBY = @BTESTRUBY@\
+	$(MINIRUBYOPT)
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_SCRIPT = @INSTALL_SCRIPT@
@@ -110,6 +116,7 @@ LIBRUBY	      = @LIBRUBY@
 LIBRUBYARG    = @LIBRUBYARG@
 LIBRUBYARG_STATIC = @LIBRUBYARG_STATIC@
 LIBRUBYARG_SHARED = @LIBRUBYARG_SHARED@
+LIBRUBY_RELATIVE = @LIBRUBY_RELATIVE@
 
 THREAD_MODEL  = @THREAD_MODEL@
 
@@ -175,7 +182,7 @@ miniruby$(EXEEXT):
 $(PROGRAM):
 		@$(RM) $@
 		$(ECHO) linking $@
-		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINLIBS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(LIBS) $(OUTFLAG)$@
+		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINLIBS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(LIBS) $(EXTLIBS) $(OUTFLAG)$@
 		$(Q) $(POSTLINK)
 
 # We must `rm' the library each time this rule is invoked because "updating" a
@@ -186,13 +193,14 @@ $(LIBRUBY_A):
 		$(ECHO) linking static-library $@
 		$(Q) $(AR) $(ARFLAGS) $@ $(OBJS) $(DMYEXT)
 		@-$(RANLIB) $@ 2> /dev/null || true
+		$(ECHO) verifying static-library $@
 		@$(PURIFY) $(CC) $(XLDFLAGS) $(MAINOBJ) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)conftest$(EXEEXT) $(LDFLAGS)
-		@$(RM) conftest$(EXEEXT)
+		@$(RM) conftest$(EXEEXT) conftest.c
 
 $(LIBRUBY_SO):
 		@-$(PRE_LIBRUBY_UPDATE)
 		$(ECHO) linking shared-library $@
-		$(Q) $(LDSHARED) $(DLDFLAGS) $(OBJS) $(DLDOBJS) $(SOLIBS) $(OUTFLAG)$@
+		$(Q) $(LDSHARED) $(DLDFLAGS) $(OBJS) $(DLDOBJS) $(SOLIBS) $(EXTSOLIBS) $(OUTFLAG)$@
 		-$(Q) $(OBJCOPY) -w -L '$(SYMBOL_PREFIX)Init_*' -L '$(SYMBOL_PREFIX)*_threadptr_*' $@
 		@-$(MINIRUBY) -e 'ARGV.each{|link| File.delete link if File.exist? link; \
 						  File.symlink "$(LIBRUBY_SO)", link}' \
@@ -287,7 +295,7 @@ enc/unicode/name2ctype.h: enc/unicode/name2ctype.kwd
 	  trap '$(RM) $@-1.h $@-2.h' 0 && \
 	  set -x; \
 	  sed '/^#ifdef USE_UNICODE_PROPERTIES/,/^#endif/d' $? | gperf $(NAME2CTYPE_OPTIONS) > $@-1.h && \
-	  sed -e '/^#ifdef USE_UNICODE_PROPERTIES/,/^#endif/{' -e '/^#/d' -e '}' $? | gperf $(NAME2CTYPE_OPTIONS) > $@-2.h && \
+	  sed '/^#ifdef USE_UNICODE_PROPERTIES/d;/^#endif/d' $? | gperf $(NAME2CTYPE_OPTIONS) > $@-2.h && \
 	  diff -DUSE_UNICODE_PROPERTIES $@-1.h $@-2.h > $@.tmp || :; \
 	  $(MV) $@.tmp $@ && \
 	  $(CP) $? $(?:.kwd=.src) && \
@@ -308,10 +316,11 @@ enc/unicode/name2ctype.h: enc/unicode/name2ctype.kwd
 
 .c.i:
 	@$(ECHO) preprocessing $<
-	$(Q) $(CPP) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -E $< > $@
+	$(Q) $(CPP) $(warnflags) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -E $< > $@
 
 clean-local::
-	$(Q)$(RM) ext/extinit.c ext/extinit.$(OBJEXT) ext/ripper/y.output
+	$(Q)$(RM) ext/extinit.c ext/extinit.$(OBJEXT) ext/ripper/y.output \
+		enc/encinit.c enc/encinit.$(OBJEXT)
 	-$(Q)$(RM) $(pkgconfig_DATA)
 
 distclean-local::
@@ -335,8 +344,10 @@ clean-ext distclean-ext realclean-ext::
 		$(RMDIRS) "ext/$$dir" 2> /dev/null || true;; \
 	    esac; \
 	done
+	-$(Q)$(RM) ext/extinit.$(OBJEXT)
 
 distclean-ext realclean-ext::
+	-$(Q)$(RM) ext/extinit.c
 	-$(Q)$(RMDIR) ext 2> /dev/null || true
 
 clean-extout:
@@ -361,6 +372,8 @@ clean-platform:
 ext/extinit.$(OBJEXT): ext/extinit.c $(SETUP)
 	$(ECHO) compiling $@
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c ext/extinit.c
+
+enc/encinit.$(OBJEXT): enc/encinit.c $(SETUP)
 
 up::
 	@$(CHDIR) "$(srcdir)" && LC_TIME=C exec $(VCSUP)

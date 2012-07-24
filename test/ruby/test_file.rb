@@ -33,10 +33,63 @@ class TestFile < Test::Unit::TestCase
     f << content
     f.rewind
     yield f
+  ensure
+    f.close(true)
   end
   alias open_file_rw open_file
 
   include TestEOF::Seek
+
+  def test_empty_file_bom
+    bug6487 = '[ruby-core:45203]'
+    f = Tempfile.new(__method__.to_s)
+    f.close
+    assert File.exist? f.path
+    assert_nothing_raised(bug6487) {File.read(f.path, mode: 'r:utf-8')}
+    assert_nothing_raised(bug6487) {File.read(f.path, mode: 'r:bom|utf-8')}
+    f.close(true)
+  end
+
+  def assert_bom(bytes, name)
+    bug6487 = '[ruby-core:45203]'
+
+    f = Tempfile.new(name.to_s)
+    f.sync = true
+    expected = ""
+    result = nil
+    bytes[0...-1].each do |x|
+      f.write x
+      f.write ' '
+      f.pos -= 1
+      expected << x
+      assert_nothing_raised(bug6487) {result = File.read(f.path, mode: 'rb:bom|utf-8')}
+      assert_equal("#{expected} ".force_encoding("utf-8"), result)
+    end
+    f.write bytes[-1]
+    assert_nothing_raised(bug6487) {result = File.read(f.path, mode: 'rb:bom|utf-8')}
+    assert_equal '', result, "valid bom"
+    f.close(true)
+  end
+
+  def test_bom_8
+    assert_bom(["\xEF", "\xBB", "\xBF"], __method__)
+  end
+
+  def test_bom_16be
+    assert_bom(["\xFE", "\xFF"], __method__)
+  end
+
+  def test_bom_16le
+    assert_bom(["\xFF", "\xFE"], __method__)
+  end
+
+  def test_bom_32be
+    assert_bom(["\0", "\0", "\xFE", "\xFF"], __method__)
+  end
+
+  def test_bom_32le
+    assert_bom(["\xFF\xFE\0", "\0"], __method__)
+  end
 
   def test_truncate_wbuf
     f = Tempfile.new("test-truncate")
@@ -45,7 +98,7 @@ class TestFile < Test::Unit::TestCase
     f.print "def"
     f.flush
     assert_equal("\0\0\0def", File.read(f.path), "[ruby-dev:24191]")
-    f.close
+    f.close(true)
   end
 
   def test_truncate_rbuf
@@ -57,6 +110,7 @@ class TestFile < Test::Unit::TestCase
     assert_equal("abc\n", f.gets)
     f.truncate(3)
     assert_equal(nil, f.gets, "[ruby-dev:24197]")
+    f.close(true)
   end
 
   def test_truncate_beyond_eof
@@ -64,6 +118,7 @@ class TestFile < Test::Unit::TestCase
     f.print "abc"
     f.truncate 10
     assert_equal("\0" * 7, f.read(100), "[ruby-dev:24532]")
+    f.close(true)
   end
 
   def test_read_all_extended_file
@@ -73,6 +128,7 @@ class TestFile < Test::Unit::TestCase
       f.print "a"
       f.rewind
       assert_equal("a", f.read, "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -83,6 +139,7 @@ class TestFile < Test::Unit::TestCase
       f.print "a"
       f.rewind
       assert_equal("a", f.gets("a"), "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -93,6 +150,7 @@ class TestFile < Test::Unit::TestCase
       f.print "\na"
       f.rewind
       assert_equal("a", f.gets(""), "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -105,6 +163,7 @@ class TestFile < Test::Unit::TestCase
       result = []
       f.each_char {|b| result << b }
       assert_equal([?a], result, "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -117,6 +176,7 @@ class TestFile < Test::Unit::TestCase
       result = []
       f.each_byte {|b| result << b.chr }
       assert_equal([?a], result, "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -127,6 +187,7 @@ class TestFile < Test::Unit::TestCase
       f.print "a"
       f.rewind
       assert_equal(?a, f.getc, "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -137,6 +198,7 @@ class TestFile < Test::Unit::TestCase
       f.print "a"
       f.rewind
       assert_equal(?a, f.getbyte.chr, "mode = <#{mode}>")
+      f.close(true)
     end
   end
 
@@ -162,7 +224,7 @@ class TestFile < Test::Unit::TestCase
   def test_realpath
     Dir.mktmpdir('rubytest-realpath') {|tmpdir|
       realdir = File.realpath(tmpdir)
-      tst = realdir.sub(/#{Regexp.escape(File::SEPARATOR)}/, '\0\0\0')
+      tst = realdir + (File::SEPARATOR*3 + ".")
       assert_equal(realdir, File.realpath(tst))
       assert_equal(realdir, File.realpath(".", tst))
       if File::ALT_SEPARATOR
@@ -175,11 +237,19 @@ class TestFile < Test::Unit::TestCase
   def test_realdirpath
     Dir.mktmpdir('rubytest-realdirpath') {|tmpdir|
       realdir = File.realpath(tmpdir)
-      tst = realdir.sub(/#{Regexp.escape(File::SEPARATOR)}/, '\0\0\0')
+      tst = realdir + (File::SEPARATOR*3 + ".")
       assert_equal(realdir, File.realdirpath(tst))
       assert_equal(realdir, File.realdirpath(".", tst))
       assert_equal(File.join(realdir, "foo"), File.realdirpath("foo", tst))
     }
+    begin
+      result = File.realdirpath("bar", "//:/foo")
+    rescue SystemCallError
+    else
+      if result.start_with?("//")
+        assert_equal("//:/foo/bar", result)
+      end
+    end
   end
 
   def test_utime_with_minus_time_segv
@@ -191,9 +261,31 @@ class TestFile < Test::Unit::TestCase
         f = Tempfile.new('test_utime_with_minus_time_segv')
         File.utime(t, t, f)
       rescue
+      ensure
+        f.close(true)
       end
       puts '#{bug5596}'
     EOS
+  end
+
+  def test_utime
+    bug6385 = '[ruby-core:44776]'
+
+    mod_time_contents = Time.at 1306527039
+
+    file = Tempfile.new("utime")
+    file.close
+    path = file.path
+
+    File.utime(File.atime(path), mod_time_contents, path)
+    stats = File.stat(path)
+
+    file.open
+    file_mtime = file.mtime
+    file.close(true)
+
+    assert_equal(mod_time_contents, file_mtime, bug6385)
+    assert_equal(mod_time_contents, stats.mtime, bug6385)
   end
 
   def test_chmod_m17n
@@ -207,7 +299,8 @@ class TestFile < Test::Unit::TestCase
 
   def test_file_open_permissions
     Dir.mktmpdir(__method__.to_s) do |tmpdir|
-      File.open('x', :mode     => IO::RDWR | IO::CREAT | IO::BINARY,
+      tmp = File.join(tmpdir, 'x')
+      File.open(tmp, :mode     => IO::RDWR | IO::CREAT | IO::BINARY,
                      :encoding => Encoding::ASCII_8BIT) do |x|
 
         assert x.autoclose?
@@ -229,9 +322,20 @@ class TestFile < Test::Unit::TestCase
 
   def test_conflicting_encodings
     Dir.mktmpdir(__method__.to_s) do |tmpdir|
-      File.open('x', 'wb', :encoding => Encoding::EUC_JP) do |x|
+      tmp = File.join(tmpdir, 'x')
+      File.open(tmp, 'wb', :encoding => Encoding::EUC_JP) do |x|
         assert_equal Encoding::EUC_JP, x.external_encoding
       end
+    end
+  end
+
+  def test_untainted_path
+    bug5374 = '[ruby-core:39745]'
+    cwd = ("./"*40+".".taint).dup.untaint
+    in_safe = proc {|safe| $SAFE = safe; File.stat(cwd)}
+    assert_not_send([cwd, :tainted?])
+    (0..1).each do |level|
+      assert_nothing_raised(SecurityError, bug5374) {in_safe[level]}
     end
   end
 

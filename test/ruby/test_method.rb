@@ -36,7 +36,7 @@ class TestMethod < Test::Unit::TestCase
   module M
     def func; end
     module_function :func
-    def meth; end
+    def meth; :meth end
   end
 
   def mv1() end
@@ -90,6 +90,20 @@ class TestMethod < Test::Unit::TestCase
     assert_equal(:m, Class.new {define_method(:m) {__method__}}.new.m)
     assert_equal(:m, Class.new {define_method(:m) {tap{return __method__}}}.new.m)
     assert_nil(eval("class TestCallee; __method__; end"))
+
+    assert_equal(:test_callee, __callee__)
+    [
+      ["method",              Class.new {def m; __callee__; end},],
+      ["block",               Class.new {def m; tap{return __callee__}; end},],
+      ["define_method",       Class.new {define_method(:m) {__callee__}}],
+      ["define_method block", Class.new {define_method(:m) {tap{return __callee__}}}],
+    ].each do |mesg, c|
+      c.class_eval {alias m2 m}
+      o = c.new
+      assert_equal(:m, o.m, mesg)
+      assert_equal(:m2, o.m2, mesg)
+    end
+    assert_nil(eval("class TestCallee; __callee__; end"))
   end
 
   def test_method_in_define_method_block
@@ -230,9 +244,11 @@ class TestMethod < Test::Unit::TestCase
       Module.new.module_eval {define_method(:foo, Base.instance_method(:foo))}
     end
 
-    assert_raise(TypeError) do
-      Class.new.class_eval {define_method(:meth, M.instance_method(:meth))}
-    end
+    feature4254 = '[ruby-core:34267]'
+    m = Module.new {define_method(:meth, M.instance_method(:meth))}
+    assert_equal(:meth, Object.new.extend(m).meth, feature4254)
+    c = Class.new {define_method(:meth, M.instance_method(:meth))}
+    assert_equal(:meth, c.new.meth, feature4254)
   end
 
   def test_super_in_proc_from_define_method

@@ -42,9 +42,9 @@ static ID id_const_missing;
  *  call-seq:
  *     obj === other   -> true or false
  *
- *  Case Equality---For class <code>Object</code>, effectively the same
- *  as calling  <code>#==</code>, but typically overridden by descendants
- *  to provide meaningful semantics in <code>case</code> statements.
+ *  Case Equality -- For class Object, effectively the same as calling
+ *  <code>#==</code>, but typically overridden by descendants to provide
+ *  meaningful semantics in +case+ statements.
  */
 
 VALUE
@@ -342,6 +342,7 @@ rb_obj_init_copy(VALUE obj, VALUE orig)
 {
     if (obj == orig) return obj;
     rb_check_frozen(obj);
+    rb_check_trusted(obj);
     if (TYPE(obj) != TYPE(orig) || rb_obj_class(obj) != rb_obj_class(orig)) {
 	rb_raise(rb_eTypeError, "initialize_copy should take same class object");
     }
@@ -509,6 +510,22 @@ rb_obj_inspect(VALUE obj)
     return rb_funcall(obj, rb_intern("to_s"), 0, 0);
 }
 
+static VALUE
+class_or_module_required(VALUE c)
+{
+    if (SPECIAL_CONST_P(c)) goto not_class;
+    switch (BUILTIN_TYPE(c)) {
+      case T_MODULE:
+      case T_CLASS:
+      case T_ICLASS:
+	break;
+
+      default:
+      not_class:
+	rb_raise(rb_eTypeError, "class or module required");
+    }
+    return c;
+}
 
 /*
  *  call-seq:
@@ -530,15 +547,7 @@ rb_obj_inspect(VALUE obj)
 VALUE
 rb_obj_is_instance_of(VALUE obj, VALUE c)
 {
-    switch (TYPE(c)) {
-      case T_MODULE:
-      case T_CLASS:
-      case T_ICLASS:
-	break;
-      default:
-	rb_raise(rb_eTypeError, "class or module required");
-    }
-
+    c = class_or_module_required(c);
     if (rb_obj_class(obj) == c) return Qtrue;
     return Qfalse;
 }
@@ -577,16 +586,7 @@ rb_obj_is_kind_of(VALUE obj, VALUE c)
 {
     VALUE cl = CLASS_OF(obj);
 
-    switch (TYPE(c)) {
-      case T_MODULE:
-      case T_CLASS:
-      case T_ICLASS:
-	break;
-
-      default:
-	rb_raise(rb_eTypeError, "class or module required");
-    }
-
+    c = class_or_module_required(c);
     while (cl) {
 	if (cl == c || RCLASS_M_TBL(cl) == RCLASS_M_TBL(c))
 	    return Qtrue;
@@ -2780,7 +2780,7 @@ rb_f_hash(VALUE obj, VALUE arg)
  *      end
  *
  *      def respond_to_missing?(name, include_private = false)
- *        DELGATE.include?(name) or super
+ *        DELEGATE.include?(name) or super
  *      end
  *    end
  *
@@ -2845,11 +2845,24 @@ Init_Object(void)
     rb_define_private_method(rb_cBasicObject, "singleton_method_removed", rb_obj_dummy, 1);
     rb_define_private_method(rb_cBasicObject, "singleton_method_undefined", rb_obj_dummy, 1);
 
+    /* Document-module: Kernel
+     *
+     * The Kernel module is included by class Object, so its methods are
+     * available in every Ruby object.
+     *
+     * The Kernel instance methods are documented in class Object while the
+     * module methods are documented here.  These methods are called without a
+     * receiver and thus can be called in functional form:
+     *
+     *   sprintf "%.1f", 1.234 #=> "1.2"
+     *
+     */
     rb_mKernel = rb_define_module("Kernel");
     rb_include_module(rb_cObject, rb_mKernel);
     rb_define_private_method(rb_cClass, "inherited", rb_obj_dummy, 1);
     rb_define_private_method(rb_cModule, "included", rb_obj_dummy, 1);
     rb_define_private_method(rb_cModule, "extended", rb_obj_dummy, 1);
+    rb_define_private_method(rb_cModule, "prepended", rb_obj_dummy, 1);
     rb_define_private_method(rb_cModule, "method_added", rb_obj_dummy, 1);
     rb_define_private_method(rb_cModule, "method_removed", rb_obj_dummy, 1);
     rb_define_private_method(rb_cModule, "method_undefined", rb_obj_dummy, 1);
@@ -2881,11 +2894,11 @@ Init_Object(void)
 
     rb_define_method(rb_mKernel, "to_s", rb_any_to_s, 0);
     rb_define_method(rb_mKernel, "inspect", rb_obj_inspect, 0);
-    rb_define_method(rb_mKernel, "methods", rb_obj_methods, -1);
+    rb_define_method(rb_mKernel, "methods", rb_obj_methods, -1); /* in class.c */
     rb_define_method(rb_mKernel, "singleton_methods", rb_obj_singleton_methods, -1); /* in class.c */
-    rb_define_method(rb_mKernel, "protected_methods", rb_obj_protected_methods, -1);
-    rb_define_method(rb_mKernel, "private_methods", rb_obj_private_methods, -1);
-    rb_define_method(rb_mKernel, "public_methods", rb_obj_public_methods, -1);
+    rb_define_method(rb_mKernel, "protected_methods", rb_obj_protected_methods, -1); /* in class.c */
+    rb_define_method(rb_mKernel, "private_methods", rb_obj_private_methods, -1); /* in class.c */
+    rb_define_method(rb_mKernel, "public_methods", rb_obj_public_methods, -1); /* in class.c */
     rb_define_method(rb_mKernel, "instance_variables", rb_obj_instance_variables, 0); /* in variable.c */
     rb_define_method(rb_mKernel, "instance_variable_get", rb_obj_ivar_get, 1);
     rb_define_method(rb_mKernel, "instance_variable_set", rb_obj_ivar_set, 2);
@@ -2966,7 +2979,7 @@ Init_Object(void)
     rb_define_method(rb_cModule, "const_missing",
 		     rb_mod_const_missing, 1); /* in variable.c */
     rb_define_method(rb_cModule, "class_variables",
-		     rb_mod_class_variables, 0); /* in variable.c */
+		     rb_mod_class_variables, -1); /* in variable.c */
     rb_define_method(rb_cModule, "remove_class_variable",
 		     rb_mod_remove_cvar, 1); /* in variable.c */
     rb_define_method(rb_cModule, "class_variable_get", rb_mod_cvar_get, 1);

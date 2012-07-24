@@ -1277,7 +1277,7 @@ static time_t known_leap_seconds_limit;
 static int number_of_leap_seconds_known;
 
 static void
-init_leap_second_info()
+init_leap_second_info(void)
 {
     /*
      * leap seconds are determined by IERS.
@@ -1741,6 +1741,19 @@ timew_out_of_timet_range(wideval_t timew)
         return 0;
     }
 #endif
+#if SIZEOF_TIME_T == SIZEOF_INT64_T
+    if (FIXWV_P(timew)) {
+        wideint_t t = FIXWV2WINT(timew);
+        if (~(time_t)0 <= 0) {
+            return 0;
+        }
+        else {
+            if (t < 0)
+                return 1;
+            return 0;
+        }
+    }
+#endif
     timexv = w2v(timew);
     if (lt(timexv, mul(INT2FIX(TIME_SCALE), TIMET2NUM(TIMET_MIN))) ||
         le(mul(INT2FIX(TIME_SCALE), add(TIMET2NUM(TIMET_MAX), INT2FIX(1))), timexv))
@@ -2111,18 +2124,27 @@ utc_offset_arg(VALUE arg)
 {
     VALUE tmp;
     if (!NIL_P(tmp = rb_check_string_type(arg))) {
-        int n;
+        int n = 0;
         char *s = RSTRING_PTR(tmp);
-        if (!rb_enc_str_asciicompat_p(tmp) ||
-            RSTRING_LEN(tmp) != 6 ||
-            (s[0] != '+' && s[0] != '-') ||
-            !ISDIGIT(s[1]) ||
-            !ISDIGIT(s[2]) ||
-            s[3] != ':' ||
-            !ISDIGIT(s[4]) ||
-            !ISDIGIT(s[5]))
+        if (!rb_enc_str_asciicompat_p(tmp)) {
+	  invalid_utc_offset:
             rb_raise(rb_eArgError, "\"+HH:MM\" or \"-HH:MM\" expected for utc_offset");
-        n = (s[1] * 10 + s[2] - '0' * 11) * 3600;
+	}
+	switch (RSTRING_LEN(tmp)) {
+	  case 9:
+	    if (s[6] != ':') goto invalid_utc_offset;
+	    if (!ISDIGIT(s[7]) || !ISDIGIT(s[8])) goto invalid_utc_offset;
+	    n += (s[7] * 10 + s[8] - '0' * 11);
+	  case 6:
+	    if (s[0] != '+' && s[0] != '-') goto invalid_utc_offset;
+	    if (!ISDIGIT(s[1]) || !ISDIGIT(s[2])) goto invalid_utc_offset;
+	    if (s[3] != ':') goto invalid_utc_offset;
+	    if (!ISDIGIT(s[4]) || !ISDIGIT(s[5])) goto invalid_utc_offset;
+	    break;
+	  default:
+	    goto invalid_utc_offset;
+	}
+        n += (s[1] * 10 + s[2] - '0' * 11) * 3600;
         n += (s[4] * 10 + s[5] - '0' * 11) * 60;
         if (s[0] == '-')
             n = -n;
@@ -3416,8 +3438,7 @@ time_init_copy(VALUE copy, VALUE time)
 {
     struct time_object *tobj, *tcopy;
 
-    if (copy == time) return copy;
-    time_modify(copy);
+    if (!OBJ_INIT_COPY(copy, time)) return copy;
     GetTimeval(time, tobj);
     GetTimeval(copy, tcopy);
     MEMCPY(tcopy, tobj, struct time_object, 1);
@@ -3862,10 +3883,12 @@ time_round(int argc, VALUE *argv, VALUE time)
  *  call-seq:
  *     time.sec -> fixnum
  *
- *  Returns the second of the minute (0..60)<em>[Yes, seconds really can
- *  range from zero to 60. This allows the system to inject leap seconds
- *  every now and then to correct for the fact that years are not really
- *  a convenient number of hours long.]</em> for <i>time</i>.
+ *  Returns the second of the minute (0..60) for <i>time</i>.
+ *  <em>[Yes, seconds really can range from zero to 60. This allows the
+ *  system to inject leap seconds every now and then to correct for the
+ *  fact that UTC is based on solar time so days are not exactly 86400
+ *  seconds or 24 hours long.  See http://en.wikipedia.org/wiki/Leap_second
+ *  for further details.]</em>
  *
  *     t = Time.now   #=> 2007-11-19 08:25:02 -0600
  *     t.sec          #=> 2
@@ -4426,7 +4449,7 @@ strftimev(const char *fmt, VALUE time, rb_encoding *enc)
  *      %z - Time zone as hour and minute offset from UTC (e.g. +0900)
  *              %:z - hour and minute offset from UTC with a colon (e.g. +09:00)
  *              %::z - hour, minute and second offset from UTC (e.g. +09:00:00)
- *      %Z - Time zone abbreviation name
+ *      %Z - Time zone abbreviation name or something similar information.
  *
  *    Weekday:
  *      %A - The full weekday name (``Sunday'')

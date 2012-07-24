@@ -18,6 +18,10 @@
 #include <errno.h>
 #include "atomic.h"
 
+#if defined(__native_client__) && defined(NACL_NEWLIB)
+# include "nacl/signal.h"
+#endif
+
 #ifdef NEED_RUBY_ATOMIC_EXCHANGE
 rb_atomic_t
 ruby_atomic_exchange(rb_atomic_t *ptr, rb_atomic_t val)
@@ -417,8 +421,6 @@ typedef RETSIGTYPE ruby_sigaction_t(int);
 #define SIGINFO_ARG
 #endif
 
-#ifdef POSIX_SIGNAL
-
 #ifdef USE_SIGALTSTACK
 /* alternate stack for SIGSEGV */
 void
@@ -437,6 +439,7 @@ rb_register_sigaltstack(rb_thread_t *th)
 }
 #endif /* USE_SIGALTSTACK */
 
+#ifdef POSIX_SIGNAL
 static sighandler_t
 ruby_signal(int signum, sighandler_t handler)
 {
@@ -564,7 +567,7 @@ sigbus(int sig SIGINFO_ARG)
  * and it's delivered as SIGBUS instaed of SIGSEGV to userland. It's crazy
  * wrong IMHO. but anyway we have to care it. Sigh.
  */
-#if defined __MACH__ && defined __APPLE__ && defined USE_SIGALTSTACK
+#if defined __APPLE__ && defined USE_SIGALTSTACK
     int ruby_stack_overflowed_p(const rb_thread_t *, const void *);
     NORETURN(void ruby_thread_stack_overflow(rb_thread_t *th));
     rb_thread_t *th = GET_THREAD();

@@ -20,7 +20,7 @@ require_relative 'deprecation'
 dir_config("openssl")
 dir_config("kerberos")
 
-message "=== OpenSSL for Ruby configurator ===\n"
+Logging::message "=== OpenSSL for Ruby configurator ===\n"
 
 ##
 # Adds -DOSSL_DEBUG for compilation and some more targets when GCC is used
@@ -30,12 +30,12 @@ if with_config("debug") or enable_config("debug")
   $defs.push("-DOSSL_DEBUG") unless $defs.include? "-DOSSL_DEBUG"
 end
 
-message "=== Checking for system dependent stuff... ===\n"
+Logging::message "=== Checking for system dependent stuff... ===\n"
 have_library("nsl", "t_open")
 have_library("socket", "socket")
 have_header("assert.h")
 
-message "=== Checking for required stuff... ===\n"
+Logging::message "=== Checking for required stuff... ===\n"
 if $mingw
   have_library("wsock32")
   have_library("gdi32")
@@ -48,21 +48,20 @@ unless result
   result &&= %w[crypto libeay32].any? {|lib| have_library(lib, "OpenSSL_add_all_digests")}
   result &&= %w[ssl ssleay32].any? {|lib| have_library(lib, "SSL_library_init")}
   unless result
-    message "=== Checking for required stuff failed. ===\n"
-    message "Makefile wasn't created. Fix the errors above.\n"
+    Logging::message "=== Checking for required stuff failed. ===\n"
+    Logging::message "Makefile wasn't created. Fix the errors above.\n"
     exit 1
   end
 end
 
 unless have_header("openssl/conf_api.h")
-  message "OpenSSL 0.9.6 or later required.\n"
-  exit 1
+  raise "OpenSSL 0.9.6 or later required."
 end
 unless OpenSSL.check_func("SSL_library_init()", "openssl/ssl.h")
-  abort "Ignore OpenSSL broken by Apple"
+  raise "Ignore OpenSSL broken by Apple.\nPlease use another openssl. (e.g. using `configure --with-openssl-dir=/path/to/openssl')"
 end
 
-message "=== Checking for OpenSSL features... ===\n"
+Logging::message "=== Checking for OpenSSL features... ===\n"
 have_func("ERR_peek_last_error")
 have_func("ASN1_put_eoc")
 have_func("BN_mod_add")
@@ -147,8 +146,8 @@ have_struct_member("EVP_CIPHER_CTX", "flags", "openssl/evp.h")
 have_struct_member("EVP_CIPHER_CTX", "engine", "openssl/evp.h")
 have_struct_member("X509_ATTRIBUTE", "single", "openssl/x509.h")
 
-message "=== Checking done. ===\n"
+Logging::message "=== Checking done. ===\n"
 
 create_header
 create_makefile("openssl")
-message "Done.\n"
+Logging::message "Done.\n"

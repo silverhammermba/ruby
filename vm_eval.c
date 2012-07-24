@@ -12,15 +12,15 @@
 **********************************************************************/
 
 static inline VALUE method_missing(VALUE obj, ID id, int argc, const VALUE *argv, int call_status);
-static inline VALUE rb_vm_set_finish_env(rb_thread_t * th);
 static inline VALUE vm_yield_with_cref(rb_thread_t *th, int argc, const VALUE *argv, const NODE *cref);
 static inline VALUE vm_yield(rb_thread_t *th, int argc, const VALUE *argv);
-static inline VALUE vm_backtrace(rb_thread_t *th, int lev);
-static int vm_backtrace_each(rb_thread_t *th, int lev, void (*init)(void *), rb_backtrace_iter_func *iter, void *arg);
 static NODE *vm_cref_push(rb_thread_t *th, VALUE klass, int noex, rb_block_t *blockptr);
 static VALUE vm_exec(rb_thread_t *th);
-static void vm_set_eval_stack(rb_thread_t * th, VALUE iseqval, const NODE *cref);
+static void vm_set_eval_stack(rb_thread_t * th, VALUE iseqval, const NODE *cref, rb_block_t *base_block);
 static int vm_collect_local_variables_in_heap(rb_thread_t *th, VALUE *dfp, VALUE ary);
+
+/* vm_backtrace.c */
+VALUE vm_backtrace_str_ary(rb_thread_t *th, int lev, int n);
 
 typedef enum call_type {
     CALL_PUBLIC,
@@ -49,11 +49,8 @@ vm_call0(rb_thread_t* th, VALUE recv, VALUE id, int argc, const VALUE *argv,
   again:
     switch (def->type) {
       case VM_METHOD_TYPE_ISEQ: {
-	rb_control_frame_t *reg_cfp;
+	rb_control_frame_t *reg_cfp = th->cfp;
 	int i;
-
-	rb_vm_set_finish_env(th);
-	reg_cfp = th->cfp;
 
 	CHECK_STACK_OVERFLOW(reg_cfp, argc + 1);
 
@@ -63,6 +60,7 @@ vm_call0(rb_thread_t* th, VALUE recv, VALUE id, int argc, const VALUE *argv,
 	}
 
 	vm_setup_method(th, reg_cfp, recv, argc, blockptr, 0 /* flag */, me);
+	th->cfp->flag |= VM_FRAME_FLAG_FINISH;
 	val = vm_exec(th);
 	break;
       }
@@ -73,7 +71,7 @@ vm_call0(rb_thread_t* th, VALUE recv, VALUE id, int argc, const VALUE *argv,
 	    rb_control_frame_t *reg_cfp = th->cfp;
 	    rb_control_frame_t *cfp =
 		vm_push_frame(th, 0, VM_FRAME_MAGIC_CFUNC,
-			      recv, (VALUE)blockptr, 0, reg_cfp->sp, 0, 1);
+			      recv, VM_ENVVAL_BLOCK_PTR(blockptr), 0, reg_cfp->sp, 1, me);
 
 	    cfp->me = me;
 	    val = call_cfunc(def->body.cfunc.func, recv, def->body.cfunc.argc, argc, argv);
@@ -105,7 +103,7 @@ vm_call0(rb_thread_t* th, VALUE recv, VALUE id, int argc, const VALUE *argv,
 	if (!klass || !(me = rb_method_entry(klass, id))) {
 	    return method_missing(recv, id, argc, argv, NOEX_SUPER);
 	}
-	RUBY_VM_CHECK_INTS();
+	RUBY_VM_CHECK_INTS(th);
 	if (!(def = me->def)) return Qnil;
 	goto again;
       }
@@ -140,7 +138,7 @@ vm_call0(rb_thread_t* th, VALUE recv, VALUE id, int argc, const VALUE *argv,
 	rb_bug("vm_call0: unsupported method type (%d)", def->type);
 	val = Qundef;
     }
-    RUBY_VM_CHECK_INTS();
+    RUBY_VM_CHECK_INTS(th);
     return val;
 }
 
@@ -895,7 +893,7 @@ rb_iterate(VALUE (* it_proc) (VALUE), VALUE data1,
 		blockptr->proc = 0;
 	    }
 	    else {
-		blockptr = GC_GUARDED_PTR_REF(th->cfp->lfp[0]);
+		blockptr = VM_CF_BLOCK_PTR(th->cfp);
 	    }
 	    th->passed_block = blockptr;
 	}
@@ -904,10 +902,10 @@ rb_iterate(VALUE (* it_proc) (VALUE), VALUE data1,
     else {
 	VALUE err = th->errinfo;
 	if (state == TAG_BREAK) {
-	    VALUE *escape_dfp = GET_THROWOBJ_CATCH_POINT(err);
-	    VALUE *cdfp = cfp->dfp;
+	    VALUE *escape_ep = GET_THROWOBJ_CATCH_POINT(err);
+	    VALUE *cep = cfp->ep;
 
-	    if (cdfp == escape_dfp) {
+	    if (cep == escape_ep) {
 		state = 0;
 		th->state = 0;
 		th->errinfo = Qnil;
@@ -931,10 +929,10 @@ rb_iterate(VALUE (* it_proc) (VALUE), VALUE data1,
 	    }
 	}
 	else if (state == TAG_RETRY) {
-	    VALUE *escape_dfp = GET_THROWOBJ_CATCH_POINT(err);
-	    VALUE *cdfp = cfp->dfp;
+	    VALUE *escape_ep = GET_THROWOBJ_CATCH_POINT(err);
+	    VALUE *cep = cfp->ep;
 
-	    if (cdfp == escape_dfp) {
+	    if (cep == escape_ep) {
 		state = 0;
 		th->state = 0;
 		th->errinfo = Qnil;
@@ -998,7 +996,7 @@ eval_string_with_cref(VALUE self, VALUE src, VALUE scope, NODE *cref, const char
     rb_binding_t *bind = 0;
     rb_thread_t *th = GET_THREAD();
     rb_env_t *env = NULL;
-    rb_block_t block;
+    rb_block_t block, *base_block;
     volatile int parse_in_eval;
     volatile int mild_compile_error;
 
@@ -1018,9 +1016,9 @@ eval_string_with_cref(VALUE self, VALUE src, VALUE scope, NODE *cref, const char
 	    if (rb_obj_is_kind_of(scope, rb_cBinding)) {
 		GetBindingPtr(scope, bind);
 		envval = bind->env;
-		if (strcmp(file, "(eval)") == 0 && bind->filename != Qnil) {
-		    file = RSTRING_PTR(bind->filename);
-		    line = bind->line_no;
+		if (strcmp(file, "(eval)") == 0 && bind->path != Qnil) {
+		    file = RSTRING_PTR(bind->path);
+		    line = bind->first_lineno;
 		}
 	    }
 	    else {
@@ -1029,16 +1027,16 @@ eval_string_with_cref(VALUE self, VALUE src, VALUE scope, NODE *cref, const char
 			 rb_obj_classname(scope));
 	    }
 	    GetEnvPtr(envval, env);
-	    th->base_block = &env->block;
+	    base_block = &env->block;
 	}
 	else {
 	    rb_control_frame_t *cfp = rb_vm_get_ruby_level_next_cfp(th, th->cfp);
 
 	    if (cfp != 0) {
 		block = *RUBY_VM_GET_BLOCK_PTR_IN_CFP(cfp);
-		th->base_block = &block;
-		th->base_block->self = self;
-		th->base_block->iseq = cfp->iseq;	/* TODO */
+		base_block = &block;
+		base_block->self = self;
+		base_block->iseq = cfp->iseq;	/* TODO */
 	    }
 	    else {
 		rb_raise(rb_eRuntimeError, "Can't eval on top of Fiber or Thread");
@@ -1048,12 +1046,11 @@ eval_string_with_cref(VALUE self, VALUE src, VALUE scope, NODE *cref, const char
 	/* make eval iseq */
 	th->parse_in_eval++;
 	th->mild_compile_error++;
-	iseqval = rb_iseq_compile(src, rb_str_new2(file), INT2FIX(line));
+	iseqval = rb_iseq_compile_on_base(src, rb_str_new2(file), INT2FIX(line), base_block);
 	th->mild_compile_error--;
 	th->parse_in_eval--;
 
-	vm_set_eval_stack(th, iseqval, cref);
-	th->base_block = 0;
+	vm_set_eval_stack(th, iseqval, cref, base_block);
 
 	if (0) {		/* for debug */
 	    VALUE disasm = rb_iseq_disasm(iseqval);
@@ -1085,7 +1082,7 @@ eval_string_with_cref(VALUE self, VALUE src, VALUE scope, NODE *cref, const char
 		errat = rb_get_backtrace(errinfo);
 		mesg = rb_attr_get(errinfo, id_mesg);
 		if (!NIL_P(errat) && RB_TYPE_P(errat, T_ARRAY) &&
-		    (bt2 = vm_backtrace(th, -2), RARRAY_LEN(bt2) > 0)) {
+		    (bt2 = vm_backtrace_str_ary(th, 0, 0), RARRAY_LEN(bt2) > 0)) {
 		    if (!NIL_P(mesg) && RB_TYPE_P(mesg, T_STRING) && !RSTRING_LEN(mesg)) {
 			if (OBJ_FROZEN(mesg)) {
 			    VALUE m = rb_str_cat(rb_str_dup(RARRAY_PTR(errat)[0]), ": ", 2);
@@ -1160,18 +1157,73 @@ rb_f_eval(int argc, VALUE *argv, VALUE self)
     return eval_string(self, src, scope, file, line);
 }
 
+/** @note This function name is not stable. */
+VALUE
+ruby_eval_string_from_file(const char *str, const char *filename) {
+    return eval_string(rb_vm_top_self(), rb_str_new2(str), Qnil, filename, 1);
+}
+
+struct eval_string_from_file_arg {
+    const char *str;
+    const char *filename;
+};
+static VALUE
+eval_string_from_file_helper(void *data) {
+    const struct eval_string_from_file_arg *const arg = (struct eval_string_from_file_arg*)data;
+    return eval_string(rb_vm_top_self(), rb_str_new2(arg->str), Qnil, arg->filename, 1);
+}
+
+VALUE
+ruby_eval_string_from_file_protect(const char *str, const char *filename, int *state) {
+    struct eval_string_from_file_arg arg = { str, filename };
+    return rb_protect((VALUE (*)(VALUE))eval_string_from_file_helper, (VALUE)&arg, state);
+}
+
+/**
+ * Evaluates the given string in an isolated binding.
+ *
+ * Here "isolated" means the binding does not inherit any other binding. This
+ * behaves same as the binding for required libraries.
+ *
+ * __FILE__ will be "(eval)", and __LINE__ starts from 1 in the evaluation.
+ *
+ * @param str Ruby code to evaluate.
+ * @return The evaluated result.
+ * @throw Exception   Raises an exception on error.
+ */
 VALUE
 rb_eval_string(const char *str)
 {
-    return eval_string(rb_vm_top_self(), rb_str_new2(str), Qnil, "(eval)", 1);
+    return ruby_eval_string_from_file(str, "eval");
 }
 
+/**
+ * Evaluates the given string in an isolated binding.
+ *
+ * __FILE__ will be "(eval)", and __LINE__ starts from 1 in the evaluation.
+ *
+ * @sa rb_eval_string
+ * @param str Ruby code to evaluate.
+ * @param state Being set to zero if succeeded. Nonzero if an error occurred.
+ * @return The evaluated result if succeeded, an undefined value if otherwise.
+ */
 VALUE
 rb_eval_string_protect(const char *str, int *state)
 {
     return rb_protect((VALUE (*)(VALUE))rb_eval_string, (VALUE)str, state);
 }
 
+/**
+ * Evaluates the given string under a module binding in an isolated binding.
+ * This is same as the binding for required libraries on "require('foo', true)".
+ *
+ * __FILE__ will be "(eval)", and __LINE__ starts from 1 in the evaluation.
+ *
+ * @sa rb_eval_string
+ * @param str Ruby code to evaluate.
+ * @param state Being set to zero if succeeded. Nonzero if an error occurred.
+ * @return The evaluated result if succeeded, an undefined value if otherwise.
+ */
 VALUE
 rb_eval_string_wrap(const char *str, int *state)
 {
@@ -1246,10 +1298,10 @@ yield_under(VALUE under, VALUE self, VALUE values)
     rb_block_t block, *blockptr;
     NODE *cref;
 
-    if ((blockptr = GC_GUARDED_PTR_REF(th->cfp->lfp[0])) != 0) {
+    if ((blockptr = VM_CF_BLOCK_PTR(th->cfp)) != 0) {
 	block = *blockptr;
 	block.self = self;
-	th->cfp->lfp[0] = GC_GUARDED_PTR(&block);
+	VM_CF_LEP(th->cfp)[0] = VM_ENVVAL_BLOCK_PTR(&block);
     }
     cref = vm_cref_push(th, under, NOEX_PUBLIC, blockptr);
     cref->flags |= NODE_FL_CREF_PUSHED_BY_EVAL;
@@ -1577,107 +1629,6 @@ rb_catch_obj(VALUE tag, VALUE (*func)(), VALUE data)
 
 /*
  *  call-seq:
- *     caller(start=1)    -> array or nil
- *
- *  Returns the current execution stack---an array containing strings in
- *  the form ``<em>file:line</em>'' or ``<em>file:line: in
- *  `method'</em>''. The optional _start_ parameter
- *  determines the number of initial stack entries to omit from the
- *  result.
- *
- *  Returns +nil+ if _start_ is greater than the size of
- *  current execution stack.
- *
- *     def a(skip)
- *       caller(skip)
- *     end
- *     def b(skip)
- *       a(skip)
- *     end
- *     def c(skip)
- *       b(skip)
- *     end
- *     c(0)   #=> ["prog:2:in `a'", "prog:5:in `b'", "prog:8:in `c'", "prog:10:in `<main>'"]
- *     c(1)   #=> ["prog:5:in `b'", "prog:8:in `c'", "prog:11:in `<main>'"]
- *     c(2)   #=> ["prog:8:in `c'", "prog:12:in `<main>'"]
- *     c(3)   #=> ["prog:13:in `<main>'"]
- *     c(4)   #=> []
- *     c(5)   #=> nil
- */
-
-static VALUE
-rb_f_caller(int argc, VALUE *argv)
-{
-    VALUE level;
-    int lev;
-
-    rb_scan_args(argc, argv, "01", &level);
-
-    if (NIL_P(level))
-	lev = 1;
-    else
-	lev = NUM2INT(level);
-    if (lev < 0)
-	rb_raise(rb_eArgError, "negative level (%d)", lev);
-
-    return vm_backtrace(GET_THREAD(), lev);
-}
-
-static int
-print_backtrace(void *arg, VALUE file, int line, VALUE method)
-{
-    FILE *fp = arg;
-    const char *filename = NIL_P(file) ? "ruby" : RSTRING_PTR(file);
-    if (NIL_P(method)) {
-	fprintf(fp, "\tfrom %s:%d:in unknown method\n",
-		filename, line);
-    }
-    else {
-	fprintf(fp, "\tfrom %s:%d:in `%s'\n",
-		filename, line, RSTRING_PTR(method));
-    }
-    return FALSE;
-}
-
-void
-rb_backtrace(void)
-{
-    vm_backtrace_each(GET_THREAD(), -1, NULL, print_backtrace, stderr);
-}
-
-VALUE
-rb_make_backtrace(void)
-{
-    return vm_backtrace(GET_THREAD(), -1);
-}
-
-VALUE
-rb_thread_backtrace(VALUE thval)
-{
-    rb_thread_t *th;
-    GetThreadPtr(thval, th);
-
-    switch (th->status) {
-      case THREAD_RUNNABLE:
-      case THREAD_STOPPED:
-      case THREAD_STOPPED_FOREVER:
-	break;
-      case THREAD_TO_KILL:
-      case THREAD_KILLED:
-	return Qnil;
-    }
-
-    return vm_backtrace(th, 0);
-}
-
-int
-rb_backtrace_each(rb_backtrace_iter_func *iter, void *arg)
-{
-    return vm_backtrace_each(GET_THREAD(), -1, NULL, iter, arg);
-}
-
-/*
- *  call-seq:
  *     local_variables    -> array
  *
  *  Returns the names of the current local variables.
@@ -1711,15 +1662,15 @@ rb_f_local_variables(void)
 		}
 	    }
 	}
-	if (cfp->lfp != cfp->dfp) {
+	if (!VM_EP_LEP_P(cfp->ep)) {
 	    /* block */
-	    VALUE *dfp = GC_GUARDED_PTR_REF(cfp->dfp[0]);
+	    VALUE *ep = VM_CF_PREV_EP(cfp);
 
-	    if (vm_collect_local_variables_in_heap(th, dfp, ary)) {
+	    if (vm_collect_local_variables_in_heap(th, ep, ary)) {
 		break;
 	    }
 	    else {
-		while (cfp->dfp != dfp) {
+		while (cfp->ep != ep) {
 		    cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 		}
 	    }
@@ -1760,9 +1711,7 @@ rb_f_block_given_p(void)
     rb_control_frame_t *cfp = th->cfp;
     cfp = vm_get_ruby_level_caller_cfp(th, RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp));
 
-    if (cfp != 0 &&
-	(cfp->lfp[0] & 0x02) == 0 &&
-	GC_GUARDED_PTR_REF(cfp->lfp[0])) {
+    if (cfp != 0 && VM_CF_BLOCK_PTR(cfp)) {
 	return Qtrue;
     }
     else {
@@ -1776,7 +1725,7 @@ rb_current_realfilepath(void)
     rb_thread_t *th = GET_THREAD();
     rb_control_frame_t *cfp = th->cfp;
     cfp = vm_get_ruby_level_caller_cfp(th, RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp));
-    if (cfp != 0) return cfp->iseq->filepath;
+    if (cfp != 0) return cfp->iseq->location.absolute_path;
     return Qnil;
 }
 
@@ -1812,7 +1761,4 @@ Init_vm_eval(void)
     rb_define_method(rb_cModule, "class_exec", rb_mod_module_exec, -1);
     rb_define_method(rb_cModule, "module_eval", rb_mod_module_eval, -1);
     rb_define_method(rb_cModule, "class_eval", rb_mod_module_eval, -1);
-
-    rb_define_global_function("caller", rb_f_caller, -1);
 }
-

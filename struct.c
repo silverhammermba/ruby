@@ -64,18 +64,9 @@ rb_struct_members(VALUE s)
 static VALUE
 rb_struct_s_members_m(VALUE klass)
 {
-    VALUE members, ary;
-    VALUE *p, *pend;
+    VALUE members = rb_struct_s_members(klass);
 
-    members = rb_struct_s_members(klass);
-    ary = rb_ary_new2(RARRAY_LEN(members));
-    p = RARRAY_PTR(members); pend = p + RARRAY_LEN(members);
-    while (p < pend) {
-	rb_ary_push(ary, *p);
-	p++;
-    }
-
-    return ary;
+    return rb_ary_dup(members);
 }
 
 /*
@@ -615,11 +606,7 @@ rb_struct_to_h(VALUE s)
 VALUE
 rb_struct_init_copy(VALUE copy, VALUE s)
 {
-    if (copy == s) return copy;
-    rb_check_frozen(copy);
-    if (!rb_obj_is_instance_of(s, rb_obj_class(copy))) {
-	rb_raise(rb_eTypeError, "wrong argument class");
-    }
+    if (!OBJ_INIT_COPY(copy, s)) return copy;
     if (RSTRUCT_LEN(copy) != RSTRUCT_LEN(s)) {
 	rb_raise(rb_eTypeError, "struct size mismatch");
     }

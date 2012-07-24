@@ -130,7 +130,6 @@ static char **readline_attempted_completion_function(const char *text,
 
 #if defined HAVE_RL_GETC_FUNCTION
 static VALUE readline_instream;
-static ID id_getbyte;
 
 #ifndef HAVE_RL_GETC
 #define rl_getc(f) EOF
@@ -173,9 +172,21 @@ readline_getc(FILE *input)
         }
     }
 #endif
-    c = rb_funcall(readline_instream, id_getbyte, 0, 0);
+    c = rb_io_getbyte(readline_instream);
     if (NIL_P(c)) return EOF;
-    return NUM2CHR(c);
+#ifdef ESC
+    if (c == INT2FIX(ESC) &&
+	RL_ISSTATE(RL_STATE_ISEARCH) && /* isn't needed in other states? */
+	rb_io_read_pending(ifp)) {
+	int meta = 0;
+	c = rb_io_getbyte(readline_instream);
+	if (FIXNUM_P(c) && isascii(FIX2INT(c))) meta = 1;
+	rb_io_ungetbyte(readline_instream, c);
+	if (meta) rl_execute_next(ESC);
+	return ESC;
+    }
+#endif
+    return FIX2INT(c);
 }
 #elif defined HAVE_RL_EVENT_HOOK
 #define BUSY_WAIT 0
@@ -1067,7 +1078,7 @@ readline_s_get_completion_append_character(VALUE self)
  *
  * Sets the basic list of characters that signal a break between words
  * for the completer routine. The default is the characters which
- * break words for completion in Bash: "\t\n\"\\'`@$><=;|&{(".
+ * break words for completion in Bash: " \t\n\"\\'`@$><=;|&{(".
  *
  * Raises NotImplementedError if the using readline library does not support.
  *
@@ -1237,6 +1248,7 @@ readline_s_get_special_prefixes(VALUE self)
 {
     VALUE str;
     rb_secure(4);
+    if (rl_special_prefixes == NULL) return Qnil;
     str = rb_ivar_get(mReadline, id_special_prefixes);
     if (!NIL_P(str)) {
 	str = rb_str_dup_frozen(str);
@@ -1703,7 +1715,6 @@ Init_readline()
     /* and using_history() call rl_initialize(). */
     /* This assignment should be placed before using_history() */
     rl_getc_function = readline_getc;
-    id_getbyte = rb_intern_const("getbyte");
 #elif defined HAVE_RL_EVENT_HOOK
     rl_event_hook = readline_event;
 #endif
@@ -1873,12 +1884,6 @@ Init_readline()
     rl_attempted_completion_function = readline_attempted_completion_function;
 #if defined(HAVE_RL_PRE_INPUT_HOOK)
     rl_pre_input_hook = (Function *)readline_pre_input_hook;
-#endif
-#ifdef HAVE_RL_CATCH_SIGNALS
-    rl_catch_signals = 0;
-#endif
-#ifdef HAVE_RL_CATCH_SIGWINCH
-    rl_catch_sigwinch = 0;
 #endif
 #ifdef HAVE_RL_CLEAR_SIGNALS
     rl_clear_signals();

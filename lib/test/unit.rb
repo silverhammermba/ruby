@@ -65,7 +65,7 @@ module Test
         opts.version = MiniTest::Unit::VERSION
 
         options[:retry] = true
-        options[:job_status] ||= :replace if @tty
+        options[:job_status] = nil
 
         opts.on '-h', '--help', 'Display this help.' do
           puts opts
@@ -122,6 +122,12 @@ module Test
 
         opts.on '--show-skip', 'Show skipped tests' do
           options[:hide_skip] = false
+        end
+
+        opts.on '--color[=WHEN]',
+                [:always, :never, :auto],
+                "colorize the output.  WHEN defaults to 'always'", "or can be 'never' or 'auto'." do |c|
+          options[:color] = c || :always
         end
       end
 
@@ -304,10 +310,9 @@ module Test
         end
 
         def close
-          begin
-            @io.close unless @io.closed?
-          rescue IOError; end
+          @io.close unless @io.closed?
           self
+        rescue IOError
         end
 
         def quit
@@ -315,6 +320,11 @@ module Test
           @quit_called = true
           @io.puts "quit"
           @io.close
+        end
+
+        def kill
+          Process.kill(:KILL, @pid)
+        rescue Errno::ESRCH
         end
 
         def died(*additional)
@@ -376,11 +386,11 @@ module Test
       end
 
       def terminal_width
-        unless @terminal_width
+        unless @terminal_width ||= nil
           begin
             require 'io/console'
             width = $stdout.winsize[1]
-          rescue LoadError, NoMethodError, Errno::ENOTTY
+          rescue LoadError, NoMethodError, Errno::ENOTTY, Errno::EBADF
             width = ENV["COLUMNS"].to_i.nonzero? || 80
           end
           width -= 1 if /mswin|mingw/ =~ RUBY_PLATFORM
@@ -390,13 +400,21 @@ module Test
       end
 
       def del_status_line
-        return unless @tty
+        @status_line_size ||= 0
+        unless @options[:job_status] == :replace
+          $stdout.puts
+          return
+        end
         print "\r"+" "*@status_line_size+"\r"
         $stdout.flush
+        @status_line_size = 0
       end
 
       def put_status(line)
-        return print(line) unless @tty
+        unless @options[:job_status] == :replace
+          print(line)
+          return
+        end
         @status_line_size ||= 0
         del_status_line
         $stdout.flush
@@ -407,7 +425,10 @@ module Test
       end
 
       def add_status(line)
-        return print(line) unless @tty
+        unless @options[:job_status] == :replace
+          print(line)
+          return
+        end
         @status_line_size ||= 0
         line = line[0...(terminal_width-@status_line_size)]
         print line
@@ -417,13 +438,9 @@ module Test
 
       def jobs_status
         return unless @options[:job_status]
-        puts "" unless @options[:verbose] or @tty
+        puts "" unless @options[:verbose] or @options[:job_status] == :replace
         status_line = @workers.map(&:to_s).join(" ")
-        if @options[:job_status] == :replace and @tty
-          put_status status_line
-        else
-          puts status_line
-        end
+        update_status(status_line) or (puts; nil)
       end
 
       def del_jobs_status
@@ -439,189 +456,183 @@ module Test
         @ios = @workers.map(&:io)
       end
 
+      def launch_worker
+        begin
+          worker = Worker.launch(@options[:ruby],@args)
+        rescue => e
+          abort "ERROR: Failed to launch job process - #{e.class}: #{e.message}"
+        end
+        worker.hook(:dead) do |w,info|
+          after_worker_quit w
+          after_worker_down w, *info if !info.empty? && !worker.quit_called
+        end
+        @workers << worker
+        @ios << worker.io
+        @workers_hash[worker.io] = worker
+        worker
+      end
+
+      def delete_worker(worker)
+        @workers_hash.delete worker.io
+        @workers.delete worker
+        @ios.delete worker.io
+      end
+
+      def quit_workers
+        return if @workers.empty?
+        @workers.reject! do |worker|
+          begin
+            timeout(1) do
+              worker.quit
+            end
+          rescue Errno::EPIPE
+          rescue Timeout::Error
+          end
+          worker.close
+        end
+
+        return if @workers.empty?
+        begin
+          timeout(0.2 * @workers.size) do
+            Process.waitall
+          end
+        rescue Timeout::Error
+          @workers.each do |worker|
+            worker.kill
+          end
+          @worker.clear
+        end
+      end
+
+      def start_watchdog
+        Thread.new do
+          while stat = Process.wait2
+            break if @interrupt # Break when interrupt
+            pid, stat = stat
+            w = (@workers + @dead_workers).find{|x| pid == x.pid }
+            next unless w
+            w = w.dup
+            if w.status != :quit && !w.quit_called?
+              # Worker down
+              w.died(nil, !stat.signaled? && stat.exitstatus)
+            end
+          end
+        end
+      end
+
+      def deal(io, type, result, rep, shutting_down = false)
+        worker = @workers_hash[io]
+        case worker.read
+        when /^okay$/
+          worker.status = :running
+          jobs_status
+        when /^ready(!)?$/
+          bang = $1
+          worker.status = :ready
+
+          return nil unless task = @tasks.shift
+          if @options[:separate] and not bang
+            worker.quit
+            worker = add_worker
+          end
+          worker.run(task, type)
+          @test_count += 1
+
+          jobs_status
+        when /^done (.+?)$/
+          r = Marshal.load($1.unpack("m")[0])
+          result << r[0..1] unless r[0..1] == [nil,nil]
+          rep    << {file: worker.real_file, report: r[2], result: r[3], testcase: r[5]}
+          $:.push(*r[4]).uniq!
+          return true
+        when /^p (.+?)$/
+          del_jobs_status
+          print $1.unpack("m")[0]
+          jobs_status if @options[:job_status] == :replace
+        when /^after (.+?)$/
+          @warnings << Marshal.load($1.unpack("m")[0])
+        when /^bye (.+?)$/
+          after_worker_down worker, Marshal.load($1.unpack("m")[0])
+        when /^bye$/, nil
+          if shutting_down || worker.quit_called
+            after_worker_quit worker
+          else
+            after_worker_down worker
+          end
+        end
+        return false
+      end
+
       def _run_parallel suites, type, result
         if @options[:parallel] < 1
           warn "Error: parameter of -j option should be greater than 0."
           return
         end
 
+        # Require needed things for parallel running
+        require 'thread'
+        require 'timeout'
+        @tasks = @files.dup # Array of filenames.
+        @need_quit = false
+        @dead_workers = []  # Array of dead workers.
+        @warnings = []
+        @total_tests = @tasks.size.to_s(10)
+        rep = [] # FIXME: more good naming
+
+        @workers      = [] # Array of workers.
+        @workers_hash = {} # out-IO => worker
+        @ios          = [] # Array of worker IOs
         begin
-          # Require needed things for parallel running
-          require 'thread'
-          require 'timeout'
-          @tasks = @files.dup # Array of filenames.
-          @need_quit = false
-          @dead_workers = []  # Array of dead workers.
-          @warnings = []
-          shutting_down = false
-          rep = [] # FIXME: more good naming
-
-          # Array of workers.
-          launch_worker = Proc.new {
-            begin
-              worker = Worker.launch(@options[:ruby],@args)
-            rescue => e
-              warn "ERROR: Failed to launch job process - #{e.class}: #{e.message}"
-              exit 1
-            end
-            worker.hook(:dead) do |w,info|
-              after_worker_quit w
-              after_worker_down w, *info if !info.empty? && !worker.quit_called
-            end
-            worker
-          }
-          @workers = @options[:parallel].times.map(&launch_worker)
-
           # Thread: watchdog
-          watchdog = Thread.new do
-            while stat = Process.wait2
-              break if @interrupt # Break when interrupt
-              pid, stat = stat
-              w = (@workers + @dead_workers).find{|x| pid == x.pid }
-              next unless w
-              w = w.dup
-              if w.status != :quit && !w.quit_called?
-                # Worker down
-                w.died(nil, !stat.signaled? && stat.exitstatus)
-              end
-            end
-          end
+          watchdog = start_watchdog
 
-          @workers_hash = Hash[@workers.map {|w| [w.io,w] }] # out-IO => worker
-          @ios = @workers.map{|w| w.io } # Array of worker IOs
+          @options[:parallel].times {launch_worker}
 
           while _io = IO.select(@ios)[0]
-            break unless _io.each do |io|
-              break if @need_quit
-              worker = @workers_hash[io]
-              case worker.read
-              when /^okay$/
-                worker.status = :running
-                jobs_status
-              when /^ready(!?)$/
-                bang = $1
-                worker.status = :ready
-                if @tasks.empty?
-                  unless @workers.find{|x| [:running, :prepare].include? x.status}
-                    break
-                  end
-                else
-                  if @options[:separate] && bang.empty?
-                    @workers_hash.delete worker.io
-                    @workers.delete worker
-                    @ios.delete worker.io
-                    new_worker = launch_worker.call()
-                    worker.quit
-                    @workers << new_worker
-                    @ios << new_worker.io
-                    @workers_hash[new_worker.io] = new_worker
-                    worker = new_worker
-                  end
-                  worker.run(@tasks.shift, type)
-                end
-
-                jobs_status
-              when /^done (.+?)$/
-                r = Marshal.load($1.unpack("m")[0])
-                result << r[0..1] unless r[0..1] == [nil,nil]
-                rep    << {file: worker.real_file,
-                           report: r[2], result: r[3], testcase: r[5]}
-                $:.push(*r[4]).uniq!
-              when /^p (.+?)$/
-                del_jobs_status
-                print $1.unpack("m")[0]
-                jobs_status if @options[:job_status] == :replace
-              when /^after (.+?)$/
-                @warnings << Marshal.load($1.unpack("m")[0])
-              when /^bye (.+?)$/
-                after_worker_down worker, Marshal.load($1.unpack("m")[0])
-              when /^bye$/
-                if shutting_down || worker.quit_called
-                  after_worker_quit worker
-                else
-                  after_worker_down worker
-                end
-              end
-              break if @need_quit
+            break if _io.any? do |io|
+              @need_quit or
+                (deal(io, type, result, rep).nil? and
+                 !@workers.any? {|x| [:running, :prepare].include? x.status})
             end
           end
         rescue Interrupt => e
           @interrupt = e
           return result
         ensure
-          shutting_down = true
-
           watchdog.kill if watchdog
           if @interrupt
             @ios.select!{|x| @workers_hash[x].status == :running }
             while !@ios.empty? && (__io = IO.select(@ios,[],[],10))
-                _io = __io[0]
-                _io.each do |io|
-                  worker = @workers_hash[io]
-                  case worker.read
-                  when /^done (.+?)$/
-                    r = Marshal.load($1.unpack("m")[0])
-                    result << r[0..1] unless r[0..1] == [nil,nil]
-                    rep    << {file: worker.real_file,
-                               report: r[2], result: r[3], testcase: r[5]}
-                    $:.push(*r[4]).uniq!
-                    @ios.delete(io)
-                  end
-                end
+              __io[0].reject! {|io| deal(io, type, result, rep, true)}
             end
           end
 
-          if @workers
-            @workers.each do |worker|
-              begin
-                timeout(1) do
-                  worker.quit
-                end
-              rescue Errno::EPIPE
-              rescue Timeout::Error
-              end
-              worker.close
-            end
+          quit_workers
 
-            begin
-              timeout(0.2*@workers.size) do
-                Process.waitall
-              end
-            rescue Timeout::Error
-              @workers.each do |worker|
-                begin
-                  Process.kill(:KILL,worker.pid)
-                rescue Errno::ESRCH; end
-              end
-            end
-          end
-
-          if !(@interrupt || !@options[:retry] || @need_quit) && @workers
+          unless @interrupt || !@options[:retry] || @need_quit
             @options[:parallel] = false
             suites, rep = rep.partition {|r| r[:testcase] && r[:file] && !r[:report].empty?}
             suites.map {|r| r[:file]}.uniq.each {|file| require file}
             suites.map! {|r| eval("::"+r[:testcase])}
-            puts ""
-            puts "Retrying..."
-            puts ""
-            _run_suites(suites, type)
+            del_status_line or puts
+            unless suites.empty?
+              puts "Retrying..."
+              _run_suites(suites, type)
+            end
           end
           unless rep.empty?
             rep.each do |r|
-              report.push(*r[:report])
+              r[:report].each do |f|
+                report.push(puke(*f)) if f
+              end
             end
             @errors   += rep.map{|x| x[:result][0] }.inject(:+)
             @failures += rep.map{|x| x[:result][1] }.inject(:+)
             @skips    += rep.map{|x| x[:result][2] }.inject(:+)
           end
-          if @warnings
+          unless @warnings.empty?
             warn ""
-            ary = []
-            @warnings.reject! do |w|
-              r = ary.include?(w[1].message)
-              ary << w[1].message
-              r
-            end
+            @warnings.uniq! {|w| w[1].message}
             @warnings.each do |w|
               warn "#{w[0]}: #{w[1].message} (#{w[1].class})"
             end
@@ -660,12 +671,31 @@ module Test
       end
 
       def _prepare_run(suites, type)
-        if @tty and !@verbose
+        options[:job_status] ||= :replace if @tty && !@verbose
+        case options[:color]
+        when :always
+          color = true
+        when :auto, nil
+          color = @options[:job_status] == :replace && /dumb/ !~ ENV["TERM"]
+        else
+          color = false
+        end
+        if color
+          # dircolors-like style
+          colors = (colors = ENV['TEST_COLORS']) ? Hash[colors.scan(/(\w+)=([^:]*)/)] : {}
+          @passed_color = "\e[#{colors["pass"] || "32"}m"
+          @failed_color = "\e[#{colors["fail"] || "31"}m"
+          @skipped_color = "\e[#{colors["skip"] || "33"}m"
+          @reset_color = "\e[m"
+        else
+          @passed_color = @failed_color = @skipped_color = @reset_color = ""
+        end
+        if color or @options[:job_status] == :replace
           @verbose = !options[:parallel]
           @output = StatusLineOutput.new(self)
         end
         if /\A\/(.*)\/\z/ =~ (filter = options[:filter])
-          options[:filter] = filter = Regexp.new($1)
+          filter = Regexp.new($1)
         end
         type = "#{type}_methods"
         total = if filter
@@ -678,7 +708,13 @@ module Test
       end
 
       def new_test(s)
-        put_status("[#{(@test_count += 1).to_s(10).rjust(@total_tests.size)}/#{@total_tests}] #{s}")
+        @test_count += 1
+        update_status(s)
+      end
+
+      def update_status(s)
+        count = @test_count.to_s(10).rjust(@total_tests.size)
+        put_status("#{@passed_color}[#{count}/#{@total_tests}]#{@reset_color} #{s}")
       end
 
       def _print(s); $stdout.print(s); end
@@ -688,10 +724,15 @@ module Test
         sep = "\n"
         @report_count ||= 0
         report.each do |msg|
-          next if @options[:hide_skip] and msg.start_with? "Skipped:"
+          if msg.start_with? "Skipped:"
+            next if @options[:hide_skip]
+            color = @skipped_color
+          else
+            color = @failed_color
+          end
           msg = msg.split(/$/, 2)
           $stdout.printf("%s%s%3d) %s%s%s\n",
-                         sep, @failed_color, @report_count += 1,
+                         sep, color, @report_count += 1,
                          msg[0], @reset_color, msg[1])
           sep = nil
         end
@@ -715,12 +756,6 @@ module Test
       def initialize # :nodoc:
         super
         @tty = $stdout.tty?
-        if @tty and /mswin|mingw/ !~ RUBY_PLATFORM and /dumb/ !~ ENV["TERM"]
-          @failed_color = "\e[#{ENV['FAILED_COLOR']||'31'}m"
-          @reset_color = "\e[m"
-        else
-          @failed_color = @reset_color = ""
-        end
       end
 
       def status(*args)
@@ -747,7 +782,7 @@ module Test
           runner.new_test($1)
         when /\A(.* s) = \z/
           runner.add_status(" = "+$1.chomp)
-        when /\A\.\z/
+        when /\A\.+\z/
           runner.succeed
         when /\A[EFS]\z/
           runner.failed(s)

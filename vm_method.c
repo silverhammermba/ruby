@@ -6,7 +6,10 @@
 #define CACHE_MASK 0x7ff
 #define EXPR1(c,m) ((((c)>>3)^(m))&CACHE_MASK)
 
+#define NOEX_NOREDEF 0
+#ifndef NOEX_NOREDEF
 #define NOEX_NOREDEF NOEX_RESPONDS
+#endif
 
 static void rb_vm_check_redefinition_opt_method(const rb_method_entry_t *me, VALUE klass);
 
@@ -166,6 +169,9 @@ rb_method_entry_make(VALUE klass, ID mid, rb_method_type_t type,
 		     rb_method_definition_t *def, rb_method_flag_t noex)
 {
     rb_method_entry_t *me;
+#if NOEX_NOREDEF
+    VALUE rklass;
+#endif
     st_table *mtbl;
     st_data_t data;
 
@@ -191,6 +197,10 @@ rb_method_entry_make(VALUE klass, ID mid, rb_method_type_t type,
     }
 
     rb_check_frozen(klass);
+#if NOEX_NOREDEF
+    rklass = klass;
+#endif
+    klass = RCLASS_ORIGIN(klass);
     mtbl = RCLASS_M_TBL(klass);
 
     /* check re-definition */
@@ -199,9 +209,10 @@ rb_method_entry_make(VALUE klass, ID mid, rb_method_type_t type,
 	rb_method_definition_t *old_def = old_me->def;
 
 	if (rb_method_definition_eq(old_def, def)) return old_me;
-#if 0
+#if NOEX_NOREDEF
 	if (old_me->flag & NOEX_NOREDEF) {
-	    rb_raise(rb_eTypeError, "cannot redefine %s#%s", rb_class2name(klass), rb_id2name(mid));
+	    rb_raise(rb_eTypeError, "cannot redefine %"PRIsVALUE"#%"PRIsVALUE,
+		     rb_class_name(rklass), rb_id2str(mid));
 	}
 #endif
 	rb_vm_check_redefinition_opt_method(old_me, klass);
@@ -224,9 +235,9 @@ rb_method_entry_make(VALUE klass, ID mid, rb_method_type_t type,
 	      default:
 		break;
 	    }
-	    if (iseq && !NIL_P(iseq->filename)) {
+	    if (iseq && !NIL_P(iseq->location.path)) {
 		int line = iseq->line_info_table ? rb_iseq_first_lineno(iseq) : 0;
-		rb_compile_warning(RSTRING_PTR(iseq->filename), line,
+		rb_compile_warning(RSTRING_PTR(iseq->location.path), line,
 				   "previous definition of %s was here",
 				   rb_id2name(old_def->original_id));
 	    }
@@ -307,7 +318,7 @@ rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_
 	th = GET_THREAD();
 	cfp = rb_vm_get_ruby_level_next_cfp(th, th->cfp);
 	if (cfp && (line = rb_vm_get_sourceline(cfp))) {
-	    VALUE location = rb_ary_new3(2, cfp->iseq->filename, INT2FIX(line));
+	    VALUE location = rb_ary_new3(2, cfp->iseq->location.path, INT2FIX(line));
 	    def->body.attr.location = rb_ary_freeze(location);
 	}
 	break;
@@ -376,15 +387,13 @@ static rb_method_entry_t*
 search_method(VALUE klass, ID id)
 {
     st_data_t body;
-    if (!klass) {
-	return 0;
-    }
 
-    while (!st_lookup(RCLASS_M_TBL(klass), id, &body)) {
-	klass = RCLASS_SUPER(klass);
-	if (!klass) {
-	    return 0;
+    for (body = 0; klass; klass = RCLASS_SUPER(klass)) {
+	st_table *m_tbl = RCLASS_M_TBL(klass);
+	if (!m_tbl) {
+	    m_tbl = RCLASS_M_TBL(RCLASS_ORIGIN(RBASIC(klass)->klass));
 	}
+	if (st_lookup(m_tbl, id, &body)) break;
     }
 
     return (rb_method_entry_t *)body;
@@ -441,6 +450,7 @@ remove_method(VALUE klass, ID mid)
     st_data_t key, data;
     rb_method_entry_t *me = 0;
 
+    klass = RCLASS_ORIGIN(klass);
     if (klass == rb_cObject) {
 	rb_secure(4);
     }
@@ -1401,4 +1411,3 @@ Init_eval_method(void)
 	REPLICATE_METHOD(rb_eException, respond_to_missing, NOEX_PUBLIC);
     }
 }
-

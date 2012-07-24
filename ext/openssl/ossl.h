@@ -30,6 +30,7 @@ extern "C" {
 #endif
 #include <ruby.h>
 #include <ruby/io.h>
+#include <ruby/thread.h>
 
 /*
  * Check the OpenSSL version
@@ -73,6 +74,11 @@ extern "C" {
 #  define OSSL_OCSP_ENABLED
 #  include <openssl/ocsp.h>
 #endif
+
+/* OpenSSL requires passwords for PEM-encoded files to be at least four
+ * characters long
+ */
+#define OSSL_MIN_PWD_LEN 4
 
 /*
  * Common Module

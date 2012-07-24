@@ -25,7 +25,7 @@ module Test
       end
 
       def _run_suite(suite, type)
-        r = report.dup
+        @partial_report = []
         orig_testout = MiniTest::Unit.output
         i,o = IO.pipe
 
@@ -35,7 +35,7 @@ module Test
         th = Thread.new do
           begin
             while buf = (self.verbose ? i.gets : i.read(5))
-              @stdout.puts "p #{[buf].pack("m0")}"
+              _report "p", buf
             end
           rescue IOError
           rescue Errno::EPIPE
@@ -63,13 +63,14 @@ module Test
         end
         i.close
 
-        result << (report - r)
+        result << @partial_report
+        @partial_report = nil
         result << [@errors-e,@failures-f,@skips-s]
         result << ($: - @old_loadpath)
         result << suite.name
 
         begin
-          @stdout.puts "done #{[Marshal.dump(result)].pack("m0")}"
+          _report "done", Marshal.dump(result)
         rescue Errno::EPIPE; end
         return result
       ensure
@@ -97,14 +98,14 @@ module Test
           exit 2 unless @stdout && @stdin
 
           @stdout.sync = true
-          @stdout.puts "ready!"
+          _report "ready!"
           while buf = @stdin.gets
             case buf.chomp
             when /^loadpath (.+?)$/
               @old_loadpath = $:.dup
               $:.push(*Marshal.load($1.unpack("m")[0].force_encoding("ASCII-8BIT"))).uniq!
             when /^run (.+?) (.+?)$/
-              @stdout.puts "okay"
+              _report "okay"
 
               @options = @opts.dup
               suites = MiniTest::Unit::TestCase.test_suites
@@ -112,23 +113,23 @@ module Test
               begin
                 require $1
               rescue LoadError
-                @stdout.puts "after #{[Marshal.dump([$1, $!])].pack("m0")}"
-                @stdout.puts "ready"
+                _report "after", Marshal.dump([$1, $!])
+                _report "ready"
                 next
               end
               _run_suites MiniTest::Unit::TestCase.test_suites-suites, $2.to_sym
 
               if @need_exit
                 begin
-                  @stdout.puts "bye"
+                  _report "bye"
                 rescue Errno::EPIPE; end
                 exit
               else
-                @stdout.puts "ready"
+                _report "ready"
               end
             when /^quit$/
               begin
-                @stdout.puts "bye"
+                _report "bye"
               rescue Errno::EPIPE; end
               exit
             end
@@ -136,13 +137,23 @@ module Test
         rescue Errno::EPIPE
         rescue Exception => e
           begin
-            @stdout.puts "bye #{[Marshal.dump(e)].pack("m0")}" if @stdout
+            _report "bye", Marshal.dump(e)
           rescue Errno::EPIPE;end
           exit
         ensure
           @stdin.close if @stdin
           @stdout.close if @stdout
         end
+      end
+
+      def _report(res, *args)
+        res = "#{res} #{args.pack("m0")}" unless args.empty?
+        @stdout.puts(res)
+      end
+
+      def puke(klass, meth, e)
+        @partial_report << [klass.name, meth, e]
+        super
       end
     end
   end
@@ -152,11 +163,16 @@ if $0 == __FILE__
   module Test
     module Unit
       class TestCase < MiniTest::Unit::TestCase
+        undef on_parallel_worker?
         def on_parallel_worker?
           true
         end
       end
     end
+  end
+  require 'rubygems'
+  class Gem::TestCase < MiniTest::Unit::TestCase
+    @@project_dir = File.expand_path('../../../..', __FILE__)
   end
 
   Test::Unit::Worker.new.run(ARGV)

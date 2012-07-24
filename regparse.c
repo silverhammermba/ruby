@@ -264,8 +264,8 @@ strdup_with_null(OnigEncoding enc, UChar* s, UChar* end)
 #define PEND_VALUE   0
 
 #ifdef __GNUC__
-/* get rid of Wunused-but-set-variable */
-#define PFETCH_READY  UChar* pfetch_prev = pfetch_prev
+/* get rid of Wunused-but-set-variable and Wuninitialized */
+#define PFETCH_READY  UChar* pfetch_prev = NULL; (void)pfetch_prev
 #else
 #define PFETCH_READY  UChar* pfetch_prev
 #endif
@@ -589,7 +589,7 @@ onig_number_of_names(regex_t* reg)
   NameTable* t = (NameTable* )reg->name_table;
 
   if (IS_NOT_NULL(t))
-    return t->num_entries;
+    return (int)t->num_entries;
   else
     return 0;
 }
@@ -5684,10 +5684,9 @@ countbits(unsigned int bits)
 static int
 is_onechar_cclass(CClassNode* cc, OnigCodePoint* code)
 {
-  OnigCodePoint c;
-  int found = 0;
-  int i, j = -1;
-  Bits b1, b2;
+  const OnigCodePoint not_found = (OnigCodePoint)-1;
+  OnigCodePoint c = not_found;
+  int i;
   BBuf *bbuf = cc->mbuf;
 
   if (IS_NCCLASS_NOT(cc)) return 0;
@@ -5699,42 +5698,36 @@ is_onechar_cclass(CClassNode* cc, OnigCodePoint* code)
     data = (OnigCodePoint* )(bbuf->p) + 1;
     if ((n == 1) && (data[0] == data[1])) {
       /* only one char found in the bbuf, save the code point. */
-      found = 1;
       c = data[0];
+      if (((c < SINGLE_BYTE_SIZE) && BITSET_AT(cc->bs, c))) {
+        /* skip if c is included in the bitset */
+	c = not_found;
+      }
     }
     else {
       return 0;  /* the bbuf contains multiple chars */
     }
   }
 
-  if (found && (c < SINGLE_BYTE_SIZE) && BITSET_AT(cc->bs, c)) {
-    /* c is included in the bitset, ignore the result of bbuf. */
-    found = 0;
-  }
-
   /* check bitset */
   for (i = 0; i < (int )BITSET_SIZE; i++) {
-    b1 = cc->bs[i];
+    Bits b1 = cc->bs[i];
     if (b1 != 0) {
-      if (((b1 & (b1 - 1)) == 0) && (found == 0)) {
-        found = 1;
-        j = i;
-        b2 = b1;
+      if (((b1 & (b1 - 1)) == 0) && (c == not_found)) {
+        c = BITS_IN_ROOM * i + countbits(b1 - 1);
       } else {
         return 0;  /* the character class contains multiple chars */
       }
     }
   }
-  if (found == 0) {
-    /* the character class contains no char. */
-    return 0;
+
+  if (c != not_found) {
+    *code = c;
+    return 1;
   }
-  if (j >= 0) {
-    /* only one char found in the bitset, calculate the code point. */
-    c = BITS_IN_ROOM * j + countbits(b2 - 1);
-  }
-  *code = c;
-  return 1;
+
+  /* the character class contains no char. */
+  return 0;
 }
 
 

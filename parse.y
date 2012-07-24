@@ -2710,6 +2710,14 @@ primary		: literal
 			$$ = dispatch1(begin, $3);
 		    %*/
 		    }
+		| tLPAREN_ARG {lex_state = EXPR_ENDARG;} rparen
+		    {
+		    /*%%%*/
+			$$ = 0;
+		    /*%
+			$$ = dispatch1(paren, 0);
+		    %*/
+		    }
 		| tLPAREN_ARG expr {lex_state = EXPR_ENDARG;} rparen
 		    {
 		    /*%%%*/
@@ -3397,7 +3405,8 @@ opt_block_args_tail : ',' block_args_tail
 		    {
 			$$ = new_args_tail(Qnone, Qnone, Qnone);
 		    }
- 		;
+		;
+
 block_param	: f_arg ',' f_block_optarg ',' f_rest_arg opt_block_args_tail
 		    {
 			$$ = new_args($1, $3, $5, Qnone, $6);
@@ -4451,6 +4460,8 @@ f_arglist	: '(' f_args rparen
 		| f_args term
 		    {
 			$$ = $1;
+			lex_state = EXPR_BEG;
+			command_start = TRUE;
 		    }
 		;
 
@@ -4480,7 +4491,7 @@ opt_args_tail	: ',' args_tail
 		    {
 			$$ = new_args_tail(Qnone, Qnone, Qnone);
 		    }
- 		;
+		;
 
 f_args		: f_arg ',' f_optarg ',' f_rest_arg opt_args_tail
 		    {
@@ -7669,7 +7680,6 @@ parser_yylex(struct parser_params *parser)
 	}
 	else if (IS_SPCARG(-1)) {
 	    c = tLPAREN_ARG;
-	    rb_warning0("(...) interpreted as grouped expression");
 	}
 	paren_nest++;
 	COND_PUSH(0);
@@ -8593,12 +8603,23 @@ assignable_gen(struct parser_params *parser, ID id, NODE *val)
 #undef parser_yyerror
 }
 
+static int
+is_private_local_id(ID name)
+{
+    VALUE s;
+    if (name == idUScore) return 1;
+    if (!is_local_id(name)) return 0;
+    s = rb_id2str(name);
+    if (!s) return 0;
+    return RSTRING_PTR(s)[0] == '_';
+}
+
 #define LVAR_USED ((int)1 << (sizeof(int) * CHAR_BIT - 1))
 
 static ID
 shadowing_lvar_gen(struct parser_params *parser, ID name)
 {
-    if (idUScore == name) return name;
+    if (is_private_local_id(name)) return name;
     if (dyna_in_block()) {
 	if (dvar_curr(name)) {
 	    yyerror("duplicated argument name");
@@ -9287,8 +9308,11 @@ new_args_tail_gen(struct parser_params *parser, NODE *k, ID kr, ID b)
     int saved_line = ruby_sourceline;
     struct rb_args_info *args;
     NODE *kw_rest_arg = 0;
+    NODE *node;
 
     args = ALLOC(struct rb_args_info);
+    MEMZERO(args, struct rb_args_info, 1);
+    node = NEW_NODE(NODE_ARGS, 0, 0, args);
 
     args->block_arg      = b;
     args->kw_args        = k;
@@ -9300,7 +9324,7 @@ new_args_tail_gen(struct parser_params *parser, NODE *k, ID kr, ID b)
     args->kw_rest_arg    = kw_rest_arg;
 
     ruby_sourceline = saved_line;
-    return NEW_NODE(NODE_ARGS, 0, 0, args);
+    return node;
 }
 #endif /* !RIPPER */
 
@@ -9319,7 +9343,7 @@ warn_unused_var(struct parser_params *parser, struct local_vars *local)
     }
     for (i = 0; i < cnt; ++i) {
 	if (!v[i] || (u[i] & LVAR_USED)) continue;
-	if (idUScore == v[i]) continue;
+	if (is_private_local_id(v[i])) continue;
 	rb_compile_warn(ruby_sourcefile, (int)u[i], "assigned but unused variable - %s", rb_id2name(v[i]));
     }
 }
@@ -10040,7 +10064,7 @@ sym_check_asciionly(VALUE str)
     if (!rb_enc_asciicompat(rb_enc_get(str))) return FALSE;
     switch (rb_enc_str_coderange(str)) {
       case ENC_CODERANGE_BROKEN:
-    	rb_raise(rb_eEncodingError, "invalid encoding symbol");
+	rb_raise(rb_eEncodingError, "invalid encoding symbol");
       case ENC_CODERANGE_7BIT:
 	return TRUE;
     }

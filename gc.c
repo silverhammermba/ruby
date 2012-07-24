@@ -15,12 +15,14 @@
 #include "ruby/st.h"
 #include "ruby/re.h"
 #include "ruby/io.h"
+#include "ruby/thread.h"
 #include "ruby/util.h"
 #include "eval_intern.h"
 #include "vm_core.h"
 #include "internal.h"
 #include "gc.h"
 #include "constant.h"
+#include "atomic.h"
 #include <stdio.h>
 #include <setjmp.h>
 #include <sys/types.h>
@@ -32,6 +34,12 @@
 
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/resource.h>
+#endif
+#if defined(__native_client__) && defined(NACL_NEWLIB)
+# include "nacl/resource.h"
+# undef HAVE_POSIX_MEMALIGN
+# undef HAVE_MEMALIGN
+
 #endif
 
 #if defined _WIN32 || defined __CYGWIN__
@@ -792,11 +800,11 @@ vm_malloc_prepare(rb_objspace_t *objspace, size_t size)
 static inline void *
 vm_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
 {
-    malloc_increase += size;
+    ATOMIC_SIZE_ADD(malloc_increase, size);
 
 #if CALC_EXACT_MALLOC_SIZE
-    objspace->malloc_params.allocated_size += size;
-    objspace->malloc_params.allocations++;
+    ATOMIC_SIZE_ADD(objspace->malloc_params.allocated_size, size);
+    ATOMIC_SIZE_INC(objspace->malloc_params.allocations);
     ((size_t *)mem)[0] = size;
     mem = (size_t *)mem + 1;
 #endif
@@ -826,6 +834,9 @@ static void *
 vm_xrealloc(rb_objspace_t *objspace, void *ptr, size_t size)
 {
     void *mem;
+#if CALC_EXACT_MALLOC_SIZE
+    size_t oldsize;
+#endif
 
     if ((ssize_t)size < 0) {
 	negative_size_allocation_error("negative re-allocation size");
@@ -840,8 +851,8 @@ vm_xrealloc(rb_objspace_t *objspace, void *ptr, size_t size)
 
 #if CALC_EXACT_MALLOC_SIZE
     size += sizeof(size_t);
-    objspace->malloc_params.allocated_size -= size;
     ptr = (size_t *)ptr - 1;
+    oldsize = ((size_t *)ptr)[0];
 #endif
 
     mem = realloc(ptr, size);
@@ -853,10 +864,10 @@ vm_xrealloc(rb_objspace_t *objspace, void *ptr, size_t size)
 	    ruby_memerror();
         }
     }
-    malloc_increase += size;
+    ATOMIC_SIZE_ADD(malloc_increase, size);
 
 #if CALC_EXACT_MALLOC_SIZE
-    objspace->malloc_params.allocated_size += size;
+    ATOMIC_SIZE_ADD(objspace->malloc_params.allocated_size, size - oldsize);
     ((size_t *)mem)[0] = size;
     mem = (size_t *)mem + 1;
 #endif
@@ -872,8 +883,8 @@ vm_xfree(rb_objspace_t *objspace, void *ptr)
     ptr = ((size_t *)ptr) - 1;
     size = ((size_t*)ptr)[0];
     if (size) {
-	objspace->malloc_params.allocated_size -= size;
-	objspace->malloc_params.allocations--;
+	ATOMIC_SIZE_SUB(objspace->malloc_params.allocated_size, size);
+	ATOMIC_SIZE_DEC(objspace->malloc_params.allocations);
     }
 #endif
 
@@ -2316,6 +2327,7 @@ before_gc_sweep(rb_objspace_t *objspace)
 static void
 after_gc_sweep(rb_objspace_t *objspace)
 {
+    size_t inc;
     GC_PROF_SET_MALLOC_INFO;
 
     if (objspace->heap.free_num < objspace->heap.free_min) {
@@ -2323,11 +2335,11 @@ after_gc_sweep(rb_objspace_t *objspace)
         heaps_increment(objspace);
     }
 
-    if (malloc_increase > malloc_limit) {
-	malloc_limit += (size_t)((malloc_increase - malloc_limit) * (double)objspace->heap.live_num / (heaps_used * HEAP_OBJ_LIMIT));
+    inc = ATOMIC_SIZE_EXCHANGE(malloc_increase, 0);
+    if (inc > malloc_limit) {
+	malloc_limit += (size_t)((inc - malloc_limit) * (double)objspace->heap.live_num / (heaps_used * HEAP_OBJ_LIMIT));
 	if (malloc_limit < initial_malloc_limit) malloc_limit = initial_malloc_limit;
     }
-    malloc_increase = 0;
 
     free_unused_heaps(objspace);
 }
@@ -2495,7 +2507,9 @@ obj_free(rb_objspace_t *objspace, VALUE obj)
       case T_MODULE:
       case T_CLASS:
 	rb_clear_cache_by_class((VALUE)obj);
-	rb_free_m_table(RCLASS_M_TBL(obj));
+        if (RCLASS_M_TBL(obj)) {
+            rb_free_m_table(RCLASS_M_TBL(obj));
+        }
 	if (RCLASS_IV_TBL(obj)) {
 	    st_free_table(RCLASS_IV_TBL(obj));
 	}
@@ -2934,7 +2948,7 @@ os_obj_of_i(void *vstart, void *vend, size_t stride, void *data)
 		continue;
 	      case T_CLASS:
 		if (FL_TEST(p, FL_SINGLETON))
-		  continue;
+		    continue;
 	      default:
 		if (!p->as.basic.klass) continue;
 		v = (VALUE)p;
@@ -3760,7 +3774,7 @@ wmap_aref(VALUE self, VALUE wmap)
 static VALUE
 gc_count(VALUE self)
 {
-    return UINT2NUM((&rb_objspace)->count);
+    return UINT2NUM(rb_objspace.count);
 }
 
 /*
@@ -3831,7 +3845,7 @@ gc_stat(int argc, VALUE *argv, VALUE self)
 static VALUE
 gc_malloc_allocated_size(VALUE self)
 {
-    return UINT2NUM((&rb_objspace)->malloc_params.allocated_size);
+    return UINT2NUM(rb_objspace.malloc_params.allocated_size);
 }
 
 /*
@@ -3846,7 +3860,7 @@ gc_malloc_allocated_size(VALUE self)
 static VALUE
 gc_malloc_allocations(VALUE self)
 {
-    return UINT2NUM((&rb_objspace)->malloc_params.allocations);
+    return UINT2NUM(rb_objspace.malloc_params.allocations);
 }
 #endif
 

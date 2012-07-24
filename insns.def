@@ -55,7 +55,7 @@ getlocal
 ()
 (VALUE val)
 {
-    val = *(GET_LFP() - idx);
+    val = *(GET_LEP() - idx);
 }
 
 /**
@@ -69,7 +69,7 @@ setlocal
 (VALUE val)
 ()
 {
-    (*(GET_LFP() - idx)) = val;
+    *(GET_LEP() - idx) = val;
 }
 
 /**
@@ -83,7 +83,7 @@ getspecial
 ()
 (VALUE val)
 {
-    val = vm_getspecial(th, GET_LFP(), key, type);
+    val = vm_getspecial(th, GET_LEP(), key, type);
 }
 
 /**
@@ -97,7 +97,7 @@ setspecial
 (VALUE obj)
 ()
 {
-    lfp_svar_set(th, GET_LFP(), key, obj);
+    lep_svar_set(th, GET_LEP(), key, obj);
 }
 
 /**
@@ -114,11 +114,11 @@ getdynamic
 (VALUE val)
 {
     rb_num_t i;
-    VALUE *dfp2 = GET_DFP();
+    VALUE *ep = GET_EP();
     for (i = 0; i < level; i++) {
-	dfp2 = GET_PREV_DFP(dfp2);
+	ep = GET_PREV_EP(ep);
     }
-    val = *(dfp2 - idx);
+    val = *(ep - idx);
 }
 
 /**
@@ -135,11 +135,11 @@ setdynamic
 ()
 {
     rb_num_t i;
-    VALUE *dfp2 = GET_DFP();
+    VALUE *ep = GET_EP();
     for (i = 0; i < level; i++) {
-	dfp2 = GET_PREV_DFP(dfp2);
+	ep = GET_PREV_EP(ep);
     }
-    *(dfp2 - idx) = val;
+    *(ep - idx) = val;
 }
 
 /**
@@ -183,7 +183,7 @@ getclassvariable
 ()
 (VALUE val)
 {
-    NODE * const cref = vm_get_cref(GET_ISEQ(), GET_LFP(), GET_DFP());
+    NODE *cref = vm_get_cref(GET_ISEQ(), GET_EP());
     val = rb_cvar_get(vm_get_cvar_base(cref), id);
 }
 
@@ -198,7 +198,7 @@ setclassvariable
 (VALUE val)
 ()
 {
-    NODE * const cref = vm_get_cref(GET_ISEQ(), GET_LFP(), GET_DFP());
+    NODE *cref = vm_get_cref(GET_ISEQ(), GET_EP());
     rb_cvar_set(vm_get_cvar_base(cref), id, val);
 }
 
@@ -343,10 +343,10 @@ putspecialobject
 	val = rb_mRubyVMFrozenCore;
 	break;
       case VM_SPECIAL_OBJECT_CBASE:
-	val = vm_get_cbase(GET_ISEQ(), GET_LFP(), GET_DFP());
+	val = vm_get_cbase(GET_ISEQ(), GET_EP());
 	break;
       case VM_SPECIAL_OBJECT_CONST_BASE:
-	val = vm_get_const_base(GET_ISEQ(), GET_LFP(), GET_DFP());
+	val = vm_get_const_base(GET_ISEQ(), GET_EP());
 	break;
       default:
 	rb_bug("putspecialobject insn: unknown value_type");
@@ -768,7 +768,7 @@ defined
 	}
 	break;
       case DEFINED_IVAR2:
-	klass = vm_get_cbase(GET_ISEQ(), GET_LFP(), GET_DFP());
+	klass = vm_get_cbase(GET_ISEQ(), GET_EP());
 	break;
       case DEFINED_GVAR:
 	if (rb_gvar_defined(rb_global_entry(SYM2ID(obj)))) {
@@ -777,7 +777,7 @@ defined
 	break;
       case DEFINED_CVAR:
 	{
-	NODE *cref = vm_get_cref(GET_ISEQ(), GET_LFP(), GET_DFP());
+	NODE *cref = vm_get_cref(GET_ISEQ(), GET_EP());
 	klass = vm_get_cvar_base(cref);
 	if (rb_cvar_defined(klass, SYM2ID(obj))) {
 	    expr_type = "class variable";
@@ -815,7 +815,7 @@ defined
 
 	    args[0] = obj; args[1] = Qfalse;
 	    r = rb_check_funcall(v, rb_intern("respond_to_missing?"), 2, args);
-	    if (r != Qundef && RTEST(r)) 
+	    if (r != Qundef && RTEST(r))
 		expr_type = "method";
 	}
 	break;
@@ -826,23 +826,18 @@ defined
 	}
 	break;
       case DEFINED_ZSUPER:{
-	rb_iseq_t *iseq = GET_ISEQ();
-	while (iseq) {
-	    if (iseq->defined_method_id) {
-		break;
-	    }
-	    iseq = iseq->parent_iseq;
-	}
-	if (iseq) {
-	    VALUE klass = vm_search_normal_superclass(iseq->klass, GET_SELF());
-	    if (rb_method_boundp(klass, iseq->defined_method_id, 0)) {
+	const rb_method_entry_t *me = GET_CFP()->me;
+	if (me) {
+	    VALUE klass = vm_search_normal_superclass(me->klass, GET_SELF());
+	    ID id = me->def ? me->def->original_id : me->called_id;
+	    if (rb_method_boundp(klass, id, 0)) {
 		expr_type = "super";
 	    }
 	}
 	break;
       }
       case DEFINED_REF:{
-	val = vm_getspecial(th, GET_LFP(), Qfalse, FIX2INT(obj));
+	val = vm_getspecial(th, GET_LEP(), Qfalse, FIX2INT(obj));
 	if (val != Qnil) {
 	    expr_type = "global-variable";
 	}
@@ -971,10 +966,10 @@ defineclass
     COPY_CREF(class_iseq->cref_stack, vm_cref_push(th, klass, NOEX_PUBLIC, NULL));
 
     /* enter scope */
-    vm_push_frame(th, class_iseq,
-		  VM_FRAME_MAGIC_CLASS, klass, (VALUE) GET_BLOCK_PTR(),
-		  class_iseq->iseq_encoded, GET_SP(), 0,
-		  class_iseq->local_size);
+    vm_push_frame(th, class_iseq, VM_FRAME_MAGIC_CLASS,
+		  klass, VM_ENVVAL_BLOCK_PTR(GET_BLOCK_PTR()),
+		  class_iseq->iseq_encoded, GET_SP(),
+		  class_iseq->local_size, 0);
     RESTORE_REGS();
 
     INC_VM_STATE_VERSION();
@@ -1091,28 +1086,20 @@ leave
 	}
     }
 
-    RUBY_VM_CHECK_INTS();
-    vm_pop_frame(th);
-    RESTORE_REGS();
-}
+    RUBY_VM_CHECK_INTS(th);
 
-/**
-  @c method/iterator
-  @e return from this vm loop
-  @j VM loop から抜ける。
- */
-DEFINE_INSN
-finish
-()
-(VALUE val)
-(VALUE val)
-{
+    if (UNLIKELY(VM_FRAME_TYPE_FINISH_P(GET_CFP()))) {
 #if OPT_CALL_THREADED_CODE
-    rb_bug("unused instruction on OPT_CALL_THREADED_CODE");
+	rb_bug("unused instruction on OPT_CALL_THREADED_CODE");
 #else
-    th->cfp++;
-    return val;
+	vm_pop_frame(th);
+	return val;
 #endif
+    }
+    else {
+	vm_pop_frame(th);
+	RESTORE_REGS();
+    }
 }
 
 /**********************************************************/
@@ -1130,7 +1117,7 @@ throw
 (VALUE throwobj)
 (VALUE val)
 {
-    RUBY_VM_CHECK_INTS();
+    RUBY_VM_CHECK_INTS(th);
     val = vm_throw(th, GET_CFP(), throw_state, throwobj);
     THROW_EXCEPTION(val);
     /* unreachable */
@@ -1151,7 +1138,7 @@ jump
 ()
 ()
 {
-    RUBY_VM_CHECK_INTS();
+    RUBY_VM_CHECK_INTS(th);
     JUMP(dst);
 }
 
@@ -1167,7 +1154,7 @@ branchif
 ()
 {
     if (RTEST(val)) {
-	RUBY_VM_CHECK_INTS();
+	RUBY_VM_CHECK_INTS(th);
 	JUMP(dst);
     }
 }
@@ -1184,7 +1171,7 @@ branchunless
 ()
 {
     if (!RTEST(val)) {
-	RUBY_VM_CHECK_INTS();
+	RUBY_VM_CHECK_INTS(th);
 	JUMP(dst);
     }
 }
@@ -1233,8 +1220,8 @@ onceinlinecache
     }
     else if (ic->ic_value.value == Qundef)
     {
-    	RUBY_VM_CHECK_INTS();
-    	rb_thread_schedule();
+	RUBY_VM_CHECK_INTS(th);
+	rb_thread_schedule();
 	goto retry;
     }
     else {
@@ -1315,11 +1302,11 @@ opt_checkenv
 ()
 ()
 {
-    if (GET_CFP()->bp != GET_DFP() + 1) {
-	VALUE *new_dfp = GET_CFP()->bp - 1;
+    if (GET_CFP()->bp != GET_EP() + 1) {
+	VALUE *ep = GET_CFP()->bp - 1;
 	/* TODO: copy env and clean stack at creating env? */
-	*new_dfp = *GET_DFP();
-	SET_DFP(new_dfp);
+	*ep = *GET_EP();
+	SET_EP(ep);
     }
 }
 

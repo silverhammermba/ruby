@@ -36,16 +36,29 @@ with all sufficient information, see the ChangeLog file.
       * added Kernel#Hash conversion method like Array() or Float().
     * extended method:
       * Kernel#warn accepts multiple args in like puts.
+      * Kernel#caller accepts second optional argument `n' which specify
+        required caller size.
     * incompatible changes:
       * system() and exec() closes non-standard file descriptors
         (The default of :close_others option is changed to true by default.)
       * respond_to? against a protected method now returns false unless
         the second argument is true.
+      * __callee__ has returned to the original behavior, and now
+        returns the called name but not the original name in an
+        aliased method.
 
   * LoadError
     * added method:
       * added LoadError#path method to return the file name that could not be
         loaded.
+
+  * Module
+    * added method:
+      * added Module#prepend which is similar to Module#include,
+        however a method in the prepended module overrides the
+        corresponding method in the prepending module.
+    * extended method:
+      * Module#define_method accepts a UnboundMethod from a Module.
 
   * NilClass
     * added method:
@@ -69,6 +82,20 @@ with all sufficient information, see the ChangeLog file.
   * Fiber
     * incompatible changes:
       * Fiber#resume cannot resume a fiber which invokes "Fiber#transfer".
+
+* net/http
+  * new features:
+    * Proxies are now automatically detected from the http_proxy environment
+      variable.  See Net::HTTP::new for details.
+    * gzip and deflate compression are now requested for all requests by
+      default.  See Net::HTTP for details.
+  * new methods:
+    * Net::HTTP#local_host
+    * Net::HTTP#local_host=
+    * Net::HTTP#local_port
+    * Net::HTTP#local_port=
+  * extended method:
+    * Net::HTTP#connect uses local_host and local_port if specified.
 
 * net/imap
   * new methods:
@@ -96,6 +123,12 @@ with all sufficient information, see the ChangeLog file.
     * Shellwords#shelljoin() accepts non-string objects in the given
       array, each of which is stringified using to_s.
 
+* syslog
+  * Added Syslog::Logger which provides a Logger API atop Syslog.
+  * Syslog::Priority, Syslog::Level, Syslog::Option and Syslog::Macros
+    are introduced for easy detection of available constants on a
+    running system.
+
 * lib/tmpdir.rb
   * incompatible changes:
     * Dir.mktmpdir uses FileUtils.remove_entry instead of
@@ -104,7 +137,11 @@ with all sufficient information, see the ChangeLog file.
       accessible from other users.
 
 * zlib
+  * Added streaming support for Zlib::Inflate and Zlib::Deflate.  This allows
+    processing of a stream without the use of large amounts of memory.
   * Added support for the new deflate strategies Zlib::RLE and Zlib::FIXED.
+  * Zlib streams are now processed without the GVL.  This allows gzip, zlib and
+    deflate streams to be processed in parallel.
 
 * openssl
   * Consistently raise an error when trying to encode nil values. All instances
@@ -112,6 +149,24 @@ with all sufficient information, see the ChangeLog file.
     instance whose value is nil. All instances of OpenSSL::ASN1::Constructive
     raise NoMethodError in the same case. Constructing such values is still
     permitted.
+  * TLS 1.1 & 1.2 support by setting OpenSSL::SSL::SSLContext#ssl_version to
+    :TLSv1_2, :TLSv1_2_server, :TLSv1_2_client or :TLSv1_1, :TLSv1_1_server
+    :TLSv1_1_client. The version being effectively used can be queried
+    with OpenSSL::SSL#ssl_version. Furthermore, it is also possible to
+    blacklist the new TLS versions with OpenSSL::SSL:OP_NO_TLSv1_1 and
+    OpenSSL::SSL::OP_NO_TLSv1_2.
+  * Added OpenSSL::SSL::SSLContext#renegotiation_cb. A user-defined callback
+    may be set which gets called whenever a new handshake is negotiated. This
+    also allows to programmatically decline (client) renegotiation attempts.
+  * Support for "0/n" splitting of records as BEAST mitigation via
+    OpenSSL::SSL::OP_DONT_INSERT_EMPTY_FRAGMENTS.
+  * OpenSSL requires passwords for decrypting PEM-encoded files to be at least
+    four characters long. This led to awkward situations where an export with
+    a password with fewer than four characters was possible, but accessing the
+    file afterwards failed. OpenSSL::PKey::RSA, OpenSSL::PKey::DSA and
+    OpenSSL::PKey::EC therefore now enforce the same check when exporting a
+    private key to PEM with a password - it has to be at least four characters
+    long.
 
 === Language changes
 === Compatibility issues (excluding feature bug fixes)

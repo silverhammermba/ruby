@@ -354,9 +354,10 @@ class TestReadline < Test::Unit::TestCase
   def test_pre_input_hook
     begin
       pr = proc {}
-      assert_equal(Readline.pre_input_hook = pr, pr)
-      assert_equal(Readline.pre_input_hook, pr)
-      assert_nil(Readline.pre_input_hook = nil)
+      Readline.pre_input_hook = pr
+      assert_equal(pr, Readline.pre_input_hook)
+      Readline.pre_input_hook = nil
+      assert_nil(Readline.pre_input_hook)
     rescue NotImplementedError
     end
   end
@@ -364,10 +365,10 @@ class TestReadline < Test::Unit::TestCase
   def test_insert_text
     begin
       str = "test_insert_text"
-      assert_equal(Readline.insert_text(str), Readline)
-      assert_equal(Readline.line_buffer, str)
-      assert_equal(Readline.line_buffer.encoding,
-                   get_default_internal_encoding)
+      assert_equal(Readline, Readline.insert_text(str))
+      assert_equal(str, Readline.line_buffer)
+      assert_equal(get_default_internal_encoding,
+                   Readline.line_buffer.encoding)
     rescue NotImplementedError
     end
   end if !/EditLine/n.match(Readline::VERSION)
@@ -396,6 +397,44 @@ class TestReadline < Test::Unit::TestCase
       rescue NotImplementedError
       end
     end
+  end if !/EditLine|\A4\.3\z/n.match(Readline::VERSION)
+
+  def test_input_metachar
+    bug6601 = '[ruby-core:45682]'
+    Readline::HISTORY << "hello"
+    wo = nil
+    line = with_pipe do |r, w|
+      wo = w.dup
+      wo.write("\C-re\ef\n")
+    end
+    assert_equal("hello", line, bug6601)
+  ensure
+    wo.close
+    with_pipe {|r, w| w.write("\C-a\C-k\n")} # clear line_buffer
+    Readline::HISTORY.clear
+  end if !/EditLine/n.match(Readline::VERSION)
+
+  def test_input_metachar_multibyte
+    skip 'this test needs UTF-8 locale' unless Encoding.find("locale") == Encoding::UTF_8
+    bug6602 = '[ruby-core:45683]'
+    Readline::HISTORY << "\u3042\u3093"
+    Readline::HISTORY << "\u3044\u3093"
+    Readline::HISTORY << "\u3046\u3093"
+    open(IO::NULL, 'w') do |null|
+      IO.pipe do |r, w|
+        Readline.input = r
+        Readline.output = null
+        w << "\cr\u3093\n\n"
+        w << "\cr\u3042\u3093"
+        w.reopen(IO::NULL)
+        assert_equal("\u3046\u3093", Readline.readline("", true), bug6602)
+        assert_equal("\u3042\u3093", Readline.readline("", true), bug6602)
+        assert_equal(nil,            Readline.readline("", true), bug6602)
+      end
+    end
+  ensure
+    with_pipe {|r, w| w.write("\C-a\C-k\n")} # clear line_buffer
+    Readline::HISTORY.clear
   end if !/EditLine/n.match(Readline::VERSION)
 
   private

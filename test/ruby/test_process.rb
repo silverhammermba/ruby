@@ -303,6 +303,78 @@ class TestProcess < Test::Unit::TestCase
     end
   end
 
+  def _test_execopts_env_popen(cmd)
+    message = cmd.inspect
+    IO.popen({"FOO"=>"BAR"}, cmd) {|io|
+      assert_equal('FOO=BAR', io.read[/^FOO=.*/], message)
+    }
+
+    old = ENV["hmm"]
+    begin
+      ENV["hmm"] = "fufu"
+      IO.popen(cmd) {|io| assert_match(/^hmm=fufu$/, io.read, message)}
+      IO.popen({"hmm"=>""}, cmd) {|io| assert_match(/^hmm=$/, io.read, message)}
+      IO.popen({"hmm"=>nil}, cmd) {|io| assert_not_match(/^hmm=/, io.read, message)}
+      ENV["hmm"] = ""
+      IO.popen(cmd) {|io| assert_match(/^hmm=$/, io.read, message)}
+      IO.popen({"hmm"=>""}, cmd) {|io| assert_match(/^hmm=$/, io.read, message)}
+      IO.popen({"hmm"=>nil}, cmd) {|io| assert_not_match(/^hmm=/, io.read, message)}
+      ENV["hmm"] = nil
+      IO.popen(cmd) {|io| assert_not_match(/^hmm=/, io.read, message)}
+      IO.popen({"hmm"=>""}, cmd) {|io| assert_match(/^hmm=$/, io.read, message)}
+      IO.popen({"hmm"=>nil}, cmd) {|io| assert_not_match(/^hmm=/, io.read, message)}
+    ensure
+      ENV["hmm"] = old
+    end
+  end
+
+  def test_execopts_env_popen_vector
+    _test_execopts_env_popen(ENVCOMMAND)
+  end
+
+  def test_execopts_env_popen_string
+    with_tmpchdir do |d|
+      open('test-script', 'w') do |f|
+        ENVCOMMAND.each_with_index do |cmd, i|
+          next if i.zero? or cmd == "-e"
+          f.puts cmd
+        end
+      end
+      _test_execopts_env_popen("#{RUBY} test-script")
+    end
+  end
+
+  def test_execopts_preserve_env_on_exec_failure
+    with_tmpchdir {|d|
+      write_file 's', <<-"End"
+        ENV["mgg"] = nil
+        prog = "/nonexistent"
+        begin
+          Process.exec({"mgg" => "mggoo"}, [prog, prog])
+        rescue Errno::ENOENT
+        end
+        open('out', 'w') {|f|
+          f.print ENV["mgg"].inspect
+        }
+      End
+      system(RUBY, 's')
+      assert_equal(nil.inspect, File.read('out'),
+        "[ruby-core:44093] [ruby-trunk - Bug #6249]")
+    }
+  end
+
+  def test_execopts_env_single_word
+    with_tmpchdir {|d|
+      open("test_execopts_env_single_word.rb", "w") {|f|
+        f.puts "print ENV['hgga']"
+      }
+      system({"hgga"=>"ugu"}, RUBY,
+             :in => 'test_execopts_env_single_word.rb',
+             :out => 'test_execopts_env_single_word.out')
+      assert_equal('ugu', File.read('test_execopts_env_single_word.out'))
+    }
+  end
+
   def test_execopts_unsetenv_others
     h = {}
     MANDATORY_ENVS.each {|k| e = ENV[k] and h[k] = e}
@@ -839,6 +911,25 @@ class TestProcess < Test::Unit::TestCase
     }
   end
 
+  def test_popen_wordsplit_beginning_and_trailing_spaces
+    with_tmpchdir {|d|
+      write_file("script", <<-'End')
+        print "fufumm pid=#{$$} ppid=#{Process.ppid}"
+        exit 7
+      End
+      str = " #{RUBY} script "
+      io = IO.popen(str)
+      pid = io.pid
+      result = io.read
+      io.close
+      status = $?
+      assert_equal(pid, status.pid)
+      assert(status.exited?)
+      assert_equal(7, status.exitstatus)
+      assert_equal("fufumm pid=#{status.pid} ppid=#{$$}", result)
+    }
+  end
+
   def test_exec_wordsplit
     with_tmpchdir {|d|
       write_file("script", <<-'End')
@@ -1266,6 +1357,11 @@ class TestProcess < Test::Unit::TestCase
       open("tmp_script.#{$$}", "w") {|f| f.puts "echo $#: $@"; f.chmod(0755)}
       result = IO.popen(["./tmp_script.#{$$}", "a b", "c"]) {|f| f.read}
       assert_equal("2: a b c\n", result, feature)
+
+      open("tmp_script.#{$$}", "w") {|f| f.puts "echo $hghg"; f.chmod(0755)}
+      result = IO.popen([{"hghg" => "mogomogo"}, "./tmp_script.#{$$}", "a b", "c"]) {|f| f.read}
+      assert_equal("mogomogo\n", result, feature)
+
     end
   end if File.executable?("/bin/sh")
 
@@ -1369,4 +1465,32 @@ class TestProcess < Test::Unit::TestCase
     assert_nothing_raised { spawn(*TRUECOMMAND, :new_pgroup=>true) }
     assert_nothing_raised { IO.popen([*TRUECOMMAND, :new_pgroup=>true]) {} }
   end
+
+  def test_sigpipe
+    system(RUBY, "-e", "")
+    with_pipe {|r, w|
+      r.close
+      assert_raise(Errno::EPIPE) { w.print "a" }
+    }
+  end
+
+  def test_sh_comment
+    IO.popen("echo a # fofoof") {|f|
+      assert_equal("a\n", f.read)
+    }
+  end if File.executable?("/bin/sh")
+
+  def test_sh_env
+    IO.popen("foofoo=barbar env") {|f|
+      lines = f.readlines
+      assert_operator(lines, :include?, "foofoo=barbar\n")
+    }
+  end if File.executable?("/bin/sh")
+
+  def test_sh_exec
+    IO.popen("exec echo exexexec") {|f|
+      assert_equal("exexexec\n", f.read)
+    }
+  end if File.executable?("/bin/sh")
+
 end

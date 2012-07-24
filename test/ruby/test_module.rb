@@ -259,6 +259,31 @@ class TestModule < Test::Unit::TestCase
     assert_equal([:MIXIN, :USER], User.constants.sort)
   end
 
+  def test_dup
+    bug6454 = '[ruby-core:45132]'
+
+    a = Module.new
+    Other.const_set :BUG6454, a
+
+    original = Other::BUG6454.inspect
+
+    b = a.dup
+    Other.const_set :BUG6454_dup, b
+
+    assert_equal "TestModule::Other::BUG6454_dup", b.inspect, bug6454
+  end
+
+  def test_dup_anonymous
+    bug6454 = '[ruby-core:45132]'
+
+    a = Module.new
+    original = a.inspect
+
+    b = a.dup
+
+    refute_equal original, b.inspect, bug6454
+  end
+
   def test_included_modules
     assert_equal([], Mixin.included_modules)
     assert_equal([Mixin], User.included_modules)
@@ -1214,62 +1239,133 @@ class TestModule < Test::Unit::TestCase
     assert_in_out_err([], src, ["NameError"], [])
   end
 
-  def test_mix_method
-    american = Module.new do
-      attr_accessor :address
-    end
-    japanese = Module.new do
-      attr_accessor :address
-    end
-
-    japanese_american = Class.new
-    assert_nothing_raised(ArgumentError) {
-      japanese_american.class_eval {mix american}
-    }
-    assert_raise(ArgumentError) {
-      japanese_american.class_eval {mix japanese}
-    }
-
-    japanese_american = Class.new
-    assert_nothing_raised(ArgumentError) {
-      japanese_american.class_eval {
-        mix american, :address => :us_address, :address= => :us_address=
-      }
-    }
-    assert_nothing_raised(ArgumentError) {
-      japanese_american.class_eval {
-        mix japanese, :address => :jp_address, :address= => :jp_address=
-      }
-    }
-
-    japanese_american = Class.new
-    assert_nothing_raised(ArgumentError) {
-      japanese_american.class_eval {
-        mix japanese, :address => nil, :address= => nil
-      }
-    }
-    assert_raise(NoMethodError) {
-      japanese_american.new.address
-    }
-    assert_nothing_raised(ArgumentError) {
-      japanese_american.class_eval {
-        mix american
-      }
-    }
+  module M0
+    def m1; [:M0] end
+  end
+  module M1
+    def m1; [:M1, *super] end
+  end
+  module M2
+    def m1; [:M2, *super] end
+  end
+  M3 = Module.new do
+    def m1; [:M3, *super] end
+  end
+  module M4
+    def m1; [:M4, *super] end
+  end
+  class C
+    def m1; end
+  end
+  class C0 < C
+    include M0
+    prepend M1
+    def m1; [:C0, *super] end
+  end
+  class C1 < C0
+    prepend M2, M3
+    include M4
+    def m1; [:C1, *super] end
   end
 
-  def test_mix_const
-    foo = Module.new do
-      const_set(:D, 55)
+  def test_prepend
+    obj = C0.new
+    expected = [:M1,:C0,:M0]
+    assert_equal(expected, obj.m1)
+    obj = C1.new
+    expected = [:M2,:M3,:C1,:M4,:M1,:C0,:M0]
+    assert_equal(expected, obj.m1)
+  end
+
+  def test_prepend_inheritance
+    bug6654 = '[ruby-core:45914]'
+    a = labeled_module("a")
+    b = labeled_module("b") {include a}
+    c = labeled_class("c") {prepend b}
+    assert_operator(c, :<, b, bug6654)
+    assert_operator(c, :<, a, bug6654)
+  end
+
+  def test_prepend_instance_methods
+    bug6655 = '[ruby-core:45915]'
+    assert_equal(Object.instance_methods, Class.new {prepend Module.new}.instance_methods, bug6655)
+  end
+
+  def test_prepend_singleton_methods
+    o = Object.new
+    o.singleton_class.class_eval {prepend Module.new}
+    assert_equal([], o.singleton_methods)
+  end
+
+  def test_prepend_remove_method
+    assert_raise(NameError) do
+      Class.new do
+        prepend Module.new {def foo; end}
+        remove_method(:foo)
+      end
     end
-    bar = Class.new do
-      const_set(:D, 42)
+  end
+
+  def test_prepend_class_ancestors
+    bug6658 = '[ruby-core:45919]'
+    m = labeled_module("m")
+    c = labeled_class("c") {prepend m}
+    assert_equal([m, c], c.ancestors[0, 2], bug6658)
+
+    bug6662 = '[ruby-dev:45868]'
+    c2 = labeled_class("c2", c)
+    anc = c2.ancestors
+    assert_equal([c2, m, c, Object], anc[0..anc.index(Object)], bug6662)
+  end
+
+  def test_prepend_module_ancestors
+    bug6659 = '[ruby-dev:45861]'
+    m0 = labeled_module("m0") {def x; [:m0, *super] end}
+    m1 = labeled_module("m1") {def x; [:m1, *super] end; prepend m0}
+    m2 = labeled_module("m2") {def x; [:m2, *super] end; prepend m1}
+    c0 = labeled_class("c0") {def x; [:c0] end}
+    c1 = labeled_class("c1") {def x; [:c1] end; prepend m2}
+    c2 = labeled_class("c2", c0) {def x; [:c2, *super] end; include m2}
+
+    assert_equal([m0, m1], m1.ancestors, bug6659)
+
+    bug6662 = '[ruby-dev:45868]'
+    assert_equal([m0, m1, m2], m2.ancestors, bug6662)
+    assert_equal([m0, m1, m2, c1], c1.ancestors[0, 4], bug6662)
+    assert_equal([:m0, :m1, :m2, :c1], c1.new.x)
+    assert_equal([c2, m0, m1, m2, c0], c2.ancestors[0, 5], bug6662)
+    assert_equal([:c2, :m0, :m1, :m2, :c0], c2.new.x)
+  end
+
+  def labeled_module(name, &block)
+    Module.new do
+      singleton_class.class_eval {define_method(:to_s) {name}}
+      class_eval(&block) if block
     end
-    assert_nothing_raised(ArgumentError) {
-      bar.class_eval {
-        mix foo
-      }
-    }
-    assert_equal(42, bar::D)
+  end
+
+  def labeled_class(name, superclass = Object, &block)
+    Class.new(superclass) do
+      singleton_class.class_eval {define_method(:to_s) {name}}
+      class_eval(&block) if block
+    end
+  end
+
+  def test_prepend_instance_methods_false
+    bug6660 = '[ruby-dev:45863]'
+    assert_equal([:m1], Class.new{ prepend Module.new; def m1; end }.instance_methods(false), bug6660)
+    assert_equal([:m1], Class.new(Class.new{def m2;end}){ prepend Module.new; def m1; end }.instance_methods(false), bug6660)
+  end
+
+  def test_class_variables
+    m = Module.new
+    m.class_variable_set(:@@foo, 1)
+    m2 = Module.new
+    m2.send(:include, m)
+    m2.class_variable_set(:@@bar, 2)
+    assert_equal([:@@foo], m.class_variables)
+    assert_equal([:@@bar, :@@foo], m2.class_variables)
+    assert_equal([:@@bar, :@@foo], m2.class_variables(true))
+    assert_equal([:@@bar], m2.class_variables(false))
   end
 end

@@ -18,6 +18,7 @@
 
 #include "ruby.h"
 #include "ruby/io.h"
+#include "ruby/thread.h"
 
 #if defined(HAVE_NCURSES_H)
 # include <ncurses.h>
@@ -738,7 +739,7 @@ static VALUE
 curses_pair_number(VALUE obj, VALUE attrs)
 {
     curses_stdscr();
-    return INT2FIX(PAIR_NUMBER(NUM2INT(attrs)));
+    return INT2FIX(PAIR_NUMBER(NUM2LONG(attrs)));
 }
 #endif /* USE_COLOR */
 
@@ -799,8 +800,7 @@ mouse_get(VALUE obj)
     VALUE val;
 
     curses_stdscr();
-    val = TypedData_Make_Struct(cMouse,struct mousedata,
-                &mousedata_type,mdata);
+    val = TypedData_Make_Struct(cMouse,struct mousedata, &mousedata_type,mdata);
     mdata->mevent = (MEVENT*)xmalloc(sizeof(MEVENT));
     return (getmouse(mdata->mevent) == OK) ? val : Qnil;
 }
@@ -1223,6 +1223,7 @@ window_cury(VALUE obj)
 
     GetWINDOW(obj, winp);
     getyx(winp->window, y, x);
+    (void)x;
     return INT2FIX(y);
 }
 
@@ -1259,6 +1260,7 @@ window_curx(VALUE obj)
 
     GetWINDOW(obj, winp);
     getyx(winp->window, y, x);
+    (void)y;
     return INT2FIX(x);
 }
 
@@ -1299,7 +1301,8 @@ window_maxy(VALUE obj)
     {
     int x, y;
     getmaxyx(winp->window, y, x);
-    return INT2FIX(y);
+    (void)x;
+	return INT2FIX(y);
     }
 #else
     return INT2FIX(winp->window->_maxy+1);
@@ -1323,7 +1326,8 @@ window_maxx(VALUE obj)
     {
     int x, y;
     getmaxyx(winp->window, y, x);
-    return INT2FIX(x);
+    (void)y;
+	return INT2FIX(x);
     }
 #else
     return INT2FIX(winp->window->_maxx+1);
@@ -1344,10 +1348,11 @@ window_begy(VALUE obj)
     GetWINDOW(obj, winp);
 #ifdef getbegyx
     getbegyx(winp->window, y, x);
-    return INT2FIX(y);
+    (void)x;
 #else
-    return INT2FIX(winp->window->_begy);
+    y = winp->window->_begy;
 #endif
+    return INT2FIX(y);
 }
 
 /*
@@ -1364,10 +1369,11 @@ window_begx(VALUE obj)
     GetWINDOW(obj, winp);
 #ifdef getbegyx
     getbegyx(winp->window, y, x);
-    return INT2FIX(x);
+    (void)y;
 #else
-    return INT2FIX(winp->window->_begx);
+    x = winp->window->_begx;
 #endif
+    return INT2FIX(x);
 }
 
 /*
@@ -1722,12 +1728,12 @@ struct wgetch_arg {
     int c;
 };
 
-static VALUE
+static void *
 wgetch_func(void *_arg)
 {
     struct wgetch_arg *arg = (struct wgetch_arg *)_arg;
     arg->c = wgetch(arg->win);
-    return Qnil;
+    return 0;
 }
 
 /*
@@ -1748,7 +1754,7 @@ window_getch(VALUE obj)
 
     GetWINDOW(obj, winp);
     arg.win = winp->window;
-    rb_thread_blocking_region(wgetch_func, (void *)&arg, RUBY_UBF_IO, 0);
+    rb_thread_call_without_gvl(wgetch_func, (void *)&arg, RUBY_UBF_IO, 0);
     c = arg.c;
     if (c == EOF) return Qnil;
     if (rb_isprint(c)) {
@@ -1767,7 +1773,7 @@ struct wgetstr_arg {
     char rtn[GETSTR_BUF_SIZE];
 };
 
-static VALUE
+static void *
 wgetstr_func(void *_arg)
 {
     struct wgetstr_arg *arg = (struct wgetstr_arg *)_arg;
@@ -1776,7 +1782,7 @@ wgetstr_func(void *_arg)
 #else
     wgetstr(arg->win, arg->rtn);
 #endif
-    return Qnil;
+    return 0;
 }
 
 /*
@@ -1793,7 +1799,7 @@ window_getstr(VALUE obj)
 
     GetWINDOW(obj, winp);
     arg.win = winp->window;
-    rb_thread_blocking_region(wgetstr_func, (void *)&arg, RUBY_UBF_IO, 0);
+    rb_thread_call_without_gvl(wgetstr_func, (void *)&arg, RUBY_UBF_IO, 0);
     return rb_locale_str_new_cstr(arg.rtn);
 }
 
@@ -2217,9 +2223,6 @@ window_keypad(VALUE obj, VALUE val)
 #define window_keypad rb_f_notimplement
 #endif
 
-<<<<<<< HEAD
-#if defined(HAVE_WTIMEOUT) || defined(HAVE_NODELAY)
-=======
 #ifdef HAVE_NODELAY
 /*
  * Document-method: Curses::Window.nodelay
@@ -2379,7 +2382,7 @@ pad_subpad(VALUE obj, VALUE height, VALUE width, VALUE begin_x, VALUE begin_y)
  */
 static VALUE
 pad_refresh(VALUE obj, VALUE pminrow, VALUE pmincol, VALUE sminrow,
-        VALUE smincol, VALUE smaxrow, VALUE smaxcol)
+            VALUE smincol, VALUE smaxrow, VALUE smaxcol)
 {
     struct windata *padp;
     int pmr, pmc, smr, smc, sxr, sxc;
@@ -2411,7 +2414,7 @@ pad_refresh(VALUE obj, VALUE pminrow, VALUE pmincol, VALUE sminrow,
  */
 static VALUE
 pad_noutrefresh(VALUE obj, VALUE pminrow, VALUE pmincol, VALUE sminrow,
-        VALUE smincol, VALUE smaxrow, VALUE smaxcol)
+                VALUE smincol, VALUE smaxrow, VALUE smaxcol)
 {
     struct windata *padp;
     int pmr, pmc, smr, smc, sxr, sxc;

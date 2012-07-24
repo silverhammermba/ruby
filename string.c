@@ -681,7 +681,7 @@ rb_str_new_frozen(VALUE orig)
 	assert(OBJ_FROZEN(str));
 	ofs = RSTRING_LEN(str) - RSTRING_LEN(orig);
 	if ((ofs > 0) || (klass != RBASIC(str)->klass) ||
-	    (!OBJ_TAINTED(str) && OBJ_TAINTED(orig)) ||
+	    ((RBASIC(str)->flags ^ RBASIC(orig)->flags) & (FL_TAINT|FL_UNTRUSTED)) ||
 	    ENCODING_GET(str) != ENCODING_GET(orig)) {
 	    str = str_new3(klass, str);
 	    RSTRING(str)->as.heap.ptr += ofs;
@@ -1147,7 +1147,10 @@ rb_str_length(VALUE str)
  *  call-seq:
  *     str.bytesize  -> integer
  *
- *  Returns the length of <i>str</i> in bytes.
+ *  Returns the length of +str+ in bytes.
+ *
+ *    "\x80\u3042".bytesize  #=> 4
+ *    "hello".bytesize       #=> 5
  */
 
 static VALUE
@@ -1163,6 +1166,7 @@ rb_str_bytesize(VALUE str)
  *  Returns <code>true</code> if <i>str</i> has a length of zero.
  *
  *     "hello".empty?   #=> false
+ *     " ".empty?       #=> false
  *     "".empty?        #=> true
  */
 
@@ -1209,10 +1213,11 @@ rb_str_plus(VALUE str1, VALUE str2)
  *  call-seq:
  *     str * integer   -> new_str
  *
- *  Copy---Returns a new <code>String</code> containing <i>integer</i> copies of
- *  the receiver.
+ *  Copy --- Returns a new String containing +integer+ copies of the receiver.
+ *  +integer+ must be greater than or equal to 0.
  *
  *     "Ho! " * 3   #=> "Ho! Ho! Ho! "
+ *     "Ho! " * 0   #=> ""
  */
 
 VALUE
@@ -1635,32 +1640,30 @@ rb_str_subseq(VALUE str, long beg, long len)
     return str2;
 }
 
-VALUE
-rb_str_substr(VALUE str, long beg, long len)
+static char *
+rb_str_subpos(VALUE str, long beg, long *lenp)
 {
+    long len = *lenp;
+    long slen = -1L;
+    long blen = RSTRING_LEN(str);
     rb_encoding *enc = STR_ENC_GET(str);
-    VALUE str2;
-    char *p, *s = RSTRING_PTR(str), *e = s + RSTRING_LEN(str);
+    char *p, *s = RSTRING_PTR(str), *e = s + blen;
 
-    if (len < 0) return Qnil;
-    if (!RSTRING_LEN(str)) {
+    if (len < 0) return 0;
+    if (!blen) {
 	len = 0;
     }
     if (single_byte_optimizable(str)) {
-	if (beg > RSTRING_LEN(str)) return Qnil;
+	if (beg > blen) return 0;
 	if (beg < 0) {
-	    beg += RSTRING_LEN(str);
-	    if (beg < 0) return Qnil;
+	    beg += blen;
+	    if (beg < 0) return 0;
 	}
-	if (beg + len > RSTRING_LEN(str))
-	    len = RSTRING_LEN(str) - beg;
-	if (len <= 0) {
-	    len = 0;
-	    p = 0;
-	}
-	else
-	    p = s + beg;
-	goto sub;
+	if (beg + len > blen)
+	    len = blen - beg;
+	if (len < 0) return 0;
+	p = s + beg;
+	goto end;
     }
     if (beg < 0) {
 	if (len > -beg) len = -beg;
@@ -1668,29 +1671,32 @@ rb_str_substr(VALUE str, long beg, long len)
 	    beg = -beg;
 	    while (beg-- > len && (e = rb_enc_prev_char(s, e, e, enc)) != 0);
 	    p = e;
-	    if (!p) return Qnil;
+	    if (!p) return 0;
 	    while (len-- > 0 && (p = rb_enc_prev_char(s, p, e, enc)) != 0);
-	    if (!p) return Qnil;
+	    if (!p) return 0;
 	    len = e - p;
-	    goto sub;
+	    goto end;
 	}
 	else {
-	    beg += str_strlen(str, enc);
-	    if (beg < 0) return Qnil;
+	    slen = str_strlen(str, enc);
+	    beg += slen;
+	    if (beg < 0) return 0;
+	    p = s + beg;
+	    if (len == 0) goto end;
 	}
     }
     else if (beg > 0 && beg > RSTRING_LEN(str)) {
-	return Qnil;
+	return 0;
     }
     if (len == 0) {
-	if (beg > str_strlen(str, enc)) return Qnil;
-	p = 0;
+	if (beg > str_strlen(str, enc)) return 0;
+	p = s + beg;
     }
 #ifdef NONASCII_MASK
     else if (ENC_CODERANGE(str) == ENC_CODERANGE_VALID &&
         enc == rb_utf8_encoding()) {
         p = str_utf8_nth(s, e, &beg);
-        if (beg > 0) return Qnil;
+        if (beg > 0) return 0;
         len = str_utf8_offset(p, e, len);
     }
 #endif
@@ -1699,7 +1705,7 @@ rb_str_substr(VALUE str, long beg, long len)
 
 	p = s + beg * char_sz;
 	if (p > e) {
-	    return Qnil;
+	    return 0;
 	}
         else if (len * char_sz > e - p)
             len = e - p;
@@ -1707,14 +1713,25 @@ rb_str_substr(VALUE str, long beg, long len)
 	    len *= char_sz;
     }
     else if ((p = str_nth_len(s, e, &beg, enc)) == e) {
-	if (beg > 0) return Qnil;
+	if (beg > 0) return 0;
 	len = 0;
     }
     else {
 	len = str_offset(p, e, len, enc, 0);
     }
-  sub:
-    if (len > RSTRING_EMBED_LEN_MAX && beg + len == RSTRING_LEN(str)) {
+  end:
+    *lenp = len;
+    return p;
+}
+
+VALUE
+rb_str_substr(VALUE str, long beg, long len)
+{
+    VALUE str2;
+    char *p = rb_str_subpos(str, beg, &len);
+
+    if (!p) return Qnil;
+    if (len > RSTRING_EMBED_LEN_MAX && p + len == RSTRING_END(str)) {
 	str2 = rb_str_new4(str);
 	str2 = str_new3(rb_obj_class(str2), str2);
 	RSTRING(str2)->as.heap.ptr += RSTRING(str2)->as.heap.len - len;
@@ -1920,15 +1937,12 @@ rb_enc_cr_str_buf_cat(VALUE str, const char *ptr, long len,
     int str_encindex = ENCODING_GET(str);
     int res_encindex;
     int str_cr, res_cr;
-    int ptr_a8 = ptr_encindex == 0;
 
     str_cr = ENC_CODERANGE(str);
 
     if (str_encindex == ptr_encindex) {
-        if (str_cr == ENC_CODERANGE_UNKNOWN ||
-            (ptr_a8 && str_cr != ENC_CODERANGE_7BIT)) {
+        if (str_cr == ENC_CODERANGE_UNKNOWN)
             ptr_cr = ENC_CODERANGE_UNKNOWN;
-        }
         else if (ptr_cr == ENC_CODERANGE_UNKNOWN) {
             ptr_cr = coderange_scan(ptr, len, rb_enc_from_index(ptr_encindex));
         }
@@ -3193,49 +3207,69 @@ rb_str_aref(VALUE str, VALUE indx)
 
 /*
  *  call-seq:
- *     str[fixnum]                 -> new_str or nil
- *     str[fixnum, fixnum]         -> new_str or nil
- *     str[range]                  -> new_str or nil
- *     str[regexp]                 -> new_str or nil
- *     str[regexp, fixnum]         -> new_str or nil
- *     str[other_str]              -> new_str or nil
- *     str.slice(fixnum)           -> new_str or nil
- *     str.slice(fixnum, fixnum)   -> new_str or nil
- *     str.slice(range)            -> new_str or nil
- *     str.slice(regexp)           -> new_str or nil
- *     str.slice(regexp, fixnum)   -> new_str or nil
- *     str.slice(regexp, capname)  -> new_str or nil
- *     str.slice(other_str)        -> new_str or nil
+ *     str[index]                 -> new_str or nil
+ *     str[start, length]         -> new_str or nil
+ *     str[range]                 -> new_str or nil
+ *     str[regexp]                -> new_str or nil
+ *     str[regexp, capture]       -> new_str or nil
+ *     str[match_str]             -> new_str or nil
+ *     str.slice(index)           -> new_str or nil
+ *     str.slice(start, length)   -> new_str or nil
+ *     str.slice(range)           -> new_str or nil
+ *     str.slice(regexp)          -> new_str or nil
+ *     str.slice(regexp, capture) -> new_str or nil
+ *     str.slice(match_str)       -> new_str or nil
  *
- *  Element Reference---If passed a single <code>Fixnum</code>, returns a
- *  substring of one character at that position. If passed two <code>Fixnum</code>
- *  objects, returns a substring starting at the offset given by the first, and
- *  with a length given by the second. If passed a range, its beginning and end
- *  are interpreted as offsets delimiting the substring to be returned. In all
- *  three cases, if an offset is negative, it is counted from the end of <i>str</i>.
- *  Returns <code>nil</code> if the initial offset falls outside the string or
- *  the length is negative.
+ *  Element Reference --- If passed a single +index+, returns a substring of
+ *  one character at that index. If passed a +start+ index and a +length+,
+ *  returns a substring containing +length+ characters starting at the
+ *  +index+. If passed a +range+, its beginning and end are interpreted as
+ *  offsets delimiting the substring to be returned.
  *
- *  If a <code>Regexp</code> is supplied, the matching portion of <i>str</i> is
- *  returned. If a numeric or name parameter follows the regular expression, that
- *  component of the <code>MatchData</code> is returned instead. If a
- *  <code>String</code> is given, that string is returned if it occurs in
- *  <i>str</i>. In both cases, <code>nil</code> is returned if there is no
- *  match.
+ *  In these three cases, if an index is negative, it is counted from the end
+ *  of the string.  For the +start+ and +range+ cases the starting index
+ *  is just before a character and an index matching the string's size.
+ *  Additionally, an empty string is returned when the starting index for a
+ *  character range is at the end of the string.
+ *
+ *  Returns +nil+ if the initial index falls outside the string or the length
+ *  is negative.
+ *
+ *  If a +Regexp+ is supplied, the matching portion of the string is
+ *  returned.  If a +capture+ follows the regular expression, which may be a
+ *  capture group index or name, follows the regular expression that component
+ *  of the MatchData is returned instead.
+ *
+ *  If a +match_str+ is given, that string is returned if it occurs in
+ *  the string.
+ *
+ *  Returns +nil+ if the regular expression does not match or the match string
+ *  cannot be found.
  *
  *     a = "hello there"
+ *
  *     a[1]                   #=> "e"
  *     a[2, 3]                #=> "llo"
  *     a[2..3]                #=> "ll"
+ *
  *     a[-3, 2]               #=> "er"
  *     a[7..-2]               #=> "her"
  *     a[-4..-2]              #=> "her"
  *     a[-2..-4]              #=> ""
+ *
+ *     a[11, 0]               #=> ""
+ *     a[11]                  #=> nil
+ *     a[12, 0]               #=> nil
  *     a[12..-1]              #=> nil
+ *
  *     a[/[aeiou](.)\1/]      #=> "ell"
  *     a[/[aeiou](.)\1/, 0]   #=> "ell"
  *     a[/[aeiou](.)\1/, 1]   #=> "l"
  *     a[/[aeiou](.)\1/, 2]   #=> nil
+ *
+ *     a[/(?<vowel>[aeiou])(?<non_vowel>[^aeiou])/, "non_vowel"] #=> "l"
+ *     a[/(?<vowel>[aeiou])(?<non_vowel>[^aeiou])/, "vowel"]     #=> "e"
+ *
  *     a["lo"]                #=> "lo"
  *     a["bye"]               #=> nil
  */
@@ -3244,7 +3278,7 @@ static VALUE
 rb_str_aref_m(int argc, VALUE *argv, VALUE str)
 {
     if (argc == 2) {
-	if (TYPE(argv[0]) == T_REGEXP) {
+	if (RB_TYPE_P(argv[0], T_REGEXP)) {
 	    return rb_str_subpat(str, argv[0], argv[1]);
 	}
 	return rb_str_substr(str, NUM2LONG(argv[0]), NUM2LONG(argv[1]));
@@ -3469,7 +3503,7 @@ static VALUE
 rb_str_aset_m(int argc, VALUE *argv, VALUE str)
 {
     if (argc == 3) {
-	if (TYPE(argv[0]) == T_REGEXP) {
+	if (RB_TYPE_P(argv[0], T_REGEXP)) {
 	    rb_str_subpat_set(str, argv[0], argv[1], argv[2]);
 	}
 	else {
@@ -3586,9 +3620,10 @@ get_pat(VALUE pat, int quote)
  *     str.sub!(pattern, replacement)          -> str or nil
  *     str.sub!(pattern) {|match| block }      -> str or nil
  *
- *  Performs the substitutions of <code>String#sub</code> in place,
- *  returning <i>str</i>, or <code>nil</code> if no substitutions were
- *  performed.
+ *  Performs the same substitution as String#sub in-place.
+ *
+ *  Returns +str+ if a substitution was performed or +nil+ if no substitution
+ *  was performed.
  */
 
 static VALUE
@@ -3607,7 +3642,7 @@ rb_str_sub_bang(int argc, VALUE *argv, VALUE str)
     }
     else {
 	repl = argv[1];
-	hash = rb_check_convert_type(argv[1], T_HASH, "Hash", "to_hash");
+	hash = rb_check_hash_type(argv[1]);
 	if (NIL_P(hash)) {
 	    StringValue(repl);
 	}
@@ -3697,23 +3732,22 @@ rb_str_sub_bang(int argc, VALUE *argv, VALUE str)
  *     str.sub(pattern, hash)                -> new_str
  *     str.sub(pattern) {|match| block }     -> new_str
  *
- *  Returns a copy of <i>str</i> with the <em>first</em> occurrence of
- *  <i>pattern</i> substituted for the second argument. The <i>pattern</i> is
- *  typically a <code>Regexp</code>; if given as a <code>String</code>, any
- *  regular expression metacharacters it contains will be interpreted
- *  literally, e.g. <code>'\\\d'</code> will match a backlash followed by 'd',
- *  instead of a digit.
+ *  Returns a copy of +str+ with the _first_ occurrence of +pattern+
+ *  replaced by the second argument. The +pattern+ is typically a Regexp; if
+ *  given as a String, any regular expression metacharacters it contains will
+ *  be interpreted literally, e.g. <code>'\\\d'</code> will match a backlash
+ *  followed by 'd', instead of a digit.
  *
- *  If <i>replacement</i> is a <code>String</code> it will be substituted for
- *  the matched text. It may contain back-references to the pattern's capture
- *  groups of the form <code>\\\d</code>, where <i>d</i> is a group number, or
- *  <code>\\\k<n></code>, where <i>n</i> is a group name. If it is a
+ *  If +replacement+ is a String it will be substituted for the matched text.
+ *  It may contain back-references to the pattern's capture groups of the form
+ *  <code>"\\d"</code>, where <i>d</i> is a group number, or
+ *  <code>"\\k<n>"</code>, where <i>n</i> is a group name. If it is a
  *  double-quoted string, both back-references must be preceded by an
- *  additional backslash. However, within <i>replacement</i> the special match
+ *  additional backslash. However, within +replacement+ the special match
  *  variables, such as <code>&$</code>, will not refer to the current match.
  *
- *  If the second argument is a <code>Hash</code>, and the matched text is one
- *  of its keys, the corresponding value is the replacement string.
+ *  If the second argument is a Hash, and the matched text is one of its keys,
+ *  the corresponding value is the replacement string.
  *
  *  In the block form, the current match string is passed in as a parameter,
  *  and variables such as <code>$1</code>, <code>$2</code>, <code>$`</code>,
@@ -3759,7 +3793,7 @@ str_gsub(int argc, VALUE *argv, VALUE str, int bang)
 	break;
       case 2:
 	repl = argv[1];
-	hash = rb_check_convert_type(argv[1], T_HASH, "Hash", "to_hash");
+	hash = rb_check_hash_type(argv[1]);
 	if (NIL_P(hash)) {
 	    StringValue(repl);
 	}
@@ -4508,8 +4542,10 @@ rb_str_inspect(VALUE str)
  *  call-seq:
  *     str.dump   -> new_str
  *
- *  Produces a version of <i>str</i> with all nonprinting characters replaced by
+ *  Produces a version of +str+ with all non-printing characters replaced by
  *  <code>\nnn</code> notation and all special characters escaped.
+ *
+ *    "hello \n ''".dump  #=> "\"hello \\n ''\"
  */
 
 VALUE
@@ -4967,6 +5003,7 @@ trnext(struct tr *t, rb_encoding *enc)
 
     for (;;) {
 	if (!t->gen) {
+nextpart:
 	    if (t->p == t->pend) return -1;
 	    if (rb_enc_ascget(t->p, t->pend, &n, enc) == '\\' && t->p + n < t->pend) {
 		t->p += n;
@@ -4995,12 +5032,20 @@ trnext(struct tr *t, rb_encoding *enc)
 	    }
 	    return t->now;
 	}
-	else if (++t->now < t->max) {
-	    return t->now;
-	}
 	else {
-	    t->gen = 0;
-	    return t->max;
+	    while (ONIGENC_CODE_TO_MBCLEN(enc, ++t->now) <= 0) {
+		if (t->now == t->max) {
+		    t->gen = 0;
+		    goto nextpart;
+		}
+	    }
+	    if (t->now < t->max) {
+		return t->now;
+	    }
+	    else {
+		t->gen = 0;
+		return t->max;
+	    }
 	}
     }
 }
@@ -7093,11 +7138,11 @@ rb_str_rjust(int argc, VALUE *argv, VALUE str)
 
 /*
  *  call-seq:
- *     str.center(integer, padstr)   -> new_str
+ *     str.center(width, padstr=' ')   -> new_str
  *
- *  If <i>integer</i> is greater than the length of <i>str</i>, returns a new
- *  <code>String</code> of length <i>integer</i> with <i>str</i> centered and
- *  padded with <i>padstr</i>; otherwise, returns <i>str</i>.
+ *  Centers +str+ in +width+.  If +width+ is greater than the length of +str+,
+ *  returns a new String of length +width+ with +str+ centered and padded with
+ *  +padstr+; otherwise, returns +str+.
  *
  *     "hello".center(4)         #=> "hello"
  *     "hello".center(20)        #=> "       hello        "
@@ -7210,18 +7255,15 @@ rb_str_rpartition(VALUE str, VALUE sep)
 
 /*
  *  call-seq:
- *     str.start_with?([prefix]+)   -> true or false
+ *     str.start_with?([prefixes]+)   -> true or false
  *
- *  Returns true if <i>str</i> starts with one of the prefixes given.
+ *  Returns true if +str+ starts with one of the +prefixes+ given.
  *
- *    p "hello".start_with?("hell")               #=> true
+ *    "hello".start_with?("hell")               #=> true
  *
  *    # returns true if one of the prefixes matches.
- *    p "hello".start_with?("heaven", "hell")     #=> true
- *    p "hello".start_with?("heaven", "paradise") #=> false
- *
- *
- *
+ *    "hello".start_with?("heaven", "hell")     #=> true
+ *    "hello".start_with?("heaven", "paradise") #=> false
  */
 
 static VALUE
@@ -7242,9 +7284,9 @@ rb_str_start_with(int argc, VALUE *argv, VALUE str)
 
 /*
  *  call-seq:
- *     str.end_with?([suffix]+)   -> true or false
+ *     str.end_with?([suffixes]+)   -> true or false
  *
- *  Returns true if <i>str</i> ends with one of the suffixes given.
+ *  Returns true if +str+ ends with one of the +suffixes+ given.
  */
 
 static VALUE
@@ -7447,6 +7489,25 @@ sym_printable(const char *s, const char *send, rb_encoding *enc)
     return TRUE;
 }
 
+int
+rb_str_symname_p(VALUE sym)
+{
+    rb_encoding *enc;
+    const char *ptr;
+    long len;
+    rb_encoding *resenc = rb_default_internal_encoding();
+
+    if (resenc == NULL) resenc = rb_default_external_encoding();
+    enc = STR_ENC_GET(sym);
+    ptr = RSTRING_PTR(sym);
+    len = RSTRING_LEN(sym);
+    if ((resenc != enc && !rb_str_is_ascii_only_p(sym)) || len != (long)strlen(ptr) ||
+	!rb_enc_symname_p(ptr, enc) || !sym_printable(ptr, ptr + len, enc)) {
+	return FALSE;
+    }
+    return TRUE;
+}
+
 /*
  *  call-seq:
  *     sym.inspect    -> string
@@ -7460,20 +7521,13 @@ static VALUE
 sym_inspect(VALUE sym)
 {
     VALUE str;
-    ID id = SYM2ID(sym);
-    rb_encoding *enc;
     const char *ptr;
     long len;
+    ID id = SYM2ID(sym);
     char *dest;
-    rb_encoding *resenc = rb_default_internal_encoding();
 
-    if (resenc == NULL) resenc = rb_default_external_encoding();
     sym = rb_id2str(id);
-    enc = STR_ENC_GET(sym);
-    ptr = RSTRING_PTR(sym);
-    len = RSTRING_LEN(sym);
-    if ((resenc != enc && !rb_str_is_ascii_only_p(sym)) || len != (long)strlen(ptr) ||
-	!rb_enc_symname_p(ptr, enc) || !sym_printable(ptr, ptr + len, enc)) {
+    if (!rb_str_symname_p(sym)) {
 	str = rb_str_inspect(sym);
 	len = RSTRING_LEN(str);
 	rb_str_resize(str, len + 1);
@@ -7482,7 +7536,9 @@ sym_inspect(VALUE sym)
 	dest[0] = ':';
     }
     else {
-	char *dest;
+	rb_encoding *enc = STR_ENC_GET(sym);
+	ptr = RSTRING_PTR(sym);
+	len = RSTRING_LEN(sym);
 	str = rb_enc_str_new(0, len + 1, enc);
 	dest = RSTRING_PTR(str);
 	dest[0] = ':';

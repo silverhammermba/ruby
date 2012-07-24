@@ -106,15 +106,15 @@ define rp
   else
   if ($flags & RUBY_T_MASK) == RUBY_T_CLASS
     printf "T_CLASS%s: ", ($flags & RUBY_FL_SINGLETON) ? "*" : ""
-    print (struct RClass *)($arg0)
+    rp_class $arg0
   else
   if ($flags & RUBY_T_MASK) == RUBY_T_ICLASS
     printf "T_ICLASS: "
-    print (struct RClass *)($arg0)
+    rp_class $arg0
   else
   if ($flags & RUBY_T_MASK) == RUBY_T_MODULE
     printf "T_MODULE: "
-    print (struct RClass *)($arg0)
+    rp_class $arg0
   else
   if ($flags & RUBY_T_MASK) == RUBY_T_FLOAT
     printf "T_FLOAT: %.16g ", (((struct RFloat*)($arg0))->float_value)
@@ -335,6 +335,19 @@ define rp
 end
 document rp
   Print a Ruby's VALUE.
+end
+
+define rp_class
+  printf "(struct RClass *) %p", (void*)$arg0
+  if ((struct RClass *)($arg0))->ptr.origin != $arg0
+    printf " -> %p", ((struct RClass *)($arg0))->ptr.origin
+  end
+  printf "\n"
+  print *(struct RClass *)($arg0)
+  print *((struct RClass *)($arg0))->ptr
+end
+document rp_class
+  Print the content of a Class/Module.
 end
 
 define nd_type
@@ -689,6 +702,17 @@ define rb_classname
   print *(struct RClass*)($arg0)
 end
 
+define rb_ancestors
+  set $rb_ancestors_module = $arg0
+  while $rb_ancestors_module
+    rp $rb_ancestors_module
+    set $rb_ancestors_module = ((struct RClass *)($rb_ancestors_module))->ptr.super
+  end
+end
+document rb_ancestors
+  Print ancestors.
+end
+
 define rb_backtrace
   call rb_backtrace()
 end
@@ -755,3 +779,20 @@ define rb_ps_thread
   set $ps_thread_id = $arg1
   print $ps_thread_th = (rb_thread_t*)$ps_thread->data
 end
+
+# Details: https://bugs.ruby-lang.org/projects/ruby-trunk/wiki/MachineInstructionsTraceWithGDB
+define trace_machine_instructions
+  set logging on
+  set height 0
+  set width 0
+  display/i $pc
+  while !$exit_code
+    info line *$pc
+    si
+  end
+end
+
+define SDR
+  call rb_vmdebug_stack_dump_raw_current()
+end
+

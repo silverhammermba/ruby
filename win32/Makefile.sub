@@ -222,11 +222,11 @@ RFLAGS = -r
 !if !defined(EXTLIBS)
 EXTLIBS =
 !endif
+!if !defined(EXTSOLIBS)
+EXTSOLIBS =
+!endif
 !if !defined(LIBS)
 LIBS = oldnames.lib user32.lib advapi32.lib shell32.lib ws2_32.lib imagehlp.lib $(EXTLIBS)
-!endif
-!if "$(ENABLE_WIN95)" == "yes"
-LIBS = unicows.lib $(LIBS)
 !endif
 !if !defined(MISSING)
 MISSING = acosh.obj cbrt.obj crypt.obj erf.obj ffs.obj langinfo.obj lgamma_r.obj strlcat.obj strlcpy.obj tgamma.obj win32/win32.obj win32/file.obj setproctitle.obj
@@ -281,6 +281,7 @@ XRUBY = $(MINIRUBY)
 !else
 XRUBY = $(RUNRUBY)
 !endif
+BTESTRUBY = $(MINIRUBY)
 !ifndef RUBY
 RUBY = ruby
 !endif
@@ -308,6 +309,8 @@ LIBRUBY_A     = $(RUBY_SO_NAME)-static.lib
 LIBRUBY_SO    = $(RUBY_SO_NAME).dll
 LIBRUBY       = $(RUBY_SO_NAME).lib
 LIBRUBYARG    = $(LIBRUBY)
+LIBRUBY_RELATIVE = yes
+
 THREAD_MODEL  = win32
 
 !if $(CROSS_COMPILING)
@@ -471,9 +474,6 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #if _MSC_VER != $(MSC_VER)
 #error MSC version unmatch: _MSC_VER: $(MSC_VER) is expected.
 #endif
-!if "$(ENABLE_WIN95)" == "yes" && "$(MACHINE)" == "x86"
-#define WIN95 1
-!endif
 #define RUBY_MSVCRT_VERSION $(RT_VER)
 #define STDC_HEADERS 1
 #define HAVE_SYS_TYPES_H 1
@@ -777,6 +777,7 @@ s,@OBJEXT@,$(OBJEXT),;t t
 s,@XCFLAGS@,$(XCFLAGS),;t t
 s,@XLDFLAGS@,$(XLDFLAGS),;t t
 s,@DLDFLAGS@,$(DLDFLAGS) $$(LIBPATH),;t t
+s,@EXTDLDFLAGS@,$(EXTDLDFLAGS),;t t
 s,@ARCH_FLAG@,$(ARCH_FLAG),;t t
 s,@STATIC@,$(STATIC),;t t
 s,@CCDLFLAGS@,,;t t

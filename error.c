@@ -25,6 +25,8 @@
 #include <unistd.h>
 #endif
 
+#define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
+
 #ifndef EXIT_SUCCESS
 #define EXIT_SUCCESS 0
 #endif
@@ -99,7 +101,42 @@ compile_snprintf(char *buf, long len, const char *file, int line, const char *fm
     }
 }
 
-static void err_append(const char*, rb_encoding *);
+static void
+compile_err_append(const char *s, rb_encoding *enc)
+{
+    rb_thread_t *th = GET_THREAD();
+    VALUE err = th->errinfo;
+    rb_block_t *prev_base_block = th->base_block;
+    th->base_block = 0;
+    /* base_block should be zero while normal Ruby execution */
+    /* after this line, any Ruby code *can* run */
+
+    if (th->mild_compile_error) {
+	if (!RTEST(err)) {
+	    err = rb_exc_new3(rb_eSyntaxError,
+			      rb_enc_str_new(s, strlen(s), enc));
+	    th->errinfo = err;
+	}
+	else {
+	    VALUE str = rb_obj_as_string(err);
+
+	    rb_str_cat2(str, "\n");
+	    rb_str_cat2(str, s);
+	    th->errinfo = rb_exc_new3(rb_eSyntaxError, str);
+	}
+    }
+    else {
+	if (!RTEST(err)) {
+	    err = rb_exc_new2(rb_eSyntaxError, "compile error");
+	    th->errinfo = err;
+	}
+	rb_write_error(s);
+	rb_write_error("\n");
+    }
+
+    /* returned to the parser world */
+    th->base_block = prev_base_block;
+}
 
 void
 rb_compile_error_with_enc(const char *file, int line, void *enc, const char *fmt, ...)
@@ -110,7 +147,7 @@ rb_compile_error_with_enc(const char *file, int line, void *enc, const char *fmt
     va_start(args, fmt);
     compile_snprintf(buf, BUFSIZ, file, line, fmt, args);
     va_end(args);
-    err_append(buf, (rb_encoding *)enc);
+    compile_err_append(buf, (rb_encoding *)enc);
 }
 
 void
@@ -122,7 +159,7 @@ rb_compile_error(const char *file, int line, const char *fmt, ...)
     va_start(args, fmt);
     compile_snprintf(buf, BUFSIZ, file, line, fmt, args);
     va_end(args);
-    err_append(buf, NULL);
+    compile_err_append(buf, NULL);
 }
 
 void
@@ -134,7 +171,7 @@ rb_compile_error_append(const char *fmt, ...)
     va_start(args, fmt);
     vsnprintf(buf, BUFSIZ, fmt, args);
     va_end(args);
-    err_append(buf, NULL);
+    compile_err_append(buf, NULL);
 }
 
 static void
@@ -352,37 +389,51 @@ rb_compile_bug(const char *file, int line, const char *fmt, ...)
     abort();
 }
 
-static const struct types {
-    int type;
-    const char *name;
-} builtin_types[] = {
-    {T_NIL,	"nil"},
-    {T_OBJECT,	"Object"},
-    {T_CLASS,	"Class"},
-    {T_ICLASS,	"iClass"},	/* internal use: mixed-in module holder */
-    {T_MODULE,	"Module"},
-    {T_FLOAT,	"Float"},
-    {T_STRING,	"String"},
-    {T_REGEXP,	"Regexp"},
-    {T_ARRAY,	"Array"},
-    {T_FIXNUM,	"Fixnum"},
-    {T_HASH,	"Hash"},
-    {T_STRUCT,	"Struct"},
-    {T_BIGNUM,	"Bignum"},
-    {T_FILE,	"File"},
-    {T_RATIONAL,"Rational"},
-    {T_COMPLEX, "Complex"},
-    {T_TRUE,	"true"},
-    {T_FALSE,	"false"},
-    {T_SYMBOL,	"Symbol"},	/* :symbol */
-    {T_DATA,	"Data"},	/* internal use: wrapped C pointers */
-    {T_MATCH,	"MatchData"},	/* data of $~ */
-    {T_NODE,	"Node"},	/* internal use: syntax tree node */
-    {T_UNDEF,	"undef"},	/* internal use: #undef; should not happen */
+static const char builtin_types[][10] = {
+    "", 			/* 0x00, */
+    "Object",
+    "Class",
+    "Module",
+    "Float",
+    "String",
+    "Regexp",
+    "Array",
+    "Hash",
+    "Struct",
+    "Bignum",
+    "File",
+    "Data",			/* internal use: wrapped C pointers */
+    "MatchData",		/* data of $~ */
+    "Complex",
+    "Rational",
+    "",				/* 0x10 */
+    "nil",
+    "true",
+    "false",
+    "Symbol",			/* :symbol */
+    "Fixnum",
+    "",				/* 0x16 */
+    "",				/* 0x17 */
+    "",				/* 0x18 */
+    "",				/* 0x19 */
+    "",				/* 0x1a */
+    "undef",			/* internal use: #undef; should not happen */
+    "Node",			/* internal use: syntax tree node */
+    "iClass",			/* internal use: mixed-in module holder */
 };
 
+const char *
+rb_builtin_type_name(int t)
+{
+    const char *name;
+    if ((unsigned int)t >= numberof(builtin_types)) return 0;
+    name = builtin_types[t];
+    if (*name) return name;
+    return 0;
+}
+
 static const char *
-builtin_type_name(VALUE x)
+builtin_class_name(VALUE x)
 {
     const char *etype;
 
@@ -410,9 +461,6 @@ builtin_type_name(VALUE x)
 void
 rb_check_type(VALUE x, int t)
 {
-    const struct types *type = builtin_types;
-    const struct types *const typeend = builtin_types +
-	sizeof(builtin_types) / sizeof(builtin_types[0]);
     int xt;
 
     if (x == Qundef) {
@@ -421,15 +469,10 @@ rb_check_type(VALUE x, int t)
 
     xt = TYPE(x);
     if (xt != t || (xt == T_DATA && RTYPEDDATA_P(x))) {
-	while (type < typeend) {
-	    if (type->type == t) {
-		const char *etype;
-
-		etype = builtin_type_name(x);
-		rb_raise(rb_eTypeError, "wrong argument type %s (expected %s)",
-			 etype, type->name);
-	    }
-	    type++;
+	const char *tname = rb_builtin_type_name(t);
+	if (tname) {
+	    rb_raise(rb_eTypeError, "wrong argument type %s (expected %s)",
+		     builtin_class_name(x), tname);
 	}
 	if (xt > T_MASK && xt <= 0x3f) {
 	    rb_fatal("unknown type 0x%x (0x%x given, probably comes from extension library for ruby 1.8)", t, xt);
@@ -451,7 +494,7 @@ rb_typeddata_inherited_p(const rb_data_type_t *child, const rb_data_type_t *pare
 int
 rb_typeddata_is_kind_of(VALUE obj, const rb_data_type_t *data_type)
 {
-    if (SPECIAL_CONST_P(obj) || BUILTIN_TYPE(obj) != T_DATA ||
+    if (!RB_TYPE_P(obj, T_DATA) ||
 	!RTYPEDDATA_P(obj) || !rb_typeddata_inherited_p(RTYPEDDATA_TYPE(obj), data_type)) {
 	return 0;
     }
@@ -464,8 +507,8 @@ rb_check_typeddata(VALUE obj, const rb_data_type_t *data_type)
     const char *etype;
     static const char mesg[] = "wrong argument type %s (expected %s)";
 
-    if (SPECIAL_CONST_P(obj) || BUILTIN_TYPE(obj) != T_DATA) {
-	etype = builtin_type_name(obj);
+    if (!RB_TYPE_P(obj, T_DATA)) {
+	etype = builtin_class_name(obj);
 	rb_raise(rb_eTypeError, mesg, etype, data_type->wrap_struct_name);
     }
     if (!RTYPEDDATA_P(obj)) {
@@ -673,9 +716,17 @@ static VALUE
 exc_backtrace(VALUE exc)
 {
     ID bt;
+    VALUE obj;
 
     CONST_ID(bt, "bt");
-    return rb_attr_get(exc, bt);
+    obj = rb_attr_get(exc, bt);
+
+    if (rb_backtrace_p(obj)) {
+	obj = rb_backtrace_to_str_ary(obj);
+	/* rb_iv_set(exc, "bt", obj); */
+    }
+
+    return obj;
 }
 
 VALUE
@@ -686,6 +737,7 @@ rb_check_backtrace(VALUE bt)
 
     if (!NIL_P(bt)) {
 	if (RB_TYPE_P(bt, T_STRING)) return rb_ary_new3(1, bt);
+	if (rb_backtrace_p(bt)) return bt;
 	if (!RB_TYPE_P(bt, T_ARRAY)) {
 	    rb_raise(rb_eTypeError, err);
 	}
@@ -700,11 +752,11 @@ rb_check_backtrace(VALUE bt)
 
 /*
  *  call-seq:
- *     exc.set_backtrace(array)   ->  array
+ *     exc.set_backtrace(backtrace)   ->  array
  *
- *  Sets the backtrace information associated with <i>exc</i>. The
- *  argument must be an array of <code>String</code> objects in the
- *  format described in <code>Exception#backtrace</code>.
+ *  Sets the backtrace information associated with +exc+. The +backtrace+ must
+ *  be an array of String objects or a single String in the format described
+ *  in Exception#backtrace.
  *
  */
 
@@ -712,6 +764,12 @@ static VALUE
 exc_set_backtrace(VALUE exc, VALUE bt)
 {
     return rb_iv_set(exc, "bt", rb_check_backtrace(bt));
+}
+
+VALUE
+rb_exc_set_backtrace(VALUE exc, VALUE bt)
+{
+    return exc_set_backtrace(exc, bt);
 }
 
 static VALUE
@@ -1101,9 +1159,9 @@ nometh_err_args(VALUE self)
 void
 rb_invalid_str(const char *str, const char *type)
 {
-    volatile VALUE s = rb_str_inspect(rb_str_new2(str));
+    VALUE s = rb_str_new2(str);
 
-    rb_raise(rb_eArgError, "invalid value for %s: %s", type, RSTRING_PTR(s));
+    rb_raise(rb_eArgError, "invalid value for %s: %+"PRIsVALUE, type, s);
 }
 
 /*
@@ -1961,6 +2019,21 @@ rb_check_trusted(VALUE obj)
 }
 
 void
+rb_check_copyable(VALUE obj, VALUE orig)
+{
+    if (!FL_ABLE(obj)) return;
+    rb_check_frozen_internal(obj);
+    rb_check_trusted_internal(obj);
+    if (!FL_ABLE(orig)) return;
+    if ((~RBASIC(obj)->flags & RBASIC(orig)->flags) & (FL_UNTRUSTED|FL_TAINT)) {
+	if (rb_safe_level() > 0) {
+	    rb_raise(rb_eSecurityError, "Insecure: can't modify %"PRIsVALUE,
+		     RBASIC(obj)->klass);
+	}
+    }
+}
+
+void
 Init_syserr(void)
 {
     rb_eNOERROR = set_syserr(0, "NOERROR");
@@ -1969,34 +2042,4 @@ Init_syserr(void)
 #include "known_errors.inc"
 #undef defined_error
 #undef undefined_error
-}
-
-static void
-err_append(const char *s, rb_encoding *enc)
-{
-    rb_thread_t *th = GET_THREAD();
-    VALUE err = th->errinfo;
-
-    if (th->mild_compile_error) {
-	if (!RTEST(err)) {
-	    err = rb_exc_new3(rb_eSyntaxError,
-			      rb_enc_str_new(s, strlen(s), enc));
-	    th->errinfo = err;
-	}
-	else {
-	    VALUE str = rb_obj_as_string(err);
-
-	    rb_str_cat2(str, "\n");
-	    rb_str_cat2(str, s);
-	    th->errinfo = rb_exc_new3(rb_eSyntaxError, str);
-	}
-    }
-    else {
-	if (!RTEST(err)) {
-	    err = rb_exc_new2(rb_eSyntaxError, "compile error");
-	    th->errinfo = err;
-	}
-	rb_write_error(s);
-	rb_write_error("\n");
-    }
 }

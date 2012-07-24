@@ -271,14 +271,6 @@ rb_w32_osver(void)
     return osver.dwMajorVersion;
 }
 
-#define IsWinNT() rb_w32_iswinnt()
-#define IsWin95() rb_w32_iswin95()
-#ifdef WIN95
-#define IfWin95(win95, winnt) (IsWin95() ? (win95) : (winnt))
-#else
-#define IfWin95(win95, winnt) (winnt)
-#endif
-
 /* simulate flock by locking a range on the file */
 
 /* License: Artistic or GPL */
@@ -335,54 +327,13 @@ flock_winnt(uintptr_t self, int argc, uintptr_t* argv)
     return i;
 }
 
-#ifdef WIN95
-/* License: Artistic or GPL */
-static uintptr_t
-flock_win95(uintptr_t self, int argc, uintptr_t* argv)
-{
-    int i = -1;
-    const HANDLE fh = (HANDLE)self;
-    const int oper = argc;
-
-    switch(oper) {
-      case LOCK_EX:
-	do {
-	    LK_ERR(LockFile(fh, 0, 0, LK_LEN, LK_LEN), i);
-	} while (i && errno == EWOULDBLOCK);
-	break;
-      case LOCK_EX|LOCK_NB:
-	LK_ERR(LockFile(fh, 0, 0, LK_LEN, LK_LEN), i);
-	break;
-      case LOCK_UN:
-      case LOCK_UN|LOCK_NB:
-	LK_ERR(UnlockFile(fh, 0, 0, LK_LEN, LK_LEN), i);
-	break;
-      default:
-	errno = EINVAL;
-	break;
-    }
-    return i;
-}
-#endif
-
 #undef LK_ERR
 
 /* License: Artistic or GPL */
 int
 flock(int fd, int oper)
 {
-#ifdef WIN95
-    static asynchronous_func_t locker = NULL;
-
-    if (!locker) {
-	if (IsWinNT())
-	    locker = flock_winnt;
-	else
-	    locker = flock_win95;
-    }
-#else
     const asynchronous_func_t locker = flock_winnt;
-#endif
 
     return rb_w32_asynchronize(locker,
 			      (VALUE)_get_osfhandle(fd), oper, NULL,
@@ -629,8 +580,38 @@ rtc_error_handler(int e, const char *src, int line, const char *exe, const char 
 static CRITICAL_SECTION select_mutex;
 static int NtSocketsInitialized = 0;
 static st_table *socklist = NULL;
+static st_table *conlist = NULL;
 static char *envarea;
 static char *uenvarea;
+
+/* License: Ruby's */
+struct constat {
+    struct {
+	int state, seq[16];
+	WORD attr;
+	COORD saved;
+    } vt100;
+};
+enum {constat_init = -2, constat_esc = -1, constat_seq = 0};
+
+/* License: Ruby's */
+static int
+free_conlist(st_data_t key, st_data_t val, st_data_t arg)
+{
+    xfree((struct constat *)val);
+    return ST_DELETE;
+}
+
+/* License: Ruby's */
+static void
+constat_delete(HANDLE h)
+{
+    if (conlist) {
+	st_data_t key = (st_data_t)h, val;
+	st_delete(conlist, &key, &val);
+	xfree((struct constat *)val);
+    }
+}
 
 /* License: Ruby's */
 static void
@@ -644,6 +625,11 @@ exit_handler(void)
 	}
 	DeleteCriticalSection(&select_mutex);
 	NtSocketsInitialized = 0;
+    }
+    if (conlist) {
+	st_foreach(conlist, free_conlist, 0);
+	st_free_table(conlist);
+	conlist = NULL;
     }
     if (envarea) {
 	FreeEnvironmentStrings(envarea);
@@ -739,6 +725,8 @@ rb_w32_sysinit(int *argc, char ***argv)
     _set_invalid_parameter_handler(invalid_parameter);
     _RTC_SetErrorFunc(rtc_error_handler);
     set_pioinfo_extra();
+#else
+    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
 #endif
 
     get_version();
@@ -1156,11 +1144,6 @@ CreateChild(const WCHAR *cmd, const WCHAR *prog, SECURITY_ATTRIBUTES *psa,
 
     child->hProcess = aProcessInformation.hProcess;
     child->pid = (rb_pid_t)aProcessInformation.dwProcessId;
-
-    if (!IsWinNT()) {
-	/* On Win9x, make pid positive similarly to cygwin and perl */
-	child->pid = -child->pid;
-    }
 
     return child;
 }
@@ -3025,6 +3008,8 @@ rb_w32_getsockname(int s, struct sockaddr *addr, int *addrlen)
     return r;
 }
 
+#undef getsockopt
+
 /* License: Artistic or GPL */
 int WSAAPI
 rb_w32_getsockopt(int s, int level, int optname, char *optval, int *optlen)
@@ -3084,7 +3069,7 @@ rb_w32_listen(int s, int backlog)
 
 /* License: Ruby's */
 static int
-finish_overlapped_socket(SOCKET s, WSAOVERLAPPED *wol, int result, DWORD *len, DWORD size)
+finish_overlapped_socket(BOOL input, SOCKET s, WSAOVERLAPPED *wol, int result, DWORD *len, DWORD size)
 {
     DWORD flg;
     int err;
@@ -3103,7 +3088,10 @@ finish_overlapped_socket(SOCKET s, WSAOVERLAPPED *wol, int result, DWORD *len, D
 	    }
 	    /* thru */
 	  default:
-	    errno = map_errno(WSAGetLastError());
+	    if ((err = WSAGetLastError()) == WSAECONNABORTED && !input)
+		errno = EPIPE;
+	    else
+		errno = map_errno(WSAGetLastError());
 	    /* thru */
 	  case WAIT_OBJECT_0 + 1:
 	    /* interrupted */
@@ -3113,7 +3101,10 @@ finish_overlapped_socket(SOCKET s, WSAOVERLAPPED *wol, int result, DWORD *len, D
 	}
     }
     else {
-	errno = map_errno(err);
+	if (err == WSAECONNABORTED && !input)
+	    errno = EPIPE;
+	else
+	    errno = map_errno(err);
 	*len = -1;
     }
     CloseHandle(wol->hEvent);
@@ -3146,15 +3137,22 @@ overlapped_socket_io(BOOL input, int fd, char *buf, int len, int flags,
 		    r = recvfrom(s, buf, len, flags, addr, addrlen);
 		else
 		    r = recv(s, buf, len, flags);
+		if (r == SOCKET_ERROR)
+		    errno = map_errno(WSAGetLastError());
 	    }
 	    else {
 		if (addr && addrlen)
 		    r = sendto(s, buf, len, flags, addr, *addrlen);
 		else
 		    r = send(s, buf, len, flags);
+		if (r == SOCKET_ERROR) {
+		    DWORD err = WSAGetLastError();
+		    if (err == WSAECONNABORTED)
+			errno = EPIPE;
+		    else
+			errno = map_errno(err);
+		}
 	    }
-	    if (r == SOCKET_ERROR)
-		errno = map_errno(WSAGetLastError());
 	});
     }
     else {
@@ -3182,7 +3180,7 @@ overlapped_socket_io(BOOL input, int fd, char *buf, int len, int flags,
 	    }
 	});
 
-	finish_overlapped_socket(s, &wol, ret, &rlen, size);
+	finish_overlapped_socket(input, s, &wol, ret, &rlen, size);
 	r = (int)rlen;
     }
 
@@ -3300,7 +3298,7 @@ recvmsg(int fd, struct msghdr *msg, int flags)
 	    ret = pWSARecvMsg(s, &wsamsg, &size, &wol, NULL);
 	});
 
-	ret = finish_overlapped_socket(s, &wol, ret, &len, size);
+	ret = finish_overlapped_socket(TRUE, s, &wol, ret, &len, size);
     }
     if (ret == SOCKET_ERROR)
 	return -1;
@@ -3357,7 +3355,7 @@ sendmsg(int fd, const struct msghdr *msg, int flags)
 	    ret = pWSASendMsg(s, &wsamsg, flags, &size, &wol, NULL);
 	});
 
-	finish_overlapped_socket(s, &wol, ret, &len, size);
+	finish_overlapped_socket(FALSE, s, &wol, ret, &len, size);
     }
 
     return len;
@@ -4064,7 +4062,6 @@ kill(int pid, int sig)
 	return -1;
     }
 
-    (void)IfWin95(pid = -pid, 0);
     if ((unsigned int)pid == GetCurrentProcessId() &&
 	(sig != 0 && sig != SIGKILL)) {
 	if ((ret = raise(sig)) != 0) {
@@ -4330,20 +4327,8 @@ wrename(const WCHAR *oldpath, const WCHAR *newpath)
 	    switch (GetLastError()) {
 	      case ERROR_ALREADY_EXISTS:
 	      case ERROR_FILE_EXISTS:
-		if (IsWinNT()) {
-		    if (MoveFileExW(oldpath, newpath, MOVEFILE_REPLACE_EXISTING))
-			res = 0;
-		}
-		else {
-		    for (;;) {
-			if (!DeleteFileW(newpath) && GetLastError() != ERROR_FILE_NOT_FOUND)
-			    break;
-			else if (MoveFileW(oldpath, newpath)) {
-			    res = 0;
-			    break;
-			}
-		    }
-		}
+		if (MoveFileExW(oldpath, newpath, MOVEFILE_REPLACE_EXISTING))
+		    res = 0;
 	    }
 	}
 
@@ -4611,22 +4596,6 @@ winnt_stat(const WCHAR *path, struct stati64 *st)
     return 0;
 }
 
-#ifdef WIN95
-/* License: Ruby's */
-static int
-win95_stat(const WCHAR *path, struct stati64 *st)
-{
-    int ret = _wstati64(path, st);
-    if (ret) return ret;
-    if (st->st_mode & S_IFDIR) {
-	return check_valid_dir(path);
-    }
-    return 0;
-}
-#else
-#define win95_stat(path, st) -1
-#endif
-
 /* License: Ruby's */
 int
 rb_w32_stat(const char *path, struct stat *st)
@@ -4677,7 +4646,7 @@ wstati64(const WCHAR *path, struct stati64 *st)
     else if (*end == L'\\' || (buf1 + 1 == end && *end == L':'))
 	lstrcatW(buf1, L".");
 
-    ret = IsWinNT() ? winnt_stat(buf1, st) : win95_stat(buf1, st);
+    ret = winnt_stat(buf1, st);
     if (ret == 0) {
 	st->st_mode &= ~(S_IWGRP | S_IWOTH);
     }
@@ -4780,17 +4749,6 @@ rb_w32_truncate(const char *path, off_t length)
 {
     HANDLE h;
     int ret;
-#ifdef WIN95
-    if (IsWin95()) {
-	int fd = open(path, O_WRONLY), e = 0;
-	if (fd == -1) return -1;
-	ret = chsize(fd, (unsigned long)length);
-	if (ret == -1) e = errno;
-	close(fd);
-	if (ret == -1) errno = e;
-	return ret;
-    }
-#endif
     h = CreateFile(path, GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
     if (h == INVALID_HANDLE_VALUE) {
 	errno = map_errno(GetLastError());
@@ -4807,11 +4765,6 @@ rb_w32_ftruncate(int fd, off_t length)
 {
     HANDLE h;
 
-#ifdef WIN95
-    if (IsWin95()) {
-	return chsize(fd, (unsigned long)length);
-    }
-#endif
     h = (HANDLE)_get_osfhandle(fd);
     if (h == (HANDLE)-1) return -1;
     return rb_chsize(h, length);
@@ -5125,13 +5078,7 @@ rb_w32_free_environ(char **env)
 rb_pid_t
 rb_w32_getpid(void)
 {
-    rb_pid_t pid;
-
-    pid = GetCurrentProcessId();
-
-    (void)IfWin95(pid = -pid, 0);
-
-    return pid;
+    return GetCurrentProcessId();
 }
 
 
@@ -5143,7 +5090,7 @@ rb_w32_getppid(void)
     static query_func *pNtQueryInformationProcess = NULL;
     rb_pid_t ppid = 0;
 
-    if (!IsWin95() && rb_w32_osver() >= 5) {
+    if (rb_w32_osver() >= 5) {
 	if (!pNtQueryInformationProcess)
 	    pNtQueryInformationProcess = (query_func *)get_proc_address("ntdll.dll", "NtQueryInformationProcess", NULL);
 	if (pNtQueryInformationProcess) {
@@ -5528,6 +5475,322 @@ rb_w32_pipe(int fds[2])
 }
 
 /* License: Ruby's */
+static struct constat *
+constat_handle(HANDLE h)
+{
+    st_data_t data;
+    struct constat *p;
+    if (!conlist) {
+	conlist = st_init_numtable();
+    }
+    if (st_lookup(conlist, (st_data_t)h, &data)) {
+	p = (struct constat *)data;
+    }
+    else {
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	p = ALLOC(struct constat);
+	p->vt100.state = constat_init;
+	p->vt100.attr = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED;
+	p->vt100.saved.X = p->vt100.saved.Y = 0;
+	if (GetConsoleScreenBufferInfo(h, &csbi)) {
+	    p->vt100.attr = csbi.wAttributes;
+	}
+	st_insert(conlist, (st_data_t)h, (st_data_t)p);
+    }
+    return p;
+}
+
+/* License: Ruby's */
+static void
+constat_reset(HANDLE h)
+{
+    st_data_t data;
+    struct constat *p;
+    if (!conlist) return;
+    if (!st_lookup(conlist, (st_data_t)h, &data)) return;
+    p = (struct constat *)data;
+    p->vt100.state = constat_init;
+}
+
+/* License: Ruby's */
+static DWORD
+constat_attr(int count, const int *seq, DWORD attr, DWORD default_attr)
+{
+#define FOREGROUND_MASK (FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED)
+#define BACKGROUND_MASK (BACKGROUND_BLUE | BACKGROUND_GREEN | BACKGROUND_RED)
+    DWORD bold = attr & (FOREGROUND_INTENSITY | BACKGROUND_INTENSITY);
+    int rev = 0;
+
+    if (!count) return attr;
+    while (count-- > 0) {
+	switch (*seq++) {
+	  case 0:
+	    attr = default_attr;
+	    rev = 0;
+	    bold = 0;
+	    break;
+	  case 1:
+	    bold |= rev ? BACKGROUND_INTENSITY : FOREGROUND_INTENSITY;
+	    break;
+	  case 4:
+#ifndef COMMON_LVB_UNDERSCORE
+#define COMMON_LVB_UNDERSCORE 0x8000
+#endif
+	    attr |= COMMON_LVB_UNDERSCORE;
+	    break;
+	  case 7:
+	    rev = 1;
+	    break;
+
+	  case 30:
+	    attr &= ~(FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED);
+	    break;
+	  case 17:
+	  case 31:
+	    attr = attr & ~(FOREGROUND_BLUE | FOREGROUND_GREEN) | FOREGROUND_RED;
+	    break;
+	  case 18:
+	  case 32:
+	    attr = attr & ~(FOREGROUND_BLUE | FOREGROUND_RED) | FOREGROUND_GREEN;
+	    break;
+	  case 19:
+	  case 33:
+	    attr = attr & ~FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED;
+	    break;
+	  case 20:
+	  case 34:
+	    attr = attr & ~(FOREGROUND_GREEN | FOREGROUND_RED) | FOREGROUND_BLUE;
+	    break;
+	  case 21:
+	  case 35:
+	    attr = attr & ~FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED;
+	    break;
+	  case 22:
+	  case 36:
+	    attr = attr & ~FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN;
+	    break;
+	  case 23:
+	  case 37:
+	    attr |= FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_RED;
+	    break;
+
+	  case 40:
+	    attr &= ~(BACKGROUND_BLUE | BACKGROUND_GREEN | BACKGROUND_RED);
+	  case 41:
+	    attr = attr & ~(BACKGROUND_BLUE | BACKGROUND_GREEN) | BACKGROUND_RED;
+	    break;
+	  case 42:
+	    attr = attr & ~(BACKGROUND_BLUE | BACKGROUND_RED) | BACKGROUND_GREEN;
+	    break;
+	  case 43:
+	    attr = attr & ~BACKGROUND_BLUE | BACKGROUND_GREEN | BACKGROUND_RED;
+	    break;
+	  case 44:
+	    attr = attr & ~(BACKGROUND_GREEN | BACKGROUND_RED) | BACKGROUND_BLUE;
+	    break;
+	  case 45:
+	    attr = attr & ~BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_RED;
+	    break;
+	  case 46:
+	    attr = attr & ~BACKGROUND_RED | BACKGROUND_BLUE | BACKGROUND_GREEN;
+	    break;
+	  case 47:
+	    attr |= BACKGROUND_BLUE | BACKGROUND_GREEN | BACKGROUND_RED;
+	    break;
+	}
+    }
+    if (rev) {
+	attr = attr & ~(FOREGROUND_MASK | BACKGROUND_MASK) |
+	    ((attr & FOREGROUND_MASK) << 4) |
+	    ((attr & BACKGROUND_MASK) >> 4);
+    }
+    return attr | bold;
+}
+
+/* License: Ruby's */
+static void
+constat_apply(HANDLE handle, struct constat *s, WCHAR w)
+{
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    const int *seq = s->vt100.seq;
+    int count = s->vt100.state;
+    int arg1 = 1;
+    COORD pos;
+    DWORD written;
+
+    if (!GetConsoleScreenBufferInfo(handle, &csbi)) return;
+    if (count > 0 && seq[0] > 0) arg1 = seq[0];
+    switch (w) {
+      case L'm':
+	SetConsoleTextAttribute(handle, constat_attr(count, seq, csbi.wAttributes, s->vt100.attr));
+	break;
+      case L'F':
+	csbi.dwCursorPosition.X = 0;
+      case L'A':
+	csbi.dwCursorPosition.Y -= arg1;
+	if (csbi.dwCursorPosition.Y < 0)
+	    csbi.dwCursorPosition.Y = 0;
+	SetConsoleCursorPosition(handle, csbi.dwCursorPosition);
+	break;
+      case L'E':
+	csbi.dwCursorPosition.X = 0;
+      case L'B':
+      case L'e':
+	csbi.dwCursorPosition.Y += arg1;
+	if (csbi.dwCursorPosition.Y >= csbi.dwSize.Y)
+	    csbi.dwCursorPosition.Y = csbi.dwSize.Y;
+	SetConsoleCursorPosition(handle, csbi.dwCursorPosition);
+	break;
+      case L'C':
+	csbi.dwCursorPosition.X += arg1;
+	if (csbi.dwCursorPosition.X >= csbi.dwSize.X)
+	    csbi.dwCursorPosition.X = csbi.dwSize.X;
+	SetConsoleCursorPosition(handle, csbi.dwCursorPosition);
+	break;
+      case L'D':
+	csbi.dwCursorPosition.X -= arg1;
+	if (csbi.dwCursorPosition.X < 0)
+	    csbi.dwCursorPosition.X = 0;
+	SetConsoleCursorPosition(handle, csbi.dwCursorPosition);
+	break;
+      case L'G':
+      case L'`':
+	csbi.dwCursorPosition.X = (arg1 > csbi.dwSize.X ? csbi.dwSize.X : arg1) - 1;
+	SetConsoleCursorPosition(handle, csbi.dwCursorPosition);
+	break;
+      case L'd':
+	csbi.dwCursorPosition.Y = (arg1 > csbi.dwSize.Y ? csbi.dwSize.Y : arg1) - 1;
+	SetConsoleCursorPosition(handle, csbi.dwCursorPosition);
+	break;
+      case L'H':
+      case L'f':
+	pos.Y = (arg1 > csbi.dwSize.Y ? csbi.dwSize.Y : arg1) - 1;
+	if (count < 2 || (arg1 = seq[1]) <= 0) arg1 = 1;
+	pos.X = (arg1 > csbi.dwSize.X ? csbi.dwSize.X : arg1) - 1;
+	SetConsoleCursorPosition(handle, pos);
+	break;
+      case L'J':
+	switch (arg1) {
+	  case 0:	/* erase after cursor */
+	    FillConsoleOutputCharacterW(handle, L' ',
+					csbi.dwSize.X * (csbi.dwSize.Y - csbi.dwCursorPosition.Y) - csbi.dwCursorPosition.X,
+					csbi.dwCursorPosition, &written);
+	    break;
+	  case 1:	/* erase before cursor */
+	    pos.X = 0;
+	    pos.Y = csbi.dwCursorPosition.Y;
+	    FillConsoleOutputCharacterW(handle, L' ',
+					csbi.dwSize.X * csbi.dwCursorPosition.Y + csbi.dwCursorPosition.X,
+					pos, &written);
+	    break;
+	  case 2:	/* erase entire line */
+	    pos.X = 0;
+	    pos.Y = 0;
+	    FillConsoleOutputCharacterW(handle, L' ', csbi.dwSize.X * csbi.dwSize.Y, pos, &written);
+	    break;
+	}
+	break;
+      case L'K':
+	switch (arg1) {
+	  case 0:	/* erase after cursor */
+	    FillConsoleOutputCharacterW(handle, L' ', csbi.dwSize.X - csbi.dwCursorPosition.X, csbi.dwCursorPosition, &written);
+	    break;
+	  case 1:	/* erase before cursor */
+	    pos.X = 0;
+	    pos.Y = csbi.dwCursorPosition.Y;
+	    FillConsoleOutputCharacterW(handle, L' ', csbi.dwCursorPosition.X, pos, &written);
+	    break;
+	  case 2:	/* erase entire line */
+	    pos.X = 0;
+	    pos.Y = csbi.dwCursorPosition.Y;
+	    FillConsoleOutputCharacterW(handle, L' ', csbi.dwSize.X, pos, &written);
+	    break;
+	}
+	break;
+      case L's':
+	s->vt100.saved = csbi.dwCursorPosition;
+	break;
+      case L'u':
+	SetConsoleCursorPosition(handle, s->vt100.saved);
+	break;
+      case L'h':
+	if (count >= 2 && seq[0] == -1 && seq[1] == 25) {
+	    CONSOLE_CURSOR_INFO cci;
+	    GetConsoleCursorInfo(handle, &cci);
+	    cci.bVisible = TRUE;
+	    SetConsoleCursorInfo(handle, &cci);
+	}
+	break;
+      case L'l':
+	if (count >= 2 && seq[0] == -1 && seq[1] == 25) {
+	    CONSOLE_CURSOR_INFO cci;
+	    GetConsoleCursorInfo(handle, &cci);
+	    cci.bVisible = FALSE;
+	    SetConsoleCursorInfo(handle, &cci);
+	}
+	break;
+    }
+}
+
+/* License: Ruby's */
+static long
+constat_parse(HANDLE h, struct constat *s, const WCHAR **ptrp, long *lenp)
+{
+    const WCHAR *ptr = *ptrp;
+    long rest, len = *lenp;
+    while (len-- > 0) {
+	WCHAR wc = *ptr++;
+	if (wc == 0x1b) {
+	    rest = *lenp - len - 1;
+	    s->vt100.state = constat_esc;
+	}
+	else if (s->vt100.state == constat_esc && wc == L'[') {
+	    rest = *lenp - len - 1;
+	    if (rest > 0) --rest;
+	    s->vt100.state = constat_seq;
+	    s->vt100.seq[0] = 0;
+	}
+	else if (s->vt100.state >= constat_seq) {
+	    if (wc >= L'0' && wc <= L'9') {
+		if (s->vt100.state < (int)numberof(s->vt100.seq)) {
+		    int *seq = &s->vt100.seq[s->vt100.state];
+		    *seq = (*seq * 10) + (wc - L'0');
+		}
+	    }
+	    else if (s->vt100.state == constat_seq && s->vt100.seq[0] == 0 && wc == L'?') {
+		s->vt100.seq[s->vt100.state++] = -1;
+	    }
+	    else {
+		do {
+		    if (++s->vt100.state < (int)numberof(s->vt100.seq)) {
+			s->vt100.seq[s->vt100.state] = 0;
+		    }
+		    else {
+			s->vt100.state = (int)numberof(s->vt100.seq);
+		    }
+		} while (0);
+		if (wc != L';') {
+		    constat_apply(h, s, wc);
+		    s->vt100.state = constat_init;
+		}
+	    }
+	    rest = 0;
+	}
+	else {
+	    continue;
+	}
+	*ptrp = ptr;
+	*lenp = len;
+	return rest;
+    }
+    len = *lenp;
+    *ptrp = ptr;
+    *lenp = 0;
+    return len;
+}
+
+
+/* License: Ruby's */
 int
 rb_w32_close(int fd)
 {
@@ -5536,6 +5799,7 @@ rb_w32_close(int fd)
 
     if (!is_socket(sock)) {
 	UnlockFile((HANDLE)sock, 0, 0, LK_LEN, LK_LEN);
+	constat_delete((HANDLE)sock);
 	return _close(fd);
     }
     _set_osfhnd(fd, (SOCKET)INVALID_HANDLE_VALUE);
@@ -5595,6 +5859,7 @@ rb_w32_read(int fd, void *buf, size_t size)
   retry:
     /* get rid of console reading bug */
     if (isconsole) {
+	constat_reset((HANDLE)_osfhnd(fd));
 	if (start)
 	    len = 1;
 	else {
@@ -5847,6 +6112,10 @@ rb_w32_write_console(uintptr_t strarg, int fd)
     HANDLE handle;
     DWORD dwMode, reslen;
     VALUE str = strarg;
+    rb_encoding *utf16 = rb_enc_find("UTF-16LE");
+    const WCHAR *ptr, *next;
+    struct constat *s;
+    long len;
 
     if (disable) return -1L;
     handle = (HANDLE)_osfhnd(fd);
@@ -5854,14 +6123,23 @@ rb_w32_write_console(uintptr_t strarg, int fd)
 	!rb_econv_has_convpath_p(rb_enc_name(rb_enc_get(str)), "UTF-16LE"))
 	return -1L;
 
-    str = rb_str_encode(str, rb_enc_from_encoding(rb_enc_find("UTF-16LE")),
+    str = rb_str_encode(str, rb_enc_from_encoding(utf16),
 			ECONV_INVALID_REPLACE|ECONV_UNDEF_REPLACE, Qnil);
-    if (!WriteConsoleW(handle, (LPWSTR)RSTRING_PTR(str), RSTRING_LEN(str)/2,
-		       &reslen, NULL)) {
-	if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
-	    disable = TRUE;
-	return -1L;
+    ptr = (const WCHAR *)RSTRING_PTR(str);
+    len = RSTRING_LEN(str) / sizeof(WCHAR);
+    s = constat_handle(handle);
+    while (len > 0) {
+	long curlen = constat_parse(handle, s, (next = ptr, &next), &len);
+	if (curlen > 0) {
+	    if (!WriteConsoleW(handle, ptr, curlen, &reslen, NULL)) {
+		if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+		    disable = TRUE;
+		return -1L;
+	    }
+	}
+	ptr = next;
     }
+    RB_GC_GUARD(str);
     return (long)reslen;
 }
 
@@ -5908,7 +6186,7 @@ wutime(const WCHAR *path, const struct utimbuf *times)
 	if (attr != (DWORD)-1 && (attr & FILE_ATTRIBUTE_READONLY))
 	    SetFileAttributesW(path, attr & ~FILE_ATTRIBUTE_READONLY);
 	hFile = CreateFileW(path, GENERIC_WRITE, 0, 0, OPEN_EXISTING,
-			    IsWin95() ? 0 : FILE_FLAG_BACKUP_SEMANTICS, 0);
+			    FILE_FLAG_BACKUP_SEMANTICS, 0);
 	if (hFile == INVALID_HANDLE_VALUE) {
 	    errno = map_errno(GetLastError());
 	    ret = -1;
@@ -6249,12 +6527,14 @@ rb_w32_inet_ntop(int af, const void *addr, char *numaddr, size_t numaddr_len)
     return numaddr;
 }
 
+/* License: Ruby's */
 char
 rb_w32_fd_is_text(int fd) {
     return _osfile(fd) & FTEXT;
 }
 
 #if RUBY_MSVCRT_VERSION < 80
+/* License: Ruby's */
 static int
 unixtime_to_systemtime(const time_t t, SYSTEMTIME *st)
 {
@@ -6264,6 +6544,7 @@ unixtime_to_systemtime(const time_t t, SYSTEMTIME *st)
     return 0;
 }
 
+/* License: Ruby's */
 static void
 systemtime_to_tm(const SYSTEMTIME *st, struct tm *t)
 {
@@ -6289,6 +6570,7 @@ systemtime_to_tm(const SYSTEMTIME *st, struct tm *t)
     t->tm_yday = d - 1;
 }
 
+/* License: Ruby's */
 static int
 systemtime_to_localtime(TIME_ZONE_INFORMATION *tz, SYSTEMTIME *gst, SYSTEMTIME *lst)
 {
@@ -6313,6 +6595,7 @@ systemtime_to_localtime(TIME_ZONE_INFORMATION *tz, SYSTEMTIME *gst, SYSTEMTIME *
 }
 #endif
 
+/* License: Ruby's */
 struct tm *
 gmtime_r(const time_t *tp, struct tm *rp)
 {
@@ -6336,6 +6619,7 @@ gmtime_r(const time_t *tp, struct tm *rp)
     return rp;
 }
 
+/* License: Ruby's */
 struct tm *
 localtime_r(const time_t *tp, struct tm *rp)
 {
@@ -6357,4 +6641,42 @@ localtime_r(const time_t *tp, struct tm *rp)
     }
 #endif
     return rp;
+}
+
+/* License: Ruby's */
+int
+rb_w32_wrap_io_handle(HANDLE h, int flags)
+{
+    BOOL tmp;
+    int len = sizeof(tmp);
+    int r = getsockopt((SOCKET)h, SOL_SOCKET, SO_DEBUG, (char *)&tmp, &len);
+    if (r != SOCKET_ERROR || WSAGetLastError() != WSAENOTSOCK) {
+        int f = 0;
+        if (flags & O_NONBLOCK) {
+            flags &= ~O_NONBLOCK;
+            f = O_NONBLOCK;
+        }
+        socklist_insert((SOCKET)h, f);
+    }
+    else if (flags & O_NONBLOCK) {
+        errno = EINVAL;
+        return -1;
+    }
+    return rb_w32_open_osfhandle((intptr_t)h, flags);
+}
+
+/* License: Ruby's */
+int
+rb_w32_unwrap_io_handle(int fd)
+{
+    SOCKET sock = TO_SOCKET(fd);
+    _set_osfhnd(fd, (SOCKET)INVALID_HANDLE_VALUE);
+    if (!is_socket(sock)) {
+	UnlockFile((HANDLE)sock, 0, 0, LK_LEN, LK_LEN);
+	constat_delete((HANDLE)sock);
+    }
+    else {
+	socklist_delete(&sock, NULL);
+    }
+    return _close(fd);
 }

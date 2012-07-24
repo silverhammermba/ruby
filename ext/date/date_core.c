@@ -218,13 +218,10 @@ f_negative_p(VALUE x)
 #include <float.h>
 #endif
 
-#if defined(FLT_RADIX) && defined(FLT_MANT_DIG)
-#if FLT_RADIX == 2 && FLT_MANT_DIG > 22
-#define USE_FLOAT
-#define sg_cast float
+#if defined(FLT_RADIX) && defined(FLT_MANT_DIG) && FLT_RADIX == 2 && FLT_MANT_DIG > 22
+#define date_sg_t float
 #else
-#define sg_cast double
-#endif
+#define date_sg_t double
 #endif
 
 /* A set of nth, jd, df and sf denote ajd + 1/2.  Each ajd begin at
@@ -240,11 +237,7 @@ struct SimpleDateData
     /* df is zero */
     /* sf is zero */
     /* of is zero */
-#ifndef USE_FLOAT
-    double sg;  /* 2298874..2426355 or -/+oo */
-#else
-    float sg;	/* at most 22 bits */
-#endif
+    date_sg_t sg;  /* 2298874..2426355 or -/+oo -- at most 22 bits */
     /* decoded as utc=local */
     int year;	/* truncated */
 #ifndef USE_PACK
@@ -267,11 +260,7 @@ struct ComplexDateData
     int df;	/* as utc, in secs */
     VALUE sf;	/* in nano secs */
     int of;	/* in secs */
-#ifndef USE_FLOAT
-    double sg;  /* 2298874..2426355 or -/+oo */
-#else
-    float sg;	/* at most 22 bits */
-#endif
+    date_sg_t sg;  /* 2298874..2426355 or -/+oo -- at most 22 bits */
     /* decoded as local */
     int year;	/* truncated */
 #ifndef USE_PACK
@@ -325,7 +314,7 @@ canon(VALUE x)
 {\
     (x)->nth = canon(_nth);\
     (x)->jd = _jd;\
-    (x)->sg = (sg_cast)(_sg);\
+    (x)->sg = (date_sg_t)(_sg);\
     (x)->year = _year;\
     (x)->mon = _mon;\
     (x)->mday = _mday;\
@@ -336,7 +325,7 @@ canon(VALUE x)
 {\
     (x)->nth = canon(_nth);\
     (x)->jd = _jd;\
-    (x)->sg = (sg_cast)(_sg);\
+    (x)->sg = (date_sg_t)(_sg);\
     (x)->year = _year;\
     (x)->pc = PACK2(_mon, _mday);\
     (x)->flags = _flags;\
@@ -352,7 +341,7 @@ _year, _mon, _mday, _hour, _min, _sec, _flags) \
     (x)->df = _df;\
     (x)->sf = canon(_sf);\
     (x)->of = _of;\
-    (x)->sg = (sg_cast)(_sg);\
+    (x)->sg = (date_sg_t)(_sg);\
     (x)->year = _year;\
     (x)->mon = _mon;\
     (x)->mday = _mday;\
@@ -370,7 +359,7 @@ _year, _mon, _mday, _hour, _min, _sec, _flags) \
     (x)->df = _df;\
     (x)->sf = canon(_sf);\
     (x)->of = _of;\
-    (x)->sg = (sg_cast)(_sg);\
+    (x)->sg = (date_sg_t)(_sg);\
     (x)->year = _year;\
     (x)->pc = PACK5(_mon, _mday, _hour, _min, _sec);\
     (x)->flags = _flags;\
@@ -385,7 +374,7 @@ _year, _mon, _mday, _hour, _min, _sec, _flags) \
     (x)->df = 0;\
     (x)->sf = INT2FIX(0);\
     (x)->of = 0;\
-    (x)->sg = (sg_cast)((y)->sg);\
+    (x)->sg = (date_sg_t)((y)->sg);\
     (x)->year = (y)->year;\
     (x)->mon = (y)->mon;\
     (x)->mday = (y)->mday;\
@@ -402,7 +391,7 @@ _year, _mon, _mday, _hour, _min, _sec, _flags) \
     (x)->df = 0;\
     (x)->sf = INT2FIX(0);\
     (x)->of = 0;\
-    (x)->sg = (sg_cast)((y)->sg);\
+    (x)->sg = (date_sg_t)((y)->sg);\
     (x)->year = (y)->year;\
     (x)->pc = PACK5(EX_MON((y)->pc), EX_MDAY((y)->pc), 0, 0, 0);\
     (x)->flags = (y)->flags;\
@@ -414,7 +403,7 @@ _year, _mon, _mday, _hour, _min, _sec, _flags) \
 {\
     (x)->nth = (y)->nth;\
     (x)->jd = (y)->jd;\
-    (x)->sg = (sg_cast)((y)->sg);\
+    (x)->sg = (date_sg_t)((y)->sg);\
     (x)->year = (y)->year;\
     (x)->mon = (y)->mon;\
     (x)->mday = (y)->mday;\
@@ -425,7 +414,7 @@ _year, _mon, _mday, _hour, _min, _sec, _flags) \
 {\
     (x)->nth = (y)->nth;\
     (x)->jd = (y)->jd;\
-    (x)->sg = (sg_cast)((y)->sg);\
+    (x)->sg = (date_sg_t)((y)->sg);\
     (x)->year = (y)->year;\
     (x)->pc = PACK2(EX_MON((y)->pc), EX_MDAY((y)->pc));\
     (x)->flags = (y)->flags;\
@@ -991,8 +980,14 @@ safe_mul_p(VALUE x, long m)
     if (!FIXNUM_P(x))
 	return 0;
     ix = FIX2LONG(x);
-    if (ix >= (FIXNUM_MAX / m))
-	return 0;
+    if (ix < 0) {
+	if (ix <= (FIXNUM_MIN / m))
+	    return 0;
+    }
+    else {
+	if (ix >= (FIXNUM_MAX / m))
+	    return 0;
+    }
     return 1;
 }
 
@@ -4207,7 +4202,7 @@ date_s__strptime_internal(int argc, VALUE *argv, VALUE klass,
  * Parses the given representation of date and time with the given
  * template, and returns a hash of parsed elements.  _strptime does
  * not support specification of flags and width unlike strftime.
- * 
+ *
  * For example:
  *
  *    Date._strptime('2001-02-03', '%Y-%m-%d')
@@ -4696,6 +4691,9 @@ d_lite_initialize(int argc, VALUE *argv, VALUE self)
     int df, of;
     double sg;
 
+    rb_check_frozen(self);
+    rb_check_trusted(self);
+
     rb_scan_args(argc, argv, "05", &vjd, &vdf, &vsf, &vof, &vsg);
 
     jd = INT2FIX(0);
@@ -4749,6 +4747,9 @@ d_lite_initialize(int argc, VALUE *argv, VALUE self)
 static VALUE
 d_lite_initialize_copy(VALUE copy, VALUE date)
 {
+    rb_check_frozen(copy);
+    rb_check_trusted(copy);
+
     if (copy == date)
 	return copy;
     {
@@ -5388,12 +5389,12 @@ set_sg(union DateData *x, double sg)
     if (simple_dat_p(x)) {
 	get_s_jd(x);
 	clear_civil(x);
-	x->s.sg = (sg_cast)sg;
+	x->s.sg = (date_sg_t)sg;
     } else {
 	get_c_jd(x);
 	get_c_df(x);
 	clear_civil(x);
-	x->c.sg = (sg_cast)sg;
+	x->c.sg = (date_sg_t)sg;
     }
 }
 
@@ -6807,10 +6808,10 @@ tmx_m_msecs(union DateData *x)
     return s;
 }
 
-static VALUE
+static int
 tmx_m_of(union DateData *x)
 {
-    return INT2FIX(m_of(x));
+    return m_of(x);
 }
 
 static char *
@@ -6836,7 +6837,7 @@ static struct tmx_funcs tmx_funcs = {
     (VALUE (*)(void *))m_sf_in_sec,
     (VALUE (*)(void *))tmx_m_secs,
     (VALUE (*)(void *))tmx_m_msecs,
-    (VALUE (*)(void *))tmx_m_of,
+    (int (*)(void *))tmx_m_of,
     (char *(*)(void *))tmx_m_zone
 };
 
@@ -6927,12 +6928,11 @@ date_strftime_internal(int argc, VALUE *argv, VALUE self,
  *    0  use zeros for padding.
  *    ^  upcase the result string.
  *    #  change case.
- *    :  use colons for %z.
  *
  *  The minimum field width specifies the minimum width.
  *
- *  The modifier is "E" and "O".
- *  They are ignored.
+ *  The modifiers are "E", "O", ":", "::" and ":::".
+ *  "E" and "O" are ignored.  No effect to result currently.
  *
  *  Format directives:
  *
@@ -6971,10 +6971,10 @@ date_strftime_internal(int argc, VALUE *argv, VALUE self,
  *
  *      %L - Millisecond of the second (000..999)
  *      %N - Fractional seconds digits, default is 9 digits (nanosecond)
- *              %3N  millisecond (3 digits)
- *              %6N  microsecond (6 digits)
- *              %9N  nanosecond (9 digits)
- *              %12N picosecond (12 digits)
+ *              %3N  millisecond (3 digits)   %15N femtosecond (15 digits)
+ *              %6N  microsecond (6 digits)   %18N attosecond  (18 digits)
+ *              %9N  nanosecond  (9 digits)   %21N zeptosecond (21 digits)
+ *              %12N picosecond (12 digits)   %24N yoctosecond (24 digits)
  *
  *    Time zone:
  *      %z - Time zone as hour and minute offset from UTC (e.g. +0900)
@@ -6982,7 +6982,7 @@ date_strftime_internal(int argc, VALUE *argv, VALUE self,
  *              %::z - hour, minute and second offset from UTC (e.g. +09:00:00)
  *              %:::z - hour, minute and second offset from UTC
  *                                                (e.g. +09, +09:30, +09:30:30)
- *      %Z - Time zone abbreviation name
+ *      %Z - Time zone abbreviation name or something similar information.
  *
  *    Weekday:
  *      %A - The full weekday name (``Sunday'')
@@ -7271,19 +7271,33 @@ d_lite_marshal_load(VALUE self, VALUE a)
 {
     get_d1(self);
 
+    rb_check_frozen(self);
+    rb_check_trusted(self);
+
     if (TYPE(a) != T_ARRAY)
 	rb_raise(rb_eTypeError, "expected an array");
 
     switch (RARRAY_LEN(a)) {
-      case 3:
+      case 2: /* 1.6.x */
+      case 3: /* 1.8.x, 1.9.2 */
 	{
 	    VALUE ajd, of, sg, nth, sf;
 	    int jd, df, rof;
 	    double rsg;
 
-	    ajd = RARRAY_PTR(a)[0];
-	    of = RARRAY_PTR(a)[1];
-	    sg = RARRAY_PTR(a)[2];
+
+	    if  (RARRAY_LEN(a) == 2) {
+		ajd = f_sub(RARRAY_PTR(a)[0], half_days_in_day);
+		of = INT2FIX(0);
+		sg = RARRAY_PTR(a)[1];
+		if (!k_numeric_p(sg))
+		    sg = DBL2NUM(RTEST(sg) ? GREGORIAN : JULIAN);
+	    }
+	    else {
+		ajd = RARRAY_PTR(a)[0];
+		of = RARRAY_PTR(a)[1];
+		sg = RARRAY_PTR(a)[2];
+	    }
 
 	    old_to_new(ajd, of, sg,
 		       &nth, &jd, &df, &sf, &rof, &rsg);
@@ -7339,6 +7353,16 @@ d_lite_marshal_load(VALUE self, VALUE a)
     return self;
 }
 
+/* :nodoc: */
+static VALUE
+date_s__load(VALUE klass, VALUE s)
+{
+    VALUE a, obj;
+
+    a = rb_marshal_load(s);
+    obj = d_lite_s_alloc(klass);
+    return d_lite_marshal_load(obj, a);
+}
 
 /* datetime */
 
@@ -8408,10 +8432,10 @@ dt_lite_to_s(VALUE self)
  *
  *      %L - Millisecond of the second (000..999)
  *      %N - Fractional seconds digits, default is 9 digits (nanosecond)
- *              %3N  millisecond (3 digits)
- *              %6N  microsecond (6 digits)
- *              %9N  nanosecond (9 digits)
- *              %12N picosecond (12 digits)
+ *              %3N  millisecond (3 digits)   %15N femtosecond (15 digits)
+ *              %6N  microsecond (6 digits)   %18N attosecond  (18 digits)
+ *              %9N  nanosecond  (9 digits)   %21N zeptosecond (21 digits)
+ *              %12N picosecond (12 digits)   %24N yoctosecond (24 digits)
  *
  *    Time zone:
  *      %z - Time zone as hour and minute offset from UTC (e.g. +0900)
@@ -8419,7 +8443,7 @@ dt_lite_to_s(VALUE self)
  *              %::z - hour, minute and second offset from UTC (e.g. +09:00:00)
  *              %:::z - hour, minute and second offset from UTC
  *                                                (e.g. +09, +09:30, +09:30:30)
- *      %Z - Time zone abbreviation name
+ *      %Z - Time zone abbreviation name or something similar information.
  *
  *    Weekday:
  *      %A - The full weekday name (``Sunday'')
@@ -8642,7 +8666,7 @@ dt_lite_jisx0301(int argc, VALUE *argv, VALUE self)
 static VALUE
 time_to_time(VALUE self)
 {
-    return rb_funcall(self, rb_intern("getlocal"), 0);
+    return f_getlocal(self);
 }
 
 /*
@@ -9677,6 +9701,7 @@ Init_date_core(void)
 #endif
     rb_define_method(cDate, "marshal_dump", d_lite_marshal_dump, 0);
     rb_define_method(cDate, "marshal_load", d_lite_marshal_load, 1);
+    rb_define_singleton_method(cDate, "_load", date_s__load, 1);
 
     /* datetime */
 

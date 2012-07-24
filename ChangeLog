@@ -1,3 +1,3506 @@
+Tue Jul 24 12:13:26 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/ruby/test_dir_m17n.rb: refactoring. RE should be in the left side
+	  of the =~ operator, and compare the result with nil is meaningless.
+
+Tue Jul 24 11:35:20 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/ruby/test_pack.rb (test_pack_unpack_M): was redefined
+	  accidentally.
+
+Tue Jul 24 09:31:18 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/rubygems:  Updated to RubyGems 1.8.24, a bugfix release.
+
+Tue Jul 24 08:30:15 2012  Luis Lavena  <luislavena@gmail.com>
+
+	* test/ruby/test_dir_m17n.rb (create_and_check_raw_file_name): add new
+	  helper method to ease encoding testing. Patch by Oleg Sukhodolsky.
+	  [ruby-core:46589][Bug #6765]
+
+	* test/ruby/test_dir_m17n.rb (test_filename_extutf8): use filesystem
+	  encoding when reading entries and comparing.
+
+	* test/ruby/test_dir_m17n.rb (test_filename_utf8_raw_name): removed.
+
+	* test/ruby/test_dir_m17n.rb (test_filename_utf8_raw_jp_name): split test.
+
+Tue Jul 24 08:09:30 2012  Luis Lavena  <luislavena@gmail.com>
+
+	* test/win32ole/test_win32ole_method.rb (is_ruby64?): Correct platform
+	  used to identify mingw-w64 (x64-mingw32). Patch by Hiroshi Shirosaki.
+	  [ruby-core:46651][Bug #6782]
+
+Tue Jul 24 07:22:58 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* time.c (time_sec):  Updated description of leap seconds for accuracy.
+	  Based on patch by Marcus Stollsteimer.  [Bug #6749]
+
+Tue Jul 24 07:03:11 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* string.c (rb_str_sub):  Fixed wording of documentation to match the
+	  replacement operation.  Minor cleanup of markup.  [Bug #6719]
+	* string.c (rb_str_sub_bang):  Minor wording change for clarity, minor
+	  cleanup of markup.
+
+Mon Jul 23 23:58:40 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enc/Makefile.in (TARGET_NAME, TARGET_ENTRY): needed for EXTDLDFLAGS
+	  on some platforms.  [ruby-core:46600] [Bug #6768]
+
+	* enc/depend: no longer needs tweaking DLDFLAGS for TARGET names.
+
+Mon Jul 23 22:48:19 2012  Tanaka Akira  <akr@fsij.org>
+
+	* lib/open-uri.rb: use respond_to? to test Tempfile.
+	  [ruby-dev:45995] [Bug #6781] reported by hsbt (Hiroshi SHIBATA).
+
+Mon Jul 23 14:43:34 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (LIBPATHENV): LIBPATH is used on AIX, but not
+	  SHLIB_PATH which was carelessly copied from HP/UX.  suggested by
+	  Perry Smith at [ruby-core:46397].  [Bug #6728]
+
+Mon Jul 23 01:55:08 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/uri/test_generic.rb (URI#test_find_proxy): add tests with
+	  empty *_proxy env variables.
+
+Mon Jul 23 01:47:26 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* test/uri/test_generic.rb (URI#with_env): unset proxy related env
+	  variables.  [Bug #6774]
+
+	* test/uri/test_generic.rb (URI#test_find_proxy): fix failures
+	  when proxy related env variables already set.  [Bug #6774]
+
+Sun Jul 22 23:58:48 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* thread.c (rb_threadptr_execute_interrupts_common): increase
+	  running_time_us on THREAD_TO_KILL like on THREAD_RUNNABLE.
+	  This cause not to switch from a thread which is to be killed
+	  on FreeBSD and Mac OS X. see also the test.
+	  This issue maybe exist for long time but happens after r36430.
+
+Sat Jul 21 06:21:45 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/net/http.rb: fixes for r36476. [Feature #6546]
+	  http://u64.rubyci.org/~chkbuild/ruby-trunk/log/20120720T030101Z.diff.html.gz
+
+	* lib/net/http.rb (Net::HTTP.newobj): return back for compatibility.
+
+	* lib/net/http.rb (Net::HTTP.new): set default_port if proxy port is
+	  not given.
+
+	* lib/net/http.rb (Net::HTTP#initialize): ditto.
+
+	* lib/net/http.rb (Net::HTTP#proxy?): return true or false.
+
+	* lib/net/http.rb (Net::HTTP#proxy_address): check proxy_uri is not nil.
+
+	* lib/net/http.rb (Net::HTTP#proxy_port): ditto.
+
+Sat Jul 21 23:12:53 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread_pthread.c (ruby_init_stack): STACK_GROW_DIR_DETECTION is
+	  necessary on platforms with unknown stack direction.  [Bug #6761]
+
+Sat Jul 21 15:13:42 2012  Shota Fukumori  <sorah@tubusu.net>
+
+	* lib/test/unit/testcase.rb (method_added): refactoring.
+
+Sat Jul 21 14:06:41 2012  Shota Fukumori  <sorah@tubusu.net>
+
+	* lib/test/unit/testcase.rb: warn when test_* method is redefined.
+	  Patch by mame (Yusuke Endoh). [Feature #2643] [ruby-core:27790]
+
+	* test/testunit/test_redefinition.rb: Test for above.
+
+	* test/testunit/test4test_redefinition.rb: Ditto.
+
+Sat Jul 21 08:41:14 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/logger.rb:  Updated example in Logger comment to match other
+	  examples and fixed a bug.  Patch by Marcus Stollsteimer.
+	  [Bug #6759]
+
+Fri Jul 20 17:20:54 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* random.c (rb_random_real): refine error message.
+
+Fri Jul 20 11:03:17 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* NEWS:  Updated net/http for automatic proxy detection (#6546) and
+	  automatic gzip and deflate compression (#6492, #6494).
+
+Fri Jul 20 10:55:38 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/net/http.rb:  Net::HTTP now automatically detects and uses
+	  proxies from the environment.  A proxy may also be specified as
+	  before.
+
+	  Net::HTTP::Proxy still creates anonymous classes, but these classes
+	  are only used to store configuration information.  When an HTTP
+	  instance is created the configuration is now copied.
+
+	  Additionally, Net::HTTP::ProxyDelta is no longer used by Net::HTTP
+
+	  [Feature #6546]
+	* lib/open-uri.rb:  Moved URI::Generic#find_proxy to uri/generic.
+	* lib/uri/generic.rb:  Imported find_proxy from open-uri.
+	* test/open-uri/test_open-uri.rb:  Moved proxy-discovery tests to URI.
+	* test/uri/test_generic.rb:  Imported proxy-discovery tests from
+	  open-uri.
+	* test/net/http/test_http.rb:  Added tests for proxy behavior.
+
+Fri Jul 20 09:34:11 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* test/socket/test_socket.rb:  Ignore IPv6 unique local addresses on OS
+	  X (iCloud Back to my Mac addresses) for test_udp_socket since they do
+	  not act as loopback addresses.  [Bug #6692]
+
+Fri Jul 20 09:32:14 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/socket/raddrinfo.c (addrinfo_ipv6_unique_local_p):  Added
+	  Addrinfo#ipv6_unique_local? to detect RFC 4193 unique local
+	  addresses.  Part of #6692
+	* ext/socket/rubysocket.h:  Add IN6_IS_ADDR_UNIQUE_LOCAL macro if
+	  missing.
+	* test/socket/test_addrinfo.rb:  Test for ipv6_unique_local?
+
+Fri Jul 20 07:40:32 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/net/http/response.rb:  Automatically inflate gzip and
+	  deflate-encoded response bodies.  [Feature #6942]
+	* lib/net/http/generic_request.rb:  Automatically accept gzip and
+	  deflate content-encoding for requests.  [Feature #6494]
+	* lib/net/http/request.rb:  Updated documentation for #6494.
+	* lib/net/http.rb:  Updated documentation for #6492 and #6494, removed
+	  Content-Encoding handling now present in Net::HTTPResponse.
+	* test/net/http/test_httpresponse.rb:  Tests for #6492
+	* test/net/http/test_http_request.rb:  Tests for #6494
+	* test/open-uri/test_open-uri.rb (test_content_encoding):  Updated test
+	  for automatic content-encoding handling.
+
+Fri Jul 20 03:42:54 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* thread_pthread.c: use #ifdef, not #if.
+
+Thu Jul 19 15:08:40 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* thread.c (rb_thread_s_control_interrupt,
+	            rb_thread_s_check_interrupt): added for
+	  Thread.control_interrupt and Thread.check_interrupt.
+	  See details on rdoc.
+	  I'll make an ticket for this feature.
+
+	* test/ruby/test_thread.rb: add a test for Thread.control_interrupt.
+
+	* thread.c (rb_threadptr_raise): make a new exception object
+	  even if argc is 0.
+
+	* thread.c (rb_thread_kill): kill thread immediately if target thread
+	  is current thread.
+
+	* vm_core.h (RUBY_VM_CHECK_INTS_BLOCKING): added.
+	  CHECK_INTS while/after blocking operation.
+
+	* vm_core.h (RUBY_VM_CHECK_INTS): require rb_thread_t ptr.
+
+	* cont.c (fiber_switch): use replaced RUBY_VM_CHECK_INTS().
+
+	* eval.c (ruby_cleanup): ditto.
+
+	* insns.def: ditto.
+
+	* process.c (rb_waitpid): ditto.
+
+	* vm_eval.c (vm_call0): ditto.
+
+	* vm_insnhelper.c (vm_call_method): ditto.
+
+Thu Jul 19 22:46:48 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_io.rb: remove temporally files early.
+
+Thu Jul 19 15:38:35 2012  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* variable.c (rb_mod_class_variables): return inherited variables
+	  except when the optional argument is set to false.
+	  [ruby-dev:44034] [Bug #4971]
+
+	* variable.c (rb_mod_constants): fix typo in documentation.
+
+Thu Jul 19 14:30:43 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* internal.h: move mark function declarations that should be private.
+
+Thu Jul 19 14:18:22 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/socket/init.c (rsock_init_sock): need to update max fd on all
+	  platforms.
+
+Thu Jul 19 14:15:48 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (rb_gc_mark_threads): remove deprecated function.
+
+Thu Jul 19 13:28:03 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/net/http/test_http.rb (TestNetHTTPLocalBind#test_bind_to_local*):
+	  re-enable the tests because now it's OK on windows.
+
+Thu Jul 19 13:26:25 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/socket/extconf.rb: now enable IPv6 by default on mswin.
+
+Thu Jul 19 09:33:46 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/emitter.c (initialize): allow a configuration object to be
+	  passed to the constructor so that mutation isn't required after
+	  instantiation.
+
+	* ext/psych/lib/psych/handler.rb: add configuration object
+
+	* ext/psych/lib/psych/visitors/emitter.rb: use configuration object if
+	  extra configuration is present.
+
+Thu Jul 19 08:20:25 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_file.rb: remove temporally files early.
+
+Thu Jul 19 07:37:41 2012  Masatoshi SEKI  <m_seki@mva.biglobe.ne.jp>
+
+	* test/drb/drbtest.rb: fixed: can't delete unix domain sockets problem.
+
+Thu Jul 19 03:41:20 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* bignum.c: Added #include <strings.h> for ffs(). Patch by Perry
+	  Smith. Thank you. [Bug #6748]
+
+Thu Jul 19 01:56:02 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* include/ruby/intern.h (rb_num_zerodiv): Added NORETURN.
+	  Patched by Xi Wang. [Bug #6736]
+
+Wed Jul 18 23:57:38 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* pack.c (pack_pack): round down too long uuencode width.  folding
+	  width in uuencode format cannot be longer than 63 bytes.
+
+Wed Jul 18 23:04:18 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/dbm/dbm.c (fdbm_empty_p): fix wrong condition introduced in r36438.
+
+	* ext/sdbm/init.c (fsdbm_empty_p): ditto.
+
+Wed Jul 18 23:08:57 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_beginendblock.rb: remove temporally files early.
+
+Wed Jul 18 22:43:02 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_autoload.rb: remove temporally files early.
+
+Wed Jul 18 21:59:46 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/ruby/test_argf.rb: use temporally directory.
+
+Wed Jul 18 19:41:19 2012  Tanaka Akira  <akr@fsij.org>
+
+	* test/openssl/test_config.rb: remove temporally files early.
+
+Wed Jul 18 17:45:26 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* error.c (rb_builtin_type_name): map by index.
+
+Wed Jul 18 16:17:40 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/mkmf.rb (have_framework): get rid of separating -framework
+	  option and its argument and dealing with the argument as a library
+	  or an object name.  if $LDFLAGS were an array...
+
+Wed Jul 18 16:09:10 2012  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* ext/curses/extconf.rb: support PDCurses.  patched by Luis Lavena.
+	  [ruby-core:46485] [Feature #6735]
+
+Wed Jul 18 15:50:25 2012  Shugo Maeda  <shugo@ruby-lang.org>
+
+	* parse.y (primary): allow an empty grouped expression as the
+	  operand of the not operator (e.g., not ()).
+	  [ruby-core:45976] [Bug #6674]
+
+	* parse.y (parser_yylex): show no warning for a grouped expression
+	  as the operand of the not operator (e.g., not (a)) or as an
+	  argument of a method call without parentheses (e.g., foo (a)).
+	  [ruby-core:39050] [Bug #5214]
+
+Wed Jul 18 15:33:21 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* thread.c (rb_thread_call_without_gvl2): added.
+	  it can skip last CHECK_INTS.  See document for more details.
+	  Document about it was updated a bit.
+
+	* include/ruby/thread.h (decl. of rb_thread_call_without_gvl2): added.
+
+	* thread.c (rb_thread_call_with_gvl): remove "EXPERIMENTAL!"
+	  warning from a document.
+
+Wed Jul 18 14:53:21 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (EXTDLDFLAGS): split options for each extension
+	  libraries, and unused in ruby.pc.  [Bug #6734]
+
+	* lib/mkmf.rb (MakeMakefile#configuration): add EXTDLDFLAGS.
+
+Wed Jul 18 14:47:23 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* thread.c: fix last commit miss.
+
+Wed Jul 18 14:16:51 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* thread.c (rb_threadptr_async_errinfo_*): manage async errors queue.
+	  Async events such as an exception throwed by Thread#raise,
+	  Thread#kill and thread termination (after main thread termination)
+	  will be queued to th->async_errinfo_queue.
+	  - clear: clear the queue.
+	  - enque: enque err object into queue.
+	  - deque: deque err object from queue.
+	  - active_p: return 1 if the queue should be checked.
+	  rb_thread_t#thrown_errinfo was removed.
+
+	* vm_core.h: add declarations of rb_threadptr_async_errinfo_*.
+	  remove rb_thread_t#thrown_errinfo field and
+	  add rb_thread_t#async_errinfo_queue (queue body: Array),
+	      rb_thread_t#async_errinfo_queue_checked (flag),
+	      rb_thread_t#async_errinfo_mask_stack(Array, not used yet).
+
+	* vm.c (rb_thread_mark): fix a mark function.
+
+	* cont.c (rb_fiber_start): enque an error.
+
+	* process.c (after_fork): clear async errinfo queue.
+
+Wed Jul 18 14:25:55 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* pack.c: (ditto) bitwise operations are not char.  Apply explicit
+	  casts on them.
+
+Wed Jul 18 12:59:50 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* encoding.c (load_encoding): explicit cast  to suppress  warning.
+	  Though the  cast truncates some bits, from  heuristic analysis I
+	  believe it is OK to do so here.
+
+	* bignum.c (rb_cstr_to_inum): ditto.
+
+Wed Jul 18 12:55:54 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/benchmark.rb: Fix Benchmark.benchmark output with an empty
+	  caption.  patched by Benoit Daloze. [ruby-core:45719] [Bug #6610]
+
+Wed Jul 18 10:00:54 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/debug.rb:  Added toplevel documentation.  Based on patch by Oscar
+	  Del Ben.  [Bug #6743], fixes #146 on github.
+
+Wed Jul 18 09:33:59 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/win32ole/test_win32ole_event.rb (TestWIN32OLE_EVENT): use
+	  standard skip method to skip tests.
+
+Wed Jul 18 09:26:45 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/logger.rb:  Updated typos and output to match modern Logger
+	  output.  Patch by Marcus Stollsteimer.  [Bug #6738]
+
+Wed Jul 18 07:59:29 2012  Takeyuki FUJIOKA  <xibbar@ruby-lang.org>
+
+	* lib/cgi/util.rb (CGI.escapeHTML,unescapeHTML): Add &apos; for HTML5
+	  escaping.
+	  [Feature #6620]
+
+Tue Jul 17 22:17:13 2012  Tanaka Akira  <akr@fsij.org>
+
+	* lib/open-uri.rb: call io.close! for Tempfile.
+
+Tue Jul 17 16:41:32 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* proc.c (rb_proc_arity): return normal value (not -n-1) if it is not
+	  a labmda, or it is a labmda and no arg_opts. [Bug #5694]
+
+Tue Jul 17 03:56:34 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych/visitors/to_ruby.rb: strings with YAML anchors
+	  are properly referenced. Patched by Joe Rafaniello via Github:
+	    https://github.com/tenderlove/psych/pull/69
+	* ext/psych/lib/psych/visitors/yaml_tree.rb: ditto
+	* test/psych/test_alias_and_anchor.rb: test for change
+
+Mon Jul 16 23:20:24 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_integer_float_cmp): use FIXNUM_MIN and FIXNUM_MAX,
+	  instead of LONG_MIN and LONG_MAX.
+
+Mon Jul 16 22:50:41 2012  Tanaka Akira  <akr@fsij.org>
+
+	* numeric.c (flo_to_s): use the exponential form if the integer part
+	  is longer than or equal DBL_DIG.
+	  [ruby-dev:45960] [ruby-trunk - Bug #6741]
+
+Mon Jul 16 22:01:00 2012  Ayumu AIZAWA  <ayumu.aizawa@gmail.com>
+
+	* ext/readline/readline.c: fixed docs. [Bug #6740][ruby-core:46501]
+	  patched by Nobuhiro IMAI.
+
+Mon Jul 16 19:24:01 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_integer_float_eq): new function.
+	  (rb_big_eq): use rb_integer_float_eq.
+
+	* internal.h (rb_integer_float_eq): declared.
+
+	* numeric.c (flo_eq): use rb_integer_float_eq.
+	  (fix_equal): ditto.
+
+Mon Jul 16 19:02:31 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_integer_float_cmp): rename a local variable.
+
+Mon Jul 16 18:40:26 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_integer_float_cmp): renamed from rb_big_float_cmp.
+
+	* internal.h: follow the above change.
+
+	* numeric.c: ditto.
+
+Mon Jul 16 17:57:54 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_big_float_cmp): compare an integer and float precisely.
+	  [ruby-core:31376] [Bug #3589] reported by Tomasz Wegrzanowski.
+
+Mon Jul 16 17:29:45 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_big_float_cmp): support fixnum for argument x.
+
+	* numeric.c (fix_equal): use rb_big_float_cmp.
+	  (fix_cmp): ditto.
+	  (fix_gt): ditto.
+	  (fix_ge): ditto.
+	  (fix_lt): ditto.
+	  (fix_le): ditto.
+	  (flo_eq): ditto.
+	  (flo_cmp): use rb_big_float_cmp for fixnum argument.
+	  (flo_gt): ditto.
+	  (flo_ge): ditto.
+	  (flo_lt): ditto.
+	  (flo_le): ditto.
+
+Mon Jul 16 17:05:53 2012  Ayumu AIZAWA  <ayumu.aizawa@gmail.com>
+
+	* test/fileutils/test_fileutils.rb: add test for FileUtils#uptodate?
+
+Mon Jul 16 16:56:12 2012  Ayumu AIZAWA  <ayumu.aizawa@gmail.com>
+
+	* lib/fileutils.rb (FileUtils.uptodate?): remove useless parameter.
+	  patched by Oscar Del Ben.[Bug #6708][ruby-core:46256]
+
+Mon Jul 16 15:37:56 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (rb_big_eq): use rb_big_float_cmp.
+
+Mon Jul 16 15:00:45 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_big_float_cmp): declared.
+
+	* bignum.c (rb_big_float_cmp): extracted from rb_big_cmp and big_op.
+	  (rb_big_cmp): use rb_big_float_cmp.
+	  (big_op): ditto.
+
+	* numeric.c (flo_cmp): use rb_big_float_cmp.
+	  (flo_gt): ditto.
+	  (flo_ge): ditto.
+	  (flo_lt): ditto.
+	  (flo_le): ditto.
+
+Mon Jul 16 14:14:21 2012  Tanaka Akira  <akr@fsij.org>
+
+	* bignum.c (enum big_op_t): new type.
+	  (big_op): use enum big_op_t.
+	  (big_gt): ditto.
+	  (big_ge): ditto.
+	  (big_lt): ditto.
+	  (big_le): ditto.
+
+Sat Jul 14 18:18:48 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (rb_get_values_at): fill with nil out of range.
+	  [ruby-core:43678] [Bug #6203]
+
+Sat Jul 14 17:17:55 2012  Ayumu AIZAWA  <ayumu.aizawa@gmail.com>
+
+	* cont.c (cont_restore_0): improve docs. [Bug #6706][ruby-core:46243]
+	  patched by Oscar Del Ben via https://github.com/ruby/ruby/pull/140
+
+Sat Jul 14 17:08:13 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* hash.c (rb_hash_s_create): raise an exception, when input elements
+	  are not one or two elements arrays.  [ruby-core:39945] [Bug #5406]
+
+Sat Jul 14 16:16:48 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#_run_parallel): use
+	  Array#uniq!.
+
+	* lib/test/unit.rb (Test::Unit::Runner#deal): deal tasks to workers.
+
+	* lib/test/unit.rb (Test::Unit::Runner#quit_workers): close and kill
+	  all workers.
+
+	* lib/test/unit.rb (Test::Unit::Runner#delete_worker): delete dead
+	  worker from working set.
+
+	* lib/test/unit.rb (Test::Unit::Runner#launch_worker): add new worker
+	  to working set.
+
+	* lib/test/unit.rb (Test::Unit::Runner#launch_worker): extract.
+
+	* lib/test/unit.rb (Test::Unit::Runner#start_watchdog): extract.
+
+	* lib/test/unit.rb (Test::Unit::Runner#_run_parallel): move
+	  initializations with nothing to release outside begin/ensure.
+
+Sat Jul 14 16:04:24 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* array.c (rb_ary_join): should not infected by separator if it is not
+	  used.  [ruby-core:42161][Bug #5902]
+
+Sat Jul 14 02:31:55 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/intern.h (rb_thread_blocking_region): fix declarations
+	  prototypes without arguments in C++ have different meanings than C.
+
+Thu Jul 12 12:32:26 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/runner.rb: skip default gems to get rid of loading old versions
+	  before installation.
+
+Thu Jul 12 11:44:23 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* string.c (rb_str_new_frozen): since the result object should have
+	  same tainted/untrusted bits with the original object, return new
+	  object if the shared object unmatch.  [ruby-core:39745][Bug #5374]
+
+Thu Jul 12 10:46:39 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/net/http/test_http.rb (TestNetHTTPLocalBind#test_bind_to_local*):
+	  cannot cross between network interfaces on Windows, so skip this test
+	  until we find better test.
+
+Thu Jul 12 08:48:33 2012  Ryan Davis  <ryand-ruby@zenspider.com>
+
+	* lib/minitest/*: Imported minitest 3.2.0 (r7598)
+	* test/minitest/*: ditto
+
+Thu Jul 12 05:11:41 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* insns.def (defined): use method entry and id in cfp for proper
+	  superclass, since klass in iseq is shared by dynamically defined
+	  methods from the same block.  [ruby-core:45831][Bug #6644]
+
+Thu Jul 12 01:49:07 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/net/http.rb (Net::HTTP#connect): use local_host and local_port
+	  if specified. patched by Ricardo Amorim [Feature #6617]
+
+Wed Jul 11 17:36:39 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/extmk.rb: append ENCOBJS to DLDOBJS but not EXTSOLIBS which is
+	  not a target, to compile enc/encinit.c.
+
+Wed Jul 11 12:38:20 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/openssl/ossl_pkey_ec.c (ossl_ec_point_mul): nonstatic initializer
+	  of an aggregate type is a C99ism.
+
+	* ext/openssl/ossl_pkey_ec.c (ossl_ec_point_mul): get rid of VC++
+	  warnings.
+
+Mon Jul  9 16:11:30 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* vm_eval.c (rb_eval_string_from_file,
+	  rb_eval_string_from_file_protect): new functions to replace
+	  rb_compile_main_from_string() and ruby_eval_main().
+
+	* nacl/pepper_ruby.c: Follows the change in vm_eval.c
+
+Mon Jul  9 14:05:42 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	Reverts a half of r36079. As we discussed on ruby-dev@ and IRC,
+	we do not need to disclose intermediate representation of program.
+	The program embedding CRuby should use rb_eval_string family.
+	* include/ruby/ruby.h (ruby_opaque_t): removed.
+	  (ruby_compile_main_from_file, ruby_compile_main_from_string,
+	   ruby_eval_main): removed.
+
+	* eval.c (ruby_eval_main_internal): became ruby_exec_internal() again.
+	  (ruby_eval_main): removed.
+
+	* ruby.c (PREPARE_PARSE_MAIN) reverted.
+	  (parse_and_compile_main, ruby_compile_main_from_file,
+	   ruby_compile_main_from_string): removed
+
+Wed Jul 11 10:16:38 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby.h (HAVE_RUBY_THREAD_H): to show ruby/thread.h to be
+	  available.  fixup of r36355.
+
+Wed Jul 11 03:26:47 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c:  Added streaming support to inflate processing.
+	  This allows zlib streams to be processed without huge memory growth.
+	  [Feature #6612]
+	* NEWS:  ditto
+	* ext/zlib/zlib.c (zstream_expand_buffer):  Uses rb_yield when a block
+	  is given for streaming support.  Refactored to use
+	  zstream_expand_buffer_into to remove duplicate code.
+	* ext/zlib/zlib.c (zstream_expand_buffer_protect):  Added wrapper
+	  function to pass jump state back through GVL-free section to allow
+	  zstream clean-up before terminating the ruby call.
+	* ext/zlib/zlib.c (zstream_expand_buffer_without_gvl):  Acquire GVL to
+	  yield processed chunk of output stream.
+	* ext/zlib/zlib.c (zstream_detach_buffer):  When a block is given,
+	  returns Qnil mid-stream and yields the output buffer at the end of
+	  the stream.
+	* test/zlib/test_zlib.rb:  Updated tests
+
+Tue Jul 10 22:57:03 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/thread.h: new header file for thread stuff.
+
+	* thread.c (rb_thread_call_without_gvl): export.  [Feature#4328]
+	  returns void* instead of VALUE.  [Feature #5543]
+
+	* thread.c (rb_thread_blocking_region): deprecate.  [ruby-core:46295]
+
+Tue Jul 10 10:48:59 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* include/ruby/win32.h (NT, NtInitialize): removed unused old macros.
+
+Tue Jul 10 10:43:37 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* configure.in: removed --enable/disable-win95 options. (see r36342)
+
+Tue Jul 10 00:44:41 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* include/ruby/ruby.h: Removed RUBY_GLOBAL_SETUP completely. It is
+	  no meaning definition since r24894.
+	* main.c: ditto.
+	* nacl/pepper_main.c: ditto.
+
+Mon Jul  9 23:59:36 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* dln.c: Simplify and make consistent an ifdef for Mac OS X.
+	* ext/socket/rubysocket.h: ditto.
+	* ext/tk/stubs.c: ditto.
+	* io.c: ditto.
+	* process.c: ditto.
+	* signal.c: ditto.
+	* vm_dump.c: ditto.
+
+Mon Jul  9 17:37:35 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/win32.c (win95_stat): removed unnecessary macro.
+
+Mon Jul  9 17:22:16 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/configure.bat, win32/setup.mak, win32/Makefile.sub: omitted
+	  Win9x support.  removed --enable/disable-win95 options.
+
+	* include/ruby/win32.h, file.c, win32/win32.c: ditto.
+
+	* win32/README.win32: ditto.
+
+Mon Jul  9 13:28:34 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (DLDFLAGS): use TARGET_ENTRY to specify an entry point
+	  instead of TARGET which may contain non-identifier characters.
+
+	* lib/mkmf.rb (create_makefile): add TARGET_NAME which is the first
+	  part consists of only word characters.  [ruby-core:46248][Bug #6709]
+
+Sun Jul  8 07:36:19 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (shadowing_lvar_gen, warn_unused_var): no warnings for
+	  variables starting with _.  [ruby-core:46160][Feature #6693]
+
+Sat Jul  7 23:07:30 2012  CHIKANAGA Tomoyuki  <nagachika@ruby-lang.org>
+
+	* test/csv/test_features.rb: add require for Tempfile.
+	* test/csv/test_serialization.rb: ditto.
+
+Fri Jul  6 06:49:50 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* array.c (rb_ary_aref):  Added a description of the behavior of
+	  index positioning.  [Bug #6680]
+	* array.c (rb_ary_aset):  ditto.  Reordered sentences for clarity.
+	* string.c (rb_str_aref_m):  Added a description of the behavior of
+	  index positioning
+
+Fri Jul  6 05:38:44 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* string.c (rb_str_bytesize):  Improve documentation.  Patch by Oscar
+	  Del Ben from github issue #138.
+	* string.c (rb_str_empty):  ditto.
+	* string.c (rb_str_times):  ditto.
+	* string.c (rb_str_dump):  ditto.
+	* string.c (rb_str_center):  ditto.
+
+Fri Jul  6 04:05:59 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (zstream_expand_buffer_without_gvl):  Use
+	  ruby_xrealloc() to avoid crash with CALC_EXACT_MALLOC_SIZE.
+
+Thu Jul  5 17:32:19 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* internal.h: move ThreadShield declarations from intern.h.
+
+Thu Jul  5 16:00:24 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread.c (ThreadShield): rename from Barrier.
+
+Thu Jul  5 15:14:50 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* bootstraptest/runner.rb (show_progress): refine error output. do not
+	  count non-empty error message, but just warn.
+
+	* bootstraptest/runner.rb (error): show errors immediately if tty.
+
+Thu Jul  5 12:28:11 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* test/net/http/test_httpresponses.rb: Add a test file for
+	  Net::HTTPResponses and put a test case for the previous bug.
+
+Thu Jul  5 06:33:52 2012  Mark Dodwell <mark@mkdynamic.co.uk>
+
+	* lib/net/http/responses.rb: Fix 4xx classes to inherit correctly
+	  from Net::HTTPClientError. [Bug #6700]
+
+Wed Jul  4 21:55:35 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ruby.c (proc_options): warn only if -K and -w option is specified.
+	  see also r36274 [Feature #5206]
+
+Wed Jul  4 21:41:44 2012  Naohisa Goto  <ngotogenome@gmail.com>
+
+	* gc.c, atomic.h (ATOMIC_SIZE_*): moved from gc.c to atomic.h
+	  [ruby-dev:45909]
+
+Wed Jul  4 19:13:15 2012  Masaki Suketa <masaki.suketa@nifty.ne.jp>
+
+	* test/win32ole/test_win32ole.rb (test_s_codepage_changed):
+	  FileSystemObject only supports ANSI or UTF-16LE encoding.
+	  Patch by h.shirosaki (Hiroshi Shirosaki) [ruby-trunk - Bug #6650]
+
+Wed Jul  4 11:52:12 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* gc.c (ATOMIC_SIZE_*): 64bit Windows support.
+
+Wed Jul  4 11:11:28 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* eval.c (rb_frame_callee, rb_f_callee_name): fix to return the
+	  called id.  this longstanding bug has been caused and blocked by
+	  the structure of old rb_control_frame_t and rb_iseq_t.
+
+	* vm_insnhelper.c (vm_push_frame): set proper method entry.
+
+Wed Jul  4 08:29:31 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* array.c (rb_ary_aref):  Updated documentation to indicate the
+	  starting index is an index into the array or string.  Updated
+	  examples to show behavior of indexes at the end of an array or
+	  string.  Based on patch by Marcus Stollsteimer.  [Bug #6680]
+	* array.c (rb_ary_aset):  ditto.
+	* string.c (rb_str_aref):  ditto.  Also added descriptive argument
+	  names to call-seq section.
+
+Wed Jul  4 07:05:59 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* test/zlib/test_zlib.rb (test_inflate_partial_input):  Added test for
+	  inflating incomplete zlib streams.
+
+Tue Jul  3 23:14:16 2012  Naohisa Goto  <ngotogenome@gmail.com>
+
+	* gc.c (ATOMIC_SIZE_EXCHANGE): fix function name on Solaris [Bug #6689]
+	  [ruby-dev:45904]
+
+Tue Jul  3 16:07:49 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* gc.c (vm_malloc_fixup, vm_xrealloc, vm_xfree, after_gc_sweep): use
+	  atomic operations to update malloc_params.
+
+Tue Jul  3 14:50:16 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (zstream_run_func):  Don't exit run loop for buffer
+	  error.  [Feature #6615]
+	* ext/zlib/zlib.c:  Fix style to match existing functions.
+
+Tue Jul  3 12:05:51 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/dl/cfunc.c (rb_dlcfunc_call): also needed the workaround for VC8
+	  for x64.  [ruby-dev:45875] [Bug #6676]
+	  reported by aves_ramphastos (Seigo Ishigane)
+
+Tue Jul  3 11:56:46 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (zstream_detach_buffer):  Refactored tainting of
+	  output string, moving it from the callee to zstream_detach_buffer.
+	* ext/zlib/zlib.c (rb_zstream_finish):  ditto
+	* ext/zlib/zlib.c (rb_zstream_flush_next_out):  ditto
+	* ext/zlib/zlib.c (rb_deflate_deflate):  ditto
+	* ext/zlib/zlib.c (rb_deflate_flush):  ditto
+	* ext/zlib/zlib.c (rb_inflate_inflate):  ditto
+
+Tue Jul  3 11:16:06 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* common.mk (runnable): make symbolic links to run in build directory.
+
+Tue Jul  3 10:46:06 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ruby.c (proc_options): warn if -K option is specified. [Feature #5206]
+
+Tue Jul  3 06:12:13 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* object.c (Init_Object):  Added RDoc location pointers for
+	  Kernel#methods, Kernel#protected_methods, Kernel#private_methods and
+	  Kernel#public_methods.  [Bug #6666]
+
+Tue Jul  3 06:02:54 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/zlib/zlib.c (zstream_run):  Process zlib streams without GVL.
+	  [Feature #6615]
+	* NEWS:  ditto.
+
+Mon Jul  2 22:13:04 2012  Tanaka Akira  <akr@fsij.org>
+
+	* thread.c (rb_thread_aref): add explanation for why Thread#[] and
+	  Thread#[]= are fiber-local and not thread-local.
+	  reported by Julien A.  [ruby-core:41606] [ruby-trunk - Bug #5750]
+
+Mon Jul  2 21:25:55 2012  Tanaka Akira  <akr@fsij.org>
+
+	* time.c (timew_out_of_timet_range): specialization for
+	  SIZEOF_TIME_T == SIZEOF_INT64_T.
+
+Mon Jul  2 17:06:32 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* class.c (rb_include_module): include modules after the origin.
+
+	* class.c (include_modules_at): skip prepended modules.
+
+	* class.c (rb_prepend_module): now basic.klass in ICLASS refers the
+	  old original class/module.  [ruby-dev:45868][Bug #6662]
+
+	* class.c (rb_mod_ancestors): ditto.
+
+	* vm_method.c (search_method): search method entry from the origin
+	  iclass.
+
+Mon Jul  2 05:54:58 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_core.c: [ruby-core:46058].
+
+Mon Jul  2 05:35:43 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_core.c (d_lite_marshal_load): accepts old dump.
+
+Mon Jul  2 03:21:53 2012  Ayumu AIZAWA  <ayumu.aizawa@gmail.com>
+
+	* README.EXT.ja: fixed args of have_struct_member() ,
+	  create_makefile() same as r35977. however, mkmf.rb include
+	  no Japanese-docs, so Appendix C was not removed. [Bug #6597]
+
+Fri Jun 29 05:08:41 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/test/unit/parallel.rb: workaround fix for rubygems.
+	  RubyGems can't find rake if the source directory is not equal to
+	  the directory which is running the test. [Bug #6604]
+
+Thu Jun 28 20:33:15 2012  Luis Lavena  <luislavena@gmail.com>
+
+	* test/win32ole/test_win32ole.rb (test_s_codepage_changed):
+	  FileSystemObject only supports ANSI or UTF-16LE encoding.
+	  Patch by bosko (Bosko Ivanisevic) [ruby-trunk - Bug #6650]
+
+Thu Jun 28 09:27:09 2012  CHIKANAGA Tomoyuki  <nagachika@ruby-lang.org>
+
+	* class.c (class_instance_method_list): consider prepended Class/Module
+	  when recur != 0. [ruby-dev:45863] [Bug #6660]
+
+	* test/ruby/test_module.rb (test_prepend_instance_methods_false): add
+	  a test for it.
+
+
+Thu Jun 28 06:12:42 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* class.c (rb_mod_ancestors): fix ancestors order.
+	  [ruby-core:45919][Bug #6658] [ruby-dev:45861][Bug #6659]
+
+Wed Jun 27 21:28:59 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* lib/racc/parser.rb: NotImplementError is not exist.
+
+	* lib/irb/output-method.rb (IRB::OutputMethod#print): ditto.
+
+Wed Jun 27 21:31:13 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* class.c (rb_prepend_module): ancestors of prepending module also
+	  should be included.  [ruby-core:45914][Bug #6654]
+
+Wed Jun 27 21:01:32 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* class.c (class_instance_method_list): m_tbl in prepended
+	  class/module is NULL.  [ruby-core:45915][Bug #6655]
+
+Wed Jun 27 16:48:48 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* class.c (rb_prepend_module): prepend module into another module.
+
+	* eval.c (rb_mod_prepend): new method Module#prepend.  [Feature #1102]
+
+Wed Jun 27 09:15:46 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (is_popen_fork): check if fork and raise NotImplementedError if
+	  unavailable.
+
+	* io.c (rb_io_s_popen): allow environment variables hash and exec
+	  options as flat parameters, not in an array arguments.
+	  [Feature#6651] [EXPERIMENTAL]
+
+	* process.c (rb_execarg_extract_options): extract exec options, but no
+	  exceptions on non-exec options and returns them as a Hash.
+
+	* process.c (rb_execarg_setenv): set environment variables.
+
+Tue Jun 26 16:57:14 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* thread_pthread.c (register_cached_thread_and_wait):
+	  return immediately if malloc() failed.
+	  [ruby-core:43960] [ruby-trunk - Bug #6235]
+
+	* thread_pthread.c (USE_THREAD_CACHE): check already defined or not.
+
+Tue Jun 26 10:01:56 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (rb_io_s_popen): revert r36213 "popen: shell commands with
+	  envvar" because it disabled to let single command bypass shell.
+
+Mon Jun 25 17:49:28 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* class.c (rb_mix_module): revert Module#mix.
+
+Mon Jun 25 16:57:38 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* proc.c (rb_mod_define_method): allow method transplanting from a
+	  module to either class or module.  [ruby-core:34267][Feature #4254]
+
+Mon Jun 25 11:34:45 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* internal.h: use rb_pid_t instead of pid_t because of there is no
+	  definition of pid_t here on Windows.
+
+Mon Jun 25 00:25:01 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* configure.in (for stack end address): remove human68k specific
+	  check. It is no longer supported.
+
+Sun Jun 24 23:02:17 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (pipe_open): merge win32 code using spawnv().
+
+Sun Jun 24 22:53:42 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (check_exec_fds): separate check_exec_fds_1() since
+	  nonstatic initializer of an aggregate type is not allowed by C89.
+
+Sun Jun 24 07:47:17 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): options field removed.
+
+	* process.c: follow the rb_execarg change.
+
+Sat Jun 23 23:48:21 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (proc_spawn_cmd): unused variable removed to suppress a
+	  warning.
+	  (save_env): ditto.
+
+	  [ruby-core:45797] reported by Luis Lavena.
+
+Sat Jun 23 23:19:31 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add new_pgroup_given and new_pgroup_flag
+	  fields.
+
+	* process.c (EXEC_OPTION_NEW_PGROUP): removed.
+	  (proc_spawn_cmd): take a struct rb_execarg argument.
+	  use the new fields.
+	  (rb_execarg_addopt): use the new fields.
+	  (rb_spawn_process): follow the proc_spawn_cmd change.
+
+	  [ruby-core:45794] [ruby-trunk - Bug #6633] reported by Luis Lavena.
+
+Sat Jun 23 20:26:36 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add fd_dup2, fd_close, fd_open,
+	  fd_dup2_child fields.
+
+	* process.c (EXEC_OPTION_DUP2): removed.
+	  (EXEC_OPTION_CLOSE): removed.
+	  (EXEC_OPTION_OPEN): removed.
+	  (EXEC_OPTION_DUP2_CHILD): removed.
+	  (mark_exec_arg): mark the new fields.
+	  (check_exec_redirect1): change condition for default option.
+	  (check_exec_redirect): take a struct rb_execarg argument.
+	  use the new fields.
+	  (rb_execarg_addopt): follow the check_exec_redirect change.
+	  (check_exec_fds): use the new fields.
+	  (save_redirect_fd): ditto.
+
+Sat Jun 23 19:01:18 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_execarg_fixup): fix envopts condition.
+
+Sat Jun 23 18:44:13 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (check_exec_redirect1): extracted from
+	  check_exec_redirect.
+
+Sat Jun 23 17:22:02 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (save_env): don't use EXEC_OPTION_UNSETENV_OTHERS.
+	  (rb_execarg_run_options): ditto.
+
+Sat Jun 23 17:04:08 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add env_modification field.
+
+	* process.c (EXEC_OPTION_ENV): removed.
+	  (mark_exec_arg): mark env_modification field.
+	  (rb_exec_fillarg): update the new field, instead of options array.
+	  (rb_execarg_fixup): use the new field.
+	  (save_env): ditto.
+	  (rb_execarg_run_options): ditto.
+
+Sat Jun 23 16:27:01 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add rlimit_limits field.
+
+	* process.c (EXEC_OPTION_RLIMIT): removed.
+	  (mark_exec_arg): mark rlimit_limits field.
+	  (rb_execarg_addopt): update the new fields, instead of options array.
+	  (run_exec_rlimit): use the new field.
+	  (rb_execarg_run_options): clear sarg using MEMZERO.  use the new
+	  field.
+
+Sat Jun 23 14:29:25 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add chdir_given and chdir_dir fields.
+
+	* process.c (EXEC_OPTION_CHDIR): removed.
+	  (mark_exec_arg): mark chdir_dir field.
+	  (rb_execarg_addopt): update the new fields, instead of options array.
+	  (rb_execarg_run_options): use the new fields.
+
+Sat Jun 23 13:20:47 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add close_others_given, close_others_do and
+	  close_others_maxhint fields.
+
+	* process.c (EXEC_OPTION_CLOSE_OTHERS): removed.
+	  (rb_execarg_addopt): update the new fields, instead of options array.
+	  (check_exec_fds): take eargp as an argument.  update the
+	  close_others_maxhint field.
+	  (rb_execarg_fixup): follow the argument change of check_exec_fds.
+	  (rb_execarg_run_options): use the new fields.
+
+Sat Jun 23 10:41:59 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add unsetenv_others_given and
+	  unsetenv_others_do fields.
+
+	* process.c (EXEC_OPTION_UNSETENV_OTHERS): removed.
+	  (rb_execarg_addopt): update the new fields, instead of options array.
+	  (rb_execarg_fixup): use the new fields.
+
+Sat Jun 23 09:35:47 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: use the variable name "soptions" for sargp->options.
+
+Sat Jun 23 09:17:49 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: use the name "sargp" for struct rb_execarg variables
+	  consistently for saving process attributes.
+
+	* io.c: ditto.
+
+Sat Jun 23 07:59:57 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: use the name "eargp" for struct rb_execarg variables
+	  consistently except for saving process attributes.
+
+	* io.c: ditto.
+
+	* ext/pty/pty.c: ditto.
+
+Wed Jun 20 18:27:03 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* common.mk: Add missing dependencies.
+
+Fri Jun 22 20:27:39 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg): add pgroup_given and pgroup_pgid fields.
+
+	* process.c (EXEC_OPTION_PGROUP): removed.
+	  (rb_execarg_addopt): update the new fields, instead of options array.
+	  (run_exec_pgroup): take a struct rb_execarg argument.  refer the new
+	  fields.
+	  (rb_execarg_run_options): follow run_exec_pgroup change.
+
+Fri Jun 22 18:48:51 2012  Kouhei Sutou  <kou@cozmixng.org>
+
+	* README.EXT, README.EXT.ja: use "sval" for the third argument
+	  name of Data_Wrap_Struct().
+	  Suggested by @satoh_fumiyasu. Thanks!!!
+
+Fri Jun 22 18:04:26 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* iseq.c, vm_eval.c: set th->base_block properly.
+	  th->base_block is information for (a) parsing, (b) compiling
+	  and (c) setting up the frame to execute the program passed by
+	  `eval' method.  For example, (1) parser need to know up-level
+	  variables to detect it is variable or method without paren.
+	  Befor (a), (b) and (c), VM set th->base_block by passed bindng
+	  (or previous frame information).  After execute (a), (b) and (c),
+	  VM should clear th->base_block.  However, if (a), (b) or (c)
+	  raises an exception, then th->base_block is not cleared.
+	  Problem is that the uncleared value th->balo_block is used for
+	  irrelevant iseq compilation.  It causes SEGV or critical error.
+	  I tried to solve this problem: to clear them before exception,
+	  but finally I found out that it is difficult to do it (Ruby
+	  program can be run in many places).
+	  Because of this background, I set th->base_block before
+	  compiling iseq and restore it after compiling.
+	  Basically, th->base_block is dirty hack (similar to global
+	  variable) and this patch is also dirty.
+
+	* bootstraptest/test_eval.rb: add a test for above.
+
+	* internal.h: remove unused decl.
+
+	* iseq.c (rb_iseq_compile_with_option): add base_block parameter.
+	  set th->base_block before compilation and restore it after
+	  compilation.
+
+	* ruby.c (require_libraries): pass 0 as base_block instead of
+	  setting th->base_block
+
+	* tool/compile_prelude.rb (prelude_eval): apply above changes.
+
+	* vm.c, vm_eval.c: ditto.
+
+	* vm_core.h: add comments.
+
+Fri Jun 22 18:19:38 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: pass struct rb_execarg value instead of its options
+	  field for saving process attribute changing functions.
+	  (save_redirect_fd): take a struct rb_execarg argument.
+	  (run_exec_dup2): ditto.
+	  (run_exec_close): ditto.
+	  (run_exec_open): ditto.
+	  (run_exec_dup2_child): ditto.
+	  (run_exec_pgroup): ditto.
+	  (run_exec_rlimit): ditto.
+	  (save_env): ditto.
+	  (rb_execarg_run_options): follow the above functions change.
+
+Fri Jun 22 17:55:48 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* test/ruby/test_backtrace.rb: decrease recursion depth
+	  to reduce consuming stack size.
+
+Fri Jun 22 13:36:50 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* random.c (random_init, random_load): cannot initialize frozen object
+	  again, nor with tainted/untrusted object.  [Bug #6540]
+
+Fri Jun 22 13:32:33 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* error.c (rb_check_copyable): new function, to ensure the target is
+	  not frozen and the source is not tainted nor untrusted.
+
+Fri Jun 22 05:55:20 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* eval.c (ruby_cleanup):  Fixed typo.  Patch by Trever Dawe.
+	  Fixes #131 (github).  [ruby-trunk - Bug #6619]
+
+Thu Jun 21 21:16:58 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_execarg_addopt): take a VALUE argument instead of
+	  struct rb_execarg.
+	  (rb_exec_arg_addopt): follow the rb_execarg_addopt change.
+	  (check_exec_options_i): ditto.
+
+	* io.c (pipe_open): follow the rb_execarg_addopt change.
+
+	* internal.h (rb_execarg_addopt): follow the definition change.
+
+Thu Jun 21 20:34:19 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): take a VALUE argument instead of
+	  struct rb_execarg.
+	  (rb_check_exec_options): ditto.
+	  (check_exec_options_i): ditto.
+
+Thu Jun 21 19:48:05 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_async_signal_safe): use rb_execarg_run_options
+	  instead of rb_run_exec_options_err.
+	  (rb_spawn_process): ditto.
+
+Thu Jun 21 19:02:43 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): take a VALUE argument instead of
+	  struct rb_execarg.
+	  (rb_execarg_init): follow the rb_exec_fillarg change.
+
+Thu Jun 21 18:36:43 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_execarg_init): take a VALUE argument instead of
+	  struct rb_execarg.
+	  (rb_execarg_new): follow the rb_execarg_init change.
+	  (rb_exec_arg_init): ditto.
+
+	* internal.h (rb_execarg_init): follow the definition change.
+
+Thu Jun 21 17:20:44 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (new_args_tail_gen): fix GC problem of keyword rest
+	  argument.  the wrapped struct should be bound to the wrapping node
+	  before assignment of child nodes, to get rid of the case the
+	  children are referred by only the struct pointer which is not a
+	  subject of GC.  [ruby-core:45744]
+
+Thu Jun 21 07:06:52 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* error.c (err_append): rename err_append() to compile_err_append()
+	  and move definition body.  err_append() is used only by compiling.
+
+Thu Jun 21 06:21:54 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_execarg_fixup): take a VALUE argument instead of
+	  struct rb_execarg.
+
+	* internal.h (rb_execarg_fixup): follow the definition change.
+
+	* io.c (pipe_open): follow rb_execarg_fixup change.
+
+	* ext/pty/pty.c (establishShell): ditto.
+
+Wed Jun 20 21:25:37 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (struct rb_execarg): add umask_given and umask_mask
+	  fields.
+
+	* process.c (STATIC_ASSERT): removed.
+	  (rb_execarg_addopt): follow the rb_execarg change.
+	  (rb_execarg_run_options): ditto.
+
+Wed Jun 20 20:38:23 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (struct rb_execarg) moved and renamed from
+	  struct rb_exec_arg in intern.h.
+
+	* include/ruby/intern.h (struct rb_exec_arg): refer Data object which
+	  contains struct rb_execarg.
+
+	* process.c: use struct rb_execarg instead of struct rb_exec_arg
+	  except functions declared in intern.h.
+	  (rb_exec_arg_addopt): extract a pointer to struct rb_execarg from
+	  struct rb_exec_arg.
+	  (rb_exec_arg_init): ditto.
+	  (rb_exec_arg_fixup): ditto.
+	  (rb_run_exec_options_err): ditto.
+	  (rb_run_exec_options): ditto.
+	  (rb_exec_err): ditto.
+	  (rb_exec): ditto.
+
+	* io.c: use struct rb_execarg instead of struct rb_exec_arg.
+
+	* ext/pty/pty.c: ditto.
+
+Wed Jun 20 19:13:25 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_execarg_new): declared.
+	  (rb_execarg_get): ditto.
+
+	* process.c (mark_exec_arg): new function.
+	  (free_exec_arg): ditto.
+	  (memsize_exec_arg): ditto.
+	  (exec_arg_data_type): defined.
+	  (rb_execarg_new): new function.
+	  (rb_execarg_get): ditto.
+	  (rb_f_exec): use rb_execarg_new.
+	  (rb_spawn_internal): ditto.
+	  (rb_f_spawn): ditto.
+
+	* io.c (pipe_open_v): use rb_execarg_new.
+	  (pipe_open_s): ditto.
+
+	* ext/pty/pty.c (establishShell): use rb_execarg_new.
+
+Wed Jun 20 16:36:14 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* missing/setproctitle.c (environ): use (*_NSGetEnviron()) instead of
+	  environ on Darwin for namespace cleanness, same as [ruby-core:00537].
+	  [ruby-core:45615] [Bug #6576]
+
+Wed Jun 20 11:33:04 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (rb_execarg_addopt): always make Fixnum, and ignore higher
+	  bits in too large umask value.
+
+Wed Jun 20 11:24:35 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#_run_parallel): deal with
+	  sudden-death of workers.
+
+Mon Jun 18 20:34:20 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* time.c (init_leap_second_info): fix non-ANSI function declaration.
+
+Mon Jun 18 20:29:04 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ruby.c (rb_f_sub): use ansi style declaration.
+	* ruby.c (rb_f_gsub): ditto.
+	* ruby.c (rb_f_chomp): ditto.
+
+Mon Jun 18 20:26:23 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* random.c (rb_random_int32): get rid of "warning: constant 0x100000000
+	  is so big it is long" warning.
+
+Mon Jun 18 20:07:23 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* dir.c (dir_initialize): get rid of "unused return: argc = rb_scan_args()"
+	  warning.
+
+Mon Jun 18 19:31:20 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* include/ruby/missing.h: include math.h before checking INFINITY
+	  and NAN. Otherwise, strange macro redefinition will occur.
+
+Mon Jun 18 19:12:37 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* array.c (ary_reverse): use ansi style declaration.
+
+Tue Jun 19 18:43:50 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/backward/rubysig.h: fix visibility.  [Bug #6607]
+
+Tue Jun 19 17:51:54 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (rb_execarg_run_options): do not call any methods in the
+	  async-signal-safe function.  mask has been checked with NUM2MODET()
+	  already and converted with LONG2NUM().
+
+Tue Jun 19 11:59:56 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/readline/readline.c (Init_readline): don't set 0 to
+	  rl_catch_signals and rl_catch_sigwinch. [Bug #5423]
+
+Tue Jun 19 11:52:59 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/readline/readline.c (readline_s_get_special_prefixes): suppress
+	  warning: uninitialized instance variable.
+
+Tue Jun 19 11:43:16 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* ext/readline/readline.c (readline_getc): fix editline compatibility
+	  broken by r36123. [Bug #6601]
+
+Mon Jun 18 17:10:08 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* string.c (rb_str_subpos): split from rb_str_substr.  returns
+	  adjusted position for substring.
+
+Mon Jun 18 10:42:57 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/readline/readline.c (readline_getc): deal with ESC just followed
+	  by ASCII as meta prefix in incremental search mode.  based on the
+	  patch from rctay (Tay Ray Chuan) at [ruby-core:45682].  [Bug #6601]
+
+Sun Jun 17 22:23:53 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* dir.c (rb_file_directory_p): move documentation for Dir.exist? from
+	  file.c so that the proper description will be shown instead of the
+	  documentation of File.directory?.  [ruby-core:45685]
+
+Sun Jun 17 16:21:01 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread_win32.h (rb_thread_lock_t): make a union for USE_WIN32_MUTEX.
+	  this internal is used only in thread_win32.c, but has to be complete
+	  to define rb_thread_t.
+
+	* thread_win32.c (native_mutex_lock, native_mutex_destroy): fix for
+	  USE_WIN32_MUTEX.
+
+	* thread_win32.c (native_cond_timedwait_ms): rename reserved pattern
+	  name.  user defined symbols should not start with __.
+
+Sat Jun 16 19:24:01 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_core.c: define date_sg_t.
+
+Sat Jun 16 18:46:57 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_tmx.h: offset in struct tmx_funcs is now int.
+	* ext/date/date_strftime.c: ditto.
+	* ext/date/date_core.c: ditto.
+
+Sat Jun 16 18:31:46 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* eval.c (ruby_setup): set running state in the normal case before
+	  popping a tag.
+
+Sat Jun 16 07:46:03 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#_run_parallel): format workers
+	  results in the parent.
+
+Sat Jun 16 07:12:56 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* tool/runruby.rb (File.realpath): return real path of expanded path.
+	  [Bug #6598]
+
+Sat Jun 16 07:12:28 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* bootstraptest/runner.rb (main): ignore -j option for compatibility
+	  with test/unit.
+
+Sat Jun 16 07:11:52 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#puke): modify only result and
+	  drop useless reports, not override entirely.
+
+	* lib/test/unit/parallel.rb (Test::Unit::Worker#_run_suite): report
+	  unformatted results.  formatting messages is not a workers task.
+
+	* lib/test/unit/parallel.rb (Test::Unit::Worker#puke): store raw
+	  results.
+
+Sat Jun 16 01:27:14 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych.rb: bumping psych to 1.3.3
+	* ext/psych/psych.gemspec: ditto
+
+Fri Jun 15 20:54:28 2012  Kazuhiro NISHIYAMA  <zn@mbf.nifty.com>
+
+	* vm_backtrace.c (backtrace_collect): rename from backtreace_collect.
+
+Fri Jun 15 19:22:13 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_core.h: remove VM_FRAME_MAGIC_FINISH (finish frame type).
+	  Before this commit:
+	    `finish frame' was place holder which indicates that VM loop
+	    needs to return function.
+	    If a C method calls a Ruby methods (a method written by Ruby),
+	    then VM loop will be (re-)invoked.  When the Ruby method returns,
+	    then also VM loop should be escaped.  `finish frame' has only
+	    one instruction `finish', which returns VM loop function.
+	    VM loop function executes `finish' instruction, then VM loop
+	    function returns itself.
+	    With such mechanism, `leave' instruction (which returns one
+	    frame from current scope) doesn't need to check that this `leave'
+	    should also return from VM loop function.
+	    Strictly, one branch can be removed from `leave' instruction.
+	  Consideration:
+	    However, pushing the `finish frame' needs costs because
+	    it needs several memory accesses.  The number of pushing
+	    `finish frame' is greater than I had assumed.  Of course,
+	    pushing `finish frame' consumes additional control frame.
+	    Moreover, recent processors has good branch prediction,
+	    with which we can ignore such trivial checking.
+	  After this commit:
+	    Finally, I decide to remove `finish frame' and `finish'
+	    instruction.  Some parts of VM depend on `finish frame',
+	    so the new frame flag VM_FRAME_FLAG_FINISH is introduced.
+	    If this frame should escape from VM function loop, then
+	    the result of VM_FRAME_TYPE_FINISH_P(cfp) is true.
+	    `leave' instruction checks this flag every time.
+	    I measured performance on it.  However on my environments,
+	    it improves some benchmarks and slows some benchmarks down.
+	    Maybe it is because of C compiler optimization parameters.
+	    I'll re-visit here if this cause problems.
+
+	* insns.def (leave, finish): remove finish instruction.
+
+	* vm.c, vm_eval.c, vm_exec.c, vm_backtrace.c, vm_dump.c:
+	  apply above changes.
+
+Fri Jun 15 19:11:23 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#puke): always add skipped
+	  results to the report for parallel test.  [Bug #6595]
+
+Fri Jun 15 09:01:35 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* nacl/pepper_main.c: Removed an unnecessary and erroneous inclusion.
+
+Thu Jun 14 22:59:56 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (RUBY_CPPOUTFILE): check if output is really sent to
+	  specified file to tell if -o option works.  [ruby-dev:45742]
+	  [Bug#6591]
+
+	* configure.in (RUBY_CPPOUTFILE): check if output file is actually
+	  created.  [ruby-dev:45742] [Bug#6591]
+
+Thu Jun 14 22:10:50 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (proc_exec_sh): don't strip leading spaces of the script.
+
+Thu Jun 14 15:54:02 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* file.c (rb_file_s_basename, rb_file_s_dirname): documentation fix.
+	  File.basename and File.dirname support File::ALT_SEPARATOR.
+
+Thu Jun 14 11:10:10 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* nacl/pepper_main.c: Applies the new embedding API to pepper_ruby.
+
+Thu Jun 14 10:44:41 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* include/ruby/ruby.h: Grouped APIs for embedding CRuby interpreter.
+	  (ruby_setup, ruby_compile_main_from_file,
+	  ruby_compile_main_from_string, ruby_eval_main,
+	  ruby_set_script_name): new APIs to embed CRuby.
+	  (ruby_opaque_t) Opaque pointer to an internal data, to NODE or iseq
+	  in particular.
+
+	* eval.c (ruby_setup): Similar to ruby_init but returns an error code
+	  instead of exit(3) on error.
+	  (ruby_eval_main): Similar to ruby_exec_node but returns the
+	  evaluation result.
+	  (ruby_eval_main_internal): renamed from ruby_exec_internal.
+
+	* ruby.c (toplevel_context): new helper function.
+	  (PREPARE_EVAL_MAIN): moved.
+	  (process_options): refactored with new functions.
+	  (parse_and_compile_main) new helper function.
+	  (ruby_compile_main_from_file, ruby_compile_main_from_string) new API
+	  (ruby_set_script_name): new API.
+
+
+Thu Jun 14 10:39:48 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* eval.c: Add doxygen comments.
+
+	* ruby.c: ditto.
+
+	* thread_pthread.c: ditto
+
+	* version.c: ditto.
+
+	* vm_core.h: ditto.
+
+Thu Jun 14 10:16:07 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* configure.in: revert r36071 and add NetBSD to blacklist of -ansi.
+
+Thu Jun 14 07:59:12 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* thread_pthread.c (get_stack): Linux is the only OS which includes
+	  the size of guard page into the stack size.
+
+Thu Jun 14 06:21:00 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/drb/drb.rb:  Replace broken links to the English DRb book.
+	  Patch by Zachary Scott.  [ruby-trunk - Bug #6544]
+
+Thu Jun 14 06:17:47 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/observer.rb:  Update broken link to the Programming Ruby book.
+	  Patch by Zachary Scott.  [ruby-trunk - Bug #6536]
+	* lib/drb/drb.rb:  ditto.
+
+Thu Jun 14 05:23:05 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* regparse.c (PFETCH_READY): suppress Wunused-but-set-variable.
+
+	* regparse.c (is_onechar_cclass): restructured to clarify that c is
+	  used iff found == 1.
+
+Thu Jun 14 02:54:17 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* configure.in: use -fbuiltin with -ansi -std=iso9899:199409.
+	  This prevents errors introduced by disabling builtin functions,
+	  which is the sub-effect of -ansi/-std.
+	  Now NetBSD can use -ansi -std=iso9899:199409.
+	  Maybe mingw, cygwin and darwin can also.
+
+Thu Jun 14 02:53:30 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* Makefile.in: don't remove macros. now name2ctype uses macros.
+
+	* tool/enc-unicode.rb: add comment why it uses Hash#index.
+
+	* enc/unicode/{name2ctype.kwd,name2ctype.src,name2ctype.h.blt}:
+	  update to follow the current name2ctype.h.
+	  FYI current Unicode version is 6.1.
+
+Thu Jun 14 00:16:59 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/net/http/responses.rb, lib/webrick/httpstatus.rb: Add HTTP
+	  response codes added in RFCs 2817 and 4918.  [ruby-core:45547]
+	  [Feature #6569]
+
+	* lib/net/http/responses.rb: Rename Net::HTTPMultipleChoice to
+	  Net::HTTPMultipleChoices, leaving the former as alias to the
+	  latter for backward compatibility.  [ruby-core:45547]
+	  [Feature #6569]
+
+	* lib/net/http/responses.rb: Add comments about unused,
+	  still-in-draft and private extension response codes.
+	  [ruby-core:45547] [Feature #6569]
+
+Wed Jun 13 22:44:32 2012  Naohisa Goto  <ngotogenome@gmail.com>
+
+	* test/dl/test_func.rb (test_qsort1, test_qsort2): use TYPE_SIZE_T
+	  for size_t variables. [ruby-dev:45733] [Bug #6584]
+
+Wed Jun 13 22:18:01 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in: remove -ansi and -std options for lgamma_r() and
+	  finite().
+
+Wed Jun 13 21:46:34 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in: cygwin does not provide some declarations in strict
+	  ANSI mode.
+
+Wed Jun 13 20:19:59 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_internal): move a variable declaration.
+
+Wed Jun 13 17:54:38 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* regparse.c (PFETCH_READY):  this  line was to  suppress warning,
+	  but  did emit  warnings if  -Wuninitialized was  set.  Assigning
+	  NULL instead if pfetch_prev should suffice the situation.
+
+Wed Jun 13 17:51:05 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in: cygwin needs C99 for some stuff, e.g.,
+	  pthread_attr_setstacksize, sched_yield.
+
+Wed Jun 13 17:50:43 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* Makefile.in (.c.i): add warnflags to make the result consistent with
+	  compilation.
+
+Wed Jun 13 15:12:07 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* configure.in: On Windows  platforms, system provided headers are
+	  VC++ optimized.  That is, C++ habits are often contaminated into
+	  various  headers.  Most  frequent  situation is  the  use of  //
+	  comments.  We bypass ANSI  C mode for them.  Otherwise extension
+	  libs cannot include those headers.
+
+Wed Jun 13 13:39:23 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* include/ruby/win32.h: get rid of C99 style one line comments.
+
+Wed Jun 13 13:39:04 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* encoding.c (enc_alias_internal): use strdup defined as macro.
+
+Wed Jun 13 10:20:27 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (rb_exec_fillarg): get rid of SIZE_T_MAX which may need
+	  more headers.
+
+	* process.c (rb_exec_fillarg): fix array element size.  "continue" and
+	  "readonly" exceeded the size.
+
+	* process.c (rb_exec_fillarg): use shell if the first word is reserved
+	  or special built-in name.
+	  http://pubs.opengroup.org/onlinepubs/009695399/utilities/xcu_chap02.html
+
+	* process.c (rb_exec_fillarg): treat '=' only in the first word.  if
+	  the first word does not contain '=', it is the command name and
+	  environment assignments cannot be anymore.
+
+Tue Jun 12 23:45:36 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/mkmf.rb: add dummy clean-static target to prevent errors for the
+	  case real clean-static target doesn't exist.
+
+Tue Jun 12 22:49:42 2012  Naohisa Goto  <ngotogenome@gmail.com>
+
+	* process.c (rb_exec_arg_fixup): fix compile error
+
+Tue Jun 12 21:40:13 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): treat '=' character as a meta
+	  character to detect assignments preceding command name.
+
+Tue Jun 12 20:29:19 2012  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_exec_arg_init): deprecated.
+	  (rb_exec_arg_addopt): ditto.
+	  (rb_exec_arg_fixup): ditto.
+	  (rb_run_exec_options): ditto.
+	  (rb_run_exec_options_err): ditto.
+
+	* internal.h (rb_execarg_init): declared.
+	  (rb_execarg_addopt): ditto.
+	  (rb_execarg_fixup): ditto.
+	  (rb_execarg_run_options): ditto.
+
+	* process.c: call rb_execarg_addopt, rb_execarg_fixup,
+	  rb_execarg_run_options, rb_execarg_init.
+	  (rb_execarg_addopt): renamed from rb_exec_arg_addopt.
+	  (rb_exec_arg_addopt): stub to call rb_execarg_addopt.
+	  (rb_execarg_init): renamed from rb_exec_arg_init.
+	  (rb_exec_arg_init): stub to call rb_execarg_init.
+	  (rb_execarg_fixup): renamed from rb_exec_arg_fixup.
+	  (rb_exec_arg_fixup): stub to call rb_execarg_fixup.
+	  (rb_execarg_run_options): renamed from rb_run_exec_options_err.
+	  (rb_run_exec_options_err): stub to call rb_execarg_run_options.
+	  (rb_run_exec_options): call rb_execarg_run_options.
+
+	* io.c: call rb_execarg_addopt, rb_execarg_fixup,
+	  rb_execarg_run_options, rb_execarg_init.
+
+	* ext/pty/pty.c (establishShell): call rb_execarg_init and
+	  rb_execarg_fixup.
+
+Tue Jun 12 18:39:59 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* configure.in: enable strict ANSI mode by default in case of GCC,
+	  requested by _ko1.
+
+Tue Jun 12 06:40:23 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): detect '#' as a meta character.
+
+Mon Jun 11 22:15:44 2012  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_proc_exec_n): deprecated.
+	  (rb_exec): ditto.
+	  (rb_exec_err): ditto.
+	  (rb_fork): ditto.
+	  (rb_fork_err): ditto.
+
+Mon Jun 11 18:49:52 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* configure.in: on checking libexecinfo, don't specify /use/local.
+	  On FreeBSD people must specify --with-opt-dir or --with-execinfo-dir.
+
+Mon Jun 11 12:14:37 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_core.h: remove lfp (local frame pointer) and rename
+	  dfp (dynamic frame pointer) to ep (environment pointer).
+	  This change make VM `normal' (similar to other interpreters).
+	  Before this commit:
+            Each frame has two env pointers lfp and dfp.  lfp points
+	    local environment which is method/class/toplevel frame.
+	    lfp[0] is block pointer.
+	    dfp is block local frame. dfp[0] points previous (parent)
+	    environment pointer.
+	    lfp == dfp when frame is method/class/toplevel.
+	    You can get lfp from dfp by traversing previous environment
+	    pointers.
+	  After this commit:
+	    Each frame has only `ep' to point respective environment.
+	    If there is parent environment, then ep[0] points parent
+	    environment (as dfp).  If there are no more environment,
+	    then ep[0] points block pointer (as lfp).  We call such ep
+	    as `LEP' (local EP).  We add some macros to get LEP and to
+	    detect LEP or not.
+	    In short, we replace dfp and lfp with ep and LEP.
+	  rb_block_t and rb_binding_t member `lfp' and `dfp' are removed
+	  and member `ep' is added.
+	  rename rb_thread_t's member `local_lfp' and `local_svar' to
+	  `root_lep' and `root_svar'.
+	  (VM_EP_PREV_EP(ep)): get previous environment pointer.  This macro
+	    assume that ep is not LEP.
+	  (VM_EP_BLOCK_PTR(ep)): get block pointer.  This macro assume
+	    that ep is LEP.
+	  (VM_EP_LEP_P(ep)): detect ep is LEP or not.
+	  (VM_ENVVAL_BLOCK_PTR(ptr)): make block pointer.
+	  (VM_ENVVAL_BLOCK_PTR_P(v)): detect v is block pointer.
+	  (VM_ENVVAL_PREV_EP_PTR(ptr)): make prev environment pointer.
+	  (VM_ENVVAL_PREV_EP_PTR_P(v)): detect v is prev env pointer.
+
+	* vm.c: apply above changes.
+	  (VM_EP_LEP(ep)): get LEP.
+	  (VM_CF_LEP(cfp)): get LEP of cfp->ep.
+	  (VM_CF_PREV_EP(cfp)): utility function VM_EP_PREV_EP(cfp->ep).
+	  (VM_CF_BLOCK_PTR(cfp)): utility function VM_EP_BLOCK_PTR(cfp->ep).
+
+	* vm.c, vm_eval.c, vm_insnhelper.c, vm_insnhelper.h, insns.def:
+	  apply above changes.
+
+	* cont.c: ditto.
+
+	* eval.c, eval_intern.h: ditto.
+
+	* proc.c: ditto.
+
+	* thread.c: ditto.
+
+	* vm_dump.c: ditto.
+
+	* vm_exec.h: fix function name (on vm debug mode).
+
+Mon Jun 11 11:52:18 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* compile.c (iseq_set_sequence): nonstatic initializer of an
+	  aggregate type is a C99ism.
+
+	* compile.c (enum compile_array_type_t): comma at the end of enum
+	  list is a C99ism.
+
+	* vm_backtrace.c (enum LOCATION_TYPE): ditto.
+
+Mon Jun 11 06:31:33 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_proc_exec_n): revert the function removed at r35889.
+
+Mon Jun 11 06:20:50 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* thread_pthread.c (rb_thread_create_timer_thread): assign return
+	  value to the variable err.
+
+Mon Jun 11 06:17:06 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* thread_pthread.c (native_cond_initialize): fix typo in r36022.
+	  this cause a failure on FreeBSD 8.2 amd64.
+	  http://fbsd.rubyci.org/~chkbuild/ruby-trunk/log/20120610T130201Z.diff.html.gz
+
+Mon Jun 11 05:21:57 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* .gdbinit (SDR): add SDR function.  It's only for VM debugging.
+
+Sun Jun 10 21:50:45 2012  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* nacl/nacl_config.rb: Fixed for 32bit hosts.
+
+Sun Jun 10 20:23:14 2012  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	Fixes threading on NativeClient.
+
+	* thread_pthread.c (timer_thread_sleep): Extracted out a function from
+	  thread_timer(). Added an alternative implementation for platforms
+	  that lacks select(2) or pipe(2).
+	  (rb_thread_create_timer_thread, native_cond_initialize,
+	  native_cond_destroy): Replaced wrong HAVE_XXX checks.
+
+	* configure.in (pthread_attr_init): New check.
+
+Sun Jun 10 21:30:11 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_without_timer_thread): renamed from rb_exec_err.
+	  (rb_exec_err): new stub function to call
+	  rb_exec_without_timer_thread.
+	  (rb_f_exec): call rb_exec_without_timer_thread.
+	  (rb_exec): call rb_exec_without_timer_thread.
+
+Sun Jun 10 21:13:10 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork): call rb_fork_internal instead of rb_fork_err.
+
+Sun Jun 10 20:55:59 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_ruby): call rb_fork_internal directly.
+
+Sun Jun 10 20:19:40 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_ruby): new function.
+	  (rb_f_fork): use rb_fork_ruby instead of rb_fork.
+	  (rb_daemon): ditto.
+
+	* io.c (pipe_open): use rb_fork_ruby instead of rb_fork.
+
+	* internal.h (rb_fork_ruby): declared.
+
+Sun Jun 10 18:58:16 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/net/http/response.rb: Remove a duplicated rdoc and leave a
+	  pointer.
+
+	* lib/net/http/responses.rb: Add RFC numbers to base on.
+
+Sun Jun 10 18:31:42 2012  Yuki Sonoda (Yugui)  <yugui@yugui.jp>
+
+	* configure.in (RUBY_NACL): Warns if $PATH does not contain the path
+	  to NativeClient SDK. PATH variable redefinition in GNUmakefile does
+	  not work for GNU make 3.81.
+
+Sun Jun 10 17:54:36 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* gc.h (IS_STACK_DIR_UPPER): utility macro.
+
+	* thread_pthread.c (get_stack): seems stack size does not include
+	  guard size on Mac OS X.
+
+	* thread_pthread.c (ruby_init_stack): adjust stack size for offset of
+	  addr from the bottom.
+
+Sun Jun 10 15:49:47 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (retry_fork): call after_fork except in a child process.
+	  (rb_fork_internal): restrict after_fork call condition.
+
+Sun Jun 10 14:19:33 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* configure.in: NetBSD 6 adds libexecinfo but it only works on amd64.
+	  http://www.mail-archive.com/source-changes-full@netbsd.org/msg38729.html
+
+Sun Jun 10 12:43:23 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_f_exec): call rb_exec_async_signal_safe except on
+	  Mac OS X.  cf. the comment in before_exec_non_async_signal_safe.
+
+Sun Jun 10 12:15:18 2012  Tanaka Akira  <akr@fsij.org>
+
+	* io.c (popen_exec): don't call rb_thread_atfork_before_exec.  use
+	  rb_exec_async_signal_safe instead of rb_exec_err.
+	  (pipe_open): use rb_fork_async_signal_safe instead of rb_fork_err.
+
+Sun Jun 10 11:44:57 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_internal): call after_fork only unless
+	  chfunc_is_async_signal_safe.
+
+Sun Jun 10 11:33:01 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_pkey_ec.c
+	  test/openssl/test_pkey_ec.rb: Add support for EC_POINT_mul.
+	  Patch provided by Sambasiva Suda. Thanks!
+	  [ruby-core:44408][ruby-trunk - Feature #6310]
+
+Sun Jun 10 10:48:15 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* lib/openssl/ssl.rb: Use a simple random number to generate the
+	  session id. MD5, as was used before, causes problems when
+	  using a FIPS version of OpenSSL. Issue was found by Jared
+	  Jennings, thank you!
+	  [ruby-trunk - Bug #6137]
+
+Sun Jun 10 10:27:34 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* NEWS: Add note about the new private key export behavior.
+
+Sun Jun 10 10:24:51 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_async_signal_safe): exported.
+
+	* ext/pty/extconf.rb: modify $INCFLAGS to include internal.h
+
+	* ext/pty/pty.c: include internal.h.
+	  (chfunc): don't call rb_thread_atfork_before_exec.  use
+	  rb_exec_async_signal_safe instead of rb_f_exec.
+	  (establishShell): set up earg.  use rb_fork_async_signal_safe
+	  instead of rb_fork_err.
+
+	* internal.h (rb_exec_async_signal_safe): declared.
+	  (rb_fork_async_signal_safe): declared.
+
+Sun Jun 10 10:21:37 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl.c
+	  ext/openssl/ossl_pkey_rsa.c
+	  ext/openssl/ossl_pkey_dsa.c
+	  ext/openssl/ossl_pkey_ec.c: Forbid export passwords that are less
+	  than four characters long, as OpenSSL itself does not allow this.
+	  Issue found by Eric Hodel.
+	* ext/openssl/ossl_pkey_ec.c: Add export as an alias of to_pem,
+	  following the PKey interface contract.
+	* test/openssl/test_pkey_dsa.rb
+	  test/openssl/test_pkey_rsa.rb
+	  test/openssl/test_pkey_ec.rb: Add tests that assert correct
+	  behaviour when dealing with passwords that are less than four
+	  characters long.
+	  [ruby-core: 42281][ruby-trunk - Bug #5951]
+
+Sun Jun 10 10:14:26 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_f_exec): use rb_exec_arg_prepare.
+
+Sun Jun 10 06:43:51 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: split after_exec into async-signal-safe part and rest.
+	  (after_exec_async_signal_safe): extracted from after_exec.
+	  (after_exec_non_async_signal_safe): ditto.
+	  (after_exec): call them.
+	  (rb_exec_async_signal_safe): call after_exec_async_signal_safe.
+	  (rb_exec_err): call after_exec_non_async_signal_safe instead of
+	  after_exec.
+
+Sun Jun 10 06:21:10 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* NEWS: document new features of Ruby OpenSSL.
+
+Sun Jun 10 03:09:41 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl.c: Fix error in example. Patch by David Albert.
+
+	  Add/extend existing documentation. Examples now also cover RSA
+	  signatures and PBKDF2.
+	  [ruby-core: 45154][ruby-trunk - Bug #6475]
+
+
+Sun Jun 10 01:41:45 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_ssl.c: Introduce SSLContext#renegotiation_cb and
+	  remove SSLContext#disable_client_renegotiation and related
+	  functionality introduced in r35797. The new callback approach
+	  gives clients maximum flexibility to decide on their own what to
+	  do on renegotiation attempts.
+	  Add documentation for SSL module and SSLError.
+	* test/openssl/test_ssl.rb: Add a test for
+	  SSLContext#renegotiation_cb.
+
+Sun Jun 10 01:37:18 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_internal): initialize exc.
+
+Sun Jun 10 00:19:25 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: don't use non async-signal-safe functions in a child
+	  process before exec, for invoking a command.
+	  (rb_exec_atfork): call rb_exec_async_signal_safe only.
+	  (retry_fork): take chfunc_is_async_signal_safe argument.  call
+	  before_fork and after_fork only unless chfunc_is_async_signal_safe.
+	  (send_child_error): take chfunc_is_async_signal_safe argument.
+	  send an exception only unless chfunc_is_async_signal_safe.
+	  (recv_child_error): take chfunc_is_async_signal_safe argument.
+	  receive an exception only unless chfunc_is_async_signal_safe.
+	  (rb_fork_internal): renamed from rb_fork_err and take
+	  chfunc_is_async_signal_safe argument.
+	  use rb_protect only unless chfunc_is_async_signal_safe.
+	  (rb_fork_err): call rb_fork_internal with false as
+	  chfunc_is_async_signal_safe.
+	  (rb_fork_async_signal_safe): call rb_fork_internal with true as
+	  chfunc_is_async_signal_safe.
+	  (rb_spawn_process): call rb_fork_async_signal_safe instead of
+	  rb_fork_err.
+
+Sat Jun  9 23:57:03 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_err): rewrite a complex "if" statement.
+
+Sat Jun  9 23:44:29 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (before_exec_async_signal_safe): extracted from
+	  before_exec.
+	  (before_exec_non_async_signal_safe): ditto.
+	  (before_exec): call before_exec_async_signal_safe and
+	  before_exec_non_async_signal_safe.
+	  (rb_exec_async_signal_safe): call before_exec_async_signal_safe.
+	  (rb_exec_err): call before_exec_non_async_signal_safe instead of
+	  before_exec.
+
+Sat Jun  9 23:36:53 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* iseq.c (iseq_load, insn_operand_intern, rb_iseq_disasm)
+	  (rb_iseq_parameters): use rb_id2str() instead of rb_id2name() to
+	  keep encoding.
+
+	* string.c (rb_str_symname_p): new function that checks if the string
+	  is valid as a symbol name.  split from sym_inspect().
+
+Sat Jun  9 22:27:05 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (retry_fork): rewrite a complex "for" statement by
+	  simple statements.
+
+Sat Jun  9 21:50:04 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (retry_fork): extracted from rb_fork_err.
+	  (send_child_error): ditto.
+	  (recv_child_error): ditto.
+
+Sat Jun  9 17:21:48 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* iseq.c (iseq_load): type is a symbol, and invalid as ID in common.
+
+Sat Jun  9 10:57:14 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_async_signal_safe): extracted from rb_exec_err.
+
+Sat Jun  9 09:31:07 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: simplified because close_others option is always
+	  enabled by default.
+	  (rb_f_exec): don't need to set the option.
+	  (rb_exec_arg_prepare): don't need to set the option.  don't need
+	  default_close_others argument.
+	  (rb_spawn_internal): don't need to give default_close_others
+	  argument for rb_exec_arg_prepare.  don't need default_close_others
+	  argument.
+	  (rb_spawn_err): don't need to give default_close_others
+	  argument for rb_spawn_internal.
+	  (rb_spawn): don't need to give default_close_others
+	  argument for rb_spawn_internal.
+	  (rb_f_system): don't need to give default_close_others argument for
+	  rb_spawn_internal.
+	  (rb_f_spawn): don't need to give default_close_others argument for
+	  rb_exec_arg_prepare.
+
+Sat Jun  9 09:00:58 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_proc_exec): call before_exec() here addition to
+	  rb_exec_err.
+
+Sat Jun  9 08:30:52 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* thread_pthread.c (ruby_init_stack): use stack info if possible.
+
+Sat Jun  9 08:21:32 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* README.EXT (prepare extconf.rb):  Added note to see MakeMakefile for
+	  documentation of extconf.rb functions.  Patch by Zachary Scott.
+	  [ruby-trunk - Feature #6522]
+	* README.EXT (Appendix C):  Removed in favor of MakeMakefile.
+	  Patch by Zachary Scott.
+	* lib/mkmf.rb:  Merged documentation from README.EXT Appendix C.  Patch
+	  by Zachary Scott.
+
+Sat Jun  9 08:16:47 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* doc/re.rdoc:  Completed wording in the description of the =~ operator.
+	  [ruby-trunk - Bug #6529]
+
+Sat Jun  9 08:09:38 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* string.c (rb_str_start_with):  Removed "p" from start_with? examples
+	  to match other String method examples.  [ruby-trunk - Bug #6553]
+	* string.c (rb_str_end_with):  Updated end_with? to use code markup
+	  instead of italic.
+
+Sat Jun  9 07:56:03 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/benchmark.rb:  Updated formatting of Benchmark documentation for
+	  consistency.  [ruby-trunk - Bug #6533]
+
+Sat Jun  9 07:46:26 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/delegate.rb:  Added documentation for Delegator#!.  Patch by
+	  Zachary Scott.  [ruby-trunk - Feature #6534]
+
+Sat Jun  9 07:39:50 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/net/http/responses.rb:  Add RFC 6585 response codes.  Patch by
+	  Sangil Jung.  [ruby-trunk - Feature #6480]
+	* lib/net/http/response.rb:  ditto
+	* lib/net/http.rb:  ditto
+	* lib/webrick/httpstatus.rb:  ditto
+
+Sat Jun  9 01:24:28 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_err): before_exec() call moved from proc_exec_cmd
+	  and proc_exec_sh.
+	  (rb_proc_exec): ditto.
+
+Sat Jun  9 01:11:07 2012  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_exec_arg_init): declaration changed to
+	  return a value.
+
+	* process.c (rb_exec_arg_init): return a value.
+
+Fri Jun  8 23:44:14 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: don't check the availability of FD_CLOEXEC.  It should
+	  be available if fork() is available.
+
+	* io.c: ditto.
+
+Fri Jun  8 22:39:32 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_err): revert r35955.  The condition needs !chfunc
+	  to close ep[0] and ep[1].  The catched exception is re-raised
+	  immediately after that if status is not NULL.
+
+Fri Jun  8 19:43:33 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_err): after_exec() call moved from proc_exec_cmd
+	  and proc_exec_sh.
+	  (rb_proc_exec): ditto.
+
+Fri Jun  8 19:00:59 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (ARGV_COUNT): unused macro removed.
+	  (ARGV_SIZE): ditto.
+	  (ALLOC_ARGV): ditto.
+	  (ALLOC_ARGV_WITH_STR): ditto.
+
+Fri Jun  8 16:19:33 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/runner.rb (src_testdir): expand real path so that
+	  TestGem#test_self_find_files does not fail by aliased load path when
+	  srcdir contains a symbolic link.
+
+	* tool/runruby.rb (srcdir): ditto.
+
+Fri Jun  8 12:04:39 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* process.c (rb_fork_err): error state in the child process is prior
+	  to exceptions in proc_syswait().
+
+	* process.c (rb_fork_err): determine status on errors.
+
+	* ext/pty/pty.c (establishShell): reraise exception if something
+	  raised during sleep.
+
+	* ext/pty/pty.c (establishShell): now needs status to protect from
+	  exceptions in rb_fork_err().
+
+Thu Jun  7 22:13:05 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_fork_err): Fix the condition to use rb_protect.
+
+Thu Jun  7 20:29:12 2012  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h: rb_exec_arg and related stuff moved back from
+	  internal.h
+
+Thu Jun 07 15:53:03 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* .gdbinit: add function `trace_machine_instructions' to trace
+	  in native machine assemble.
+	  See https://bugs.ruby-lang.org/projects/ruby-trunk/wiki/MachineInstructionsTraceWithGDB
+	  for more details.
+
+Wed Jun  6 21:31:21 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (proc_exec_cmd) renamed from proc_exec_v.
+	  (proc_exec_sh): renamed from rb_proc_exec_e.
+	  (proc_spawn_cmd_internal): renamed from proc_spawn_v.
+	  (proc_spawn_cmd): renamed from proc_spawn_n.
+	  (proc_spawn_sh): renamed from proc_spawn.
+
+Wed Jun  6 21:18:47 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (try_with_sh): please take care of the macro defined by
+	  you.
+
+Wed Jun  6 20:45:08 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (proc_exec_v): don't call dln_find_exe_r here because it
+	  is not async-signal-safe and proc_exec_v is called in a child
+	  process.
+	  command_abspath field of rb_exec_arg.
+	  (rb_exec_fillarg): call dln_find_exe_r and set command_abspath.
+	  (rb_exec_err): Give the absolute path of the invoking command for
+	  proc_exec_v, instead of the command name.
+
+	* internal.h: add command_abspath field for rb_exec_arg.
+
+Wed Jun  6 20:08:01 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (try_with_sh): take envp argument.
+	  (exec_with_sh): ditto.  use it for execve.
+	  (proc_exec_v): provide envp for try_with_sh.
+
+Wed Jun  6 13:25:04 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/win32.c, include/ruby/win32.h (rb_w32_wrap_io_handle): new API.
+	  this API wraps an I/O handle (HANDLE or SOCKET) and returns fd.
+	  the second parameter should be combination of O_*, for example,
+	  O_RDWR | O_BINARY | O_NOINHERIT.
+
+	* win32/win32.c, include/ruby/win32.h (rb_w32_unwrap_io_handle): new
+	  API.  this API unwraps an I/O handle and close the fd (not closes
+	  the handle itself).
+
+	[Feature #4906] [ruby-core:37227]
+
+Wed Jun  6 13:18:26 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/win32.c (rb_w32_close): of course, console handle is not socket.
+
+Wed Jun  6 12:37:43 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_run_exec_options_err): allocate a temporary buffer for
+	  run_exec_dup2() for restoring fds on non-fork environments.
+
+Wed Jun  6 09:45:21 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/dl/test_c_{struct_entry,union_entity}.rb: sorry, typos.
+
+Wed Jun  6 05:27:54 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): check use_shell field before accessing
+	  a union field.
+
+Wed Jun  6 04:58:44 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_spawn_process): prog variable is not used for Unix.
+
+Wed Jun  6 00:20:37 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_exec_arg_init): change return type to void.
+
+	* process.c (rb_exec_arg_init): don't return a value.
+	  (rb_exec_arg_prepare): ditto.
+	  (rb_spawn_process): don't take the prog argument.  extract the
+	  information from earg.
+	  (rb_spawn_internal): follow rb_spawn_process change.
+	  (rb_f_spawn): ditto.
+
+	* io.c (pipe_open): don't take the prog argument.  extract the
+	  information from eargp.
+	  (pipe_open_v): follow pipe_open change.
+	  (pipe_open_s): ditto.
+
+Tue Jun  5 23:51:33 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (rb_exec_arg): use union to represent command invocation
+	  with/without shell.
+
+	* process.c: follow the rb_exec_arg change.
+
+	* io.c (pipe_open): ditto.
+
+Tue Jun  5 22:28:46 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h: rb_exec_arg and related stuff moved from intern.h
+
+	* include/ruby/intern.h (rb_proc_exec_n): removed.
+
+Tue Jun  5 21:57:22 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_arg_fixup): allocate a temporary buffer for
+	  run_exec_dup2 here because it should be async-signal-safe.
+	  (run_exec_dup2): use the temporary buffer.
+	  (run_exec_dup2_tmpbuf_size): new function.
+
+	* include/ruby/intern.h (rb_exec_arg): add dup2_tmpbuf field.
+
+Tue Jun  5 20:13:15 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* object.c (rb_obj_init_copy): should check if trusted too.
+
+Tue Jun  5 19:59:13 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (strtok): declaration removed because it is not used.
+
+Tue Jun  5 19:33:51 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (proc_spawn): don't detect simple command line here
+	  because rb_exec_fillarg already did.
+
+Tue Jun  5 19:21:10 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): bail out a loop eagerly.
+
+Tue Jun  5 19:15:14 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c: add comments about async-signal-safe.
+
+	* io.c: ditto.
+
+Tue Jun  5 09:25:10 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* io.c:  Edited documentation for IO and File open and new and
+	  Kernel#open for consistency and clarity.
+
+Mon Jun  4 21:53:56 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* win32/win32.c (rb_w32_sysinit): let the system not display the
+	  critical-error-handler message box and the Windows Error Reporting
+	  dialog.  [ruby-core:45389] [Bug #6535]
+
+Mon Jun  4 19:36:25 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_fillarg): allocate one more element before
+	  beginning in argv_str for try_with_sh.
+
+	* internal.h (ARGVSTR2ARGC): adjust for the above change.
+	  (ARGVSTR2ARGV): ditto.
+
+Mon Jun  4 19:17:06 2012  Tanaka Akira  <akr@fsij.org>
+
+	* internal.h (ARGVSTR2ARGC): defined.
+	  (ARGVSTR2ARGV): defined.
+
+	* process.c (proc_exec_v): use ARGVSTR2ARGV.
+	  (rb_spawn_process): use ARGVSTR2ARGC and ARGVSTR2ARGV.
+
+	* io.c (pipe_open): use ARGVSTR2ARGV.
+
+Mon Jun  4 16:13:00 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_insnhelper.h: remove magical code "lfp[0] & 0x02".
+	  Current VM doesn't use this bit.
+
+	* vm_core.h (RUBY_VM_GET_BLOCK_PTR): added.
+
+	* eval.c (rb_block_given_p): use RUBY_VM_GET_BLOCK_PTR().
+
+	* vm_eval.c (rb_f_block_given_p): ditto.
+
+Mon Jun  4 15:39:33 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* win32/win32.c (constat_apply): apply VT100 functions.
+	  [ruby-core:44958] [Feature #6418]
+
+	* win32/win32.c (constat_parse): parse some VT100 escape sequence.
+
+Mon Jun  4 14:06:12 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_exec_err): should preserve errno.
+
+Mon Jun  4 13:10:11 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* test/dl/test_c_{struct_entry,union_entity}.rb: broken require.
+
+Mon Jun  4 12:01:21 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* test/ruby/test_backtrace.rb: fix test.
+	  Windows path includes `:' character.
+
+Mon Jun  4 11:42:39 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_core.h (rb_location_t): fix type and field name.
+	  (1) rename rb_location_t to rb_iseq_location_t.
+	  (2) rename field names of rb_iseq_location_t to adjust
+	      RubyVM::Backtrace::Location methods.
+	      (2-1) filename -> path
+	      (2-2) filepath -> absolute_path
+	      (2-3) basename -> base_label
+	      (2-4) name -> label
+	  (3) rename filed name rb_iseq_location_t#line_no to
+	      rb_iseq_location_t#first_lineno to clear purpose of this field.
+	  (4) The field names rb_binding_t#(filename|line_no) are also renamed
+	      to rb_binding_t#(path|first_lineno).
+
+	* compile.c: apply above changes.
+
+	* iseq.c: ditto.
+
+	* proc.c: ditto.
+
+	* vm*.c: ditto.
+
+Mon Jun  4 11:40:28 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c (r_object0): also load TYPE_USRMARSHAL, TYPE_DATA using
+	  compatible loader.
+
+Mon Jun  4 11:33:42 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* process.c (rb_run_exec_options_err): restore save_env() call for
+	  non-fork environments.
+
+	* process.c (rb_exec_err): restore environments after the failure of
+	  exec to fix [ruby-core:44093] [Bug #6249] on non-fork environments
+
+Mon Jun  4 10:42:04 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* io.c (pipe_open): follow up changes in r35889.
+
+	* process.c (proc_spawn_n): now uses char ** instead of VALUE *.
+
+	* process.c (rb_spawn_process): prog is now VALUE of String, not char *.
+
+Mon Jun  4 06:12:43 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c (r_object0): remove old warning for _alloc.
+
+Mon Jun  4 04:24:06 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* marshal.c: experimental test aborted.
+	* complex.c: ditto.
+	* rational.c: ditto.
+	* include/ruby/intern.h: ditto.
+
+Mon Jun  4 00:45:18 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_spawn_process): fix for Windows.  not tested.
+
+Mon Jun  4 00:11:51 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_proc_exec_e): don't use ISSPACE().  \f, \r and \v
+	  are not word separator in Bourne shell.
+
+Sun Jun  3 23:47:30 2012  Tanaka Akira  <akr@fsij.org>
+
+	* include/ruby/intern.h (rb_exec_arg): remove argc and argv fields.
+	  add use_shell, argv_str and argv_buf fields.
+
+	* process.c (rb_proc_exec_e): don't split shell command line arguments
+	  here to avoid memory allocation in a child process.
+	  (rb_exec_fillarg): split shell command line arguments here.
+	  (proc_exec_v): takes argv_str argument instead of argv.
+	  (rb_proc_exec_ne): removed.
+	  (rb_proc_exec_n): removed.
+	  (rb_run_exec_options_err): don't initialize the removed fields.
+	  (rb_exec_err): don't initialize the removed fields.
+	  call proc_exec_v directly instead of rb_proc_exec_ne.
+	  (rb_spawn_process): use use_shell field.
+
+Sun Jun  3 21:53:00 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* GPL: update text of GPLv2. [ruby-core:44488] [Bug #6328]
+	  http://www.gnu.org/licenses/gpl-2.0.txt
+
+Sun Jun  3 21:22:52 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_exec_getargs): remove rb_exec_arg argument.
+
+Sun Jun  3 21:14:26 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* marshal.c: calls directly rb_{Complex,Rational}_marshal_load().
+	  But now disabled. [experimental]
+	* complex.c: followed the above.
+	* rational.c: ditto.
+	* include/ruby/intern.h: ditto.
+
+Sun Jun  3 21:18:17 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_check_argv): use rb_str_new_frozen instead of
+	  rb_str_new4.
+
+Sun Jun  3 20:10:52 2012  Tanaka Akira  <akr@fsij.org>
+
+	* process.c (rb_proc_exec_e): extended version of rb_proc_exec() to
+	  call execle().
+	  (rb_proc_exec): use rb_proc_exec_e().
+	  (rb_exec_err): use rb_proc_exec_e().
+
+Sun Jun  3 19:47:18 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* thread.c (vm_living_thread_num): suppress a warning.
+
+Sun Jun  3 17:23:52 2012  Tanaka Akira  <akr@fsij.org>
+
+	* use execve() to preserve environment variables when exec method is
+	  failed.  [ruby-core:44093] [ruby-trunk - Bug #6249]
+
+	* include/ruby/intern.h (rb_exec_arg): add envp_str and envp_buf field
+	  to store envp of execve().
+
+	* process.c (proc_exec_v): takes envp_str as an argument and use it
+	  for execve().
+	  (rb_proc_exec_ne): extended version of rb_proc_exec_n().
+	  (rb_proc_exec_n): use rb_proc_exec_ne().
+	  (rb_proc_exec): follow proc_exec_v() change.
+	  (fill_envp_buf_i): new function.
+	  (rb_exec_arg_fixup): set up envp_str and envp_buf.
+	  (save_env_i): removed.
+	  (save_env): removed.
+	  (rb_run_exec_options_err): don't modify environment variables.
+	  (rb_exec_err): use rb_proc_exec_ne().
+
+Sun Jun  3 16:33:58 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* marshal.c: revert r35879 "now marshal_{load|dump} are external."
+
+	* complex.c (nucomp_marshal__{dump,load}): should use rb_marshal_{dump,load}.
+
+	* rational.c (nurat_marshal__{dump,load}): ditto.
+
+Sun Jun  3 14:13:58 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_core.c: checks whether the object is frozen or not.
+
+Sun Jun  3 14:00:51 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c: wrote Complex#_dump and Complex::load.  But now
+	  disabled (due to compatibility) [experimental].
+
+	* rational.c: wrote Rational#_dump and Rational::load. ditto.
+
+Sun Jun  3 10:23:32 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* complex.c (nucomp_marshal_load): [ruby-core:45394]
+	* rational.c (nurat_marshal_load): ditto.
+
+Sun Jun  3 03:15:46 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* regparse.c (onig_number_of_names): suppress a warning.
+
+Sun Jun  3 01:36:52 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_backtrace.c: change names.
+	  (1) Class name: RubyVM::FrameInfo -> RubyVM::Backtrace::Location.
+	  (2) Method name: RubyVM::FrameInfo.caller ->
+	      Kernel.caller_locations.
+	  (3) Instance methods of
+              RubyVM::FrameInfo (RubyVM::Backtrace::Location)
+	      (3-1) name -> label
+	      (3-2) basename -> base_label (basename is confusing with
+	            File.basename)
+	      (3-3) line_no -> lineno (We have already similar name
+	            File#lineno, commented by kou [ruby-dev:45686]).
+	      (3-4) filename -> path.
+	      (3-5) filepath -> absolute_path.
+	      (3-5) iseq -> removed (we will make other APIs to access iseq
+	            and other information of frame for debugging).
+
+	* test/ruby/test_backtrace.rb: apply above changes.
+	  And apply comment from kou [ruby-dev:45686].
+
+Sun Jun  3 00:49:11 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* common.mk: fix to build vm_backtrace.c only itself (vm_backtrace.c
+	  is no longer included from vm.c).  I hope this separation reduce
+	  compile time of vm.c.
+
+	* internal.h: ditto.
+
+	* vm.c, vm_core.h, vm_dump.c, vm_eval.c: ditto.
+
+	* vm_eval.c: some functions (callee, etc) moved to vm_backtrace.c.
+
+Sun Jun  3 00:20:53 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_backtrace.c: added.  Separate backtrace related functions to
+	  this file.
+
+	* vm.c, common.mk: ditto.
+
+Sat Jun  2 18:09:02 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* lib/ipaddr.rb: Inhibit zero-filled octets in an IPv4 address in
+	  all platforms. [ruby-dev:45671]
+
+	* lib/ipaddr.rb: Allow the x:x:x:x:x:x:d.d.d.d form not limited to
+	  IPv4 mapped/compatible addresses.  This change also makes it
+	  possible for the parser to understand IPv4 mapped and compatible
+	  IPv6 addresses in non-compressed form.
+
+	* lib/ipaddr.rb: Stop exposing IPSocket.valid*? methods which were
+	  only usable on non-IPv6-ready platforms.
+
+Sat Jun  2 16:59:00 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* string.c (rb_enc_cr_str_buf_cat): don't reset coderange as unknown.
+	  the condition 'ptr_a8 && str_cr != ENC_CODERANGE_7BIT' means not
+	  unknown, str is also ASCII-8BIT because str_encindex == ptr_encindex,
+	  and nont (str_cr == ENC_CODERANGE_UNKNOWN) and
+	  str_cr != ENC_CODERANGE_7BIT means str_cr is valid because ASCII-8BIT
+	  can't be broken. [ruby-dev:45688] [Bug #6509]
+
+Sat Jun  2 07:04:48 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* doc/re.rdoc (Performance):  Replaced incorrect example of reducing
+	  backtracking through anchoring with reduced backtracking through a
+	  range.  [ruby-trunk - Bug #6525]
+
+Sat Jun  2 06:34:15 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* doc/re.rdoc (Performance):  Removed useless sample output from final
+	  performance example and switched from #match to #=~ for consistency.
+	  [ruby-trunk - Bug #6524]
+
+Fri Jun  1 09:30:53 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* object.c (class_or_module_required): extract check for class or
+	  module.
+
+Fri Jun  1 08:50:47 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* array.c:  Updated Array documentation formatting.  Patch by Zachary
+	  Scott.  [ruby-trunk - Feature #6517]
+
+Fri Jun  1 06:57:10 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/dl/lib/dl/struct.rb (DL::CStructEntity#set_ctypes):  Refactored
+	  #set_ctypes using newer ruby features to simplify its implementation.
+	* test/dl/test_c_struct_entry.rb (class DL):  Test to verify
+	  refactoring.
+
+Fri Jun  1 06:40:25 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* object.c (Init_Object):  Restored Kernel documentation based on
+	  Pickaxe book documentation.  Patch by Zachary Scott.
+	  [ruby-trunk - Feature #6521]
+
+Fri Jun  1 06:29:42 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* object.c (rb_equal):  Let Object be a link in #=== documentation.
+	  Patch by Zachary Scott.  [ruby-trunk - Feature #6518]
+
+Thu May 31 09:27:06 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/dl/lib/dl/struct.rb (DL::CStructEntity::size):  Refactored ::size
+	  to remove unused variables and simplify using newer ruby features.
+	* test/dl/test_c_struct_entry.rb:  Test to validate refactoring
+
+Thu May 31 08:40:34 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/dl/lib/dl/struct.rb (DL::CUnionEntity#set_ctypes):  Refactored
+	  #set_types to reuse DL::CUnionEntity::size
+	* test/dl/test_c_union_entity.rb:  Added test
+
+Thu May 31 08:20:14 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/dl/lib/dl/struct.rb (DL::CUnionEntity::size):  Fixed ::size to
+	  return the size of the union.
+	* test/dl/test_c_union_entity.rb:  Test for DL::CUnionEntity::size
+
+Thu May 31 07:45:43 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/dl:  Added documentation.  Patch by Vincent Batts.
+	  [ruby-trunk - Bug #6496]
+
+Wed May 30 16:30:00 2012  Kenta Murata  <mrkn@cookpad.com>
+
+	* ext/bigdecimal/lib/bigdecimal/jacobian.rb,
+	  ext/bigdecimal/lib/bigdecimal/newton.rb:
+	  fix documentation comments.
+	  Patch by alperakgun from github.com/shyouhei/ruby/pull/8
+
+Wed May 30 16:20:00 2012  Kenta Murata  <mrkn@cookpad.com>
+
+	* ext/bigdecimal/lib/bigdecimal/jacobian.rb (Jacobian#dfdxi):
+	  fix jacobian to get stuck in an infinite loop when a solution is not
+	  found due to forget to increment nRetry counter.
+	  Patch by alperakgun from github.com/shyouhei/ruby/pull/8
+
+Wed May 30 10:58:31 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* time.c (utc_offset_arg): utc offset can be precision in seconds.
+	  e.g. old Europe/Lisbon (c.f. [ruby-dev:40066])
+
+Wed May 30 06:20:29 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* error.c (exc_set_backtrace):  Updated documentation to indicate
+	  set_backtrace allows a string as well as an array of strings.
+	  [ruby-trunk - Bug #6501]
+
+Tue May 29 17:28:20 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* strftime.c (rb_strftime_with_timespec): support GNU extension triple
+	  colons modifier.  [EXPERIMENTAL]
+
+	* strftime.c (rb_strftime_with_timespec): check conversion with locale
+	  modifier.
+
+	* strftime.c (rb_strftime_with_timespec): colons are valid only for
+	  'z' and must come just before it.
+
+Mon May 28 16:56:55 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#_prepare_run): StatusLineOutput
+	  needs job_status to be :replace.
+
+Mon May 28 13:35:33 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* common.mk (do-install-*): fix dependencies.  based on the patch by
+	  nagachika at [ruby-dev:45683].  [Bug #6506]
+
+Mon May 28 12:03:04 2012  Narihiro Nakamura  <authornari@gmail.com>
+
+	* gc.c (obj_free): doesn't free a method table if it doesn't
+	  exist. [ruby-dev:44436]
+	* test/ruby/test_gc.rb (class TestGc): added the test case for
+	  this issue.
+
+Sun May 27 23:37:48 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* benchmark/bm_vm1_lvar_init.rb: added.
+	  This benchmark measures a initialize time of non-used variable.
+
+	* benchmark/bm_vm1_lvar_set.rb: added.
+	  This benchmark measures a local variables initialization time.
+
+	* benchmark/bm_vm2_bigarray.rb: added.
+	  This benchmark mesures a big array literal creation time.
+
+	* benchmark/bm_vm2_bighash.rb: added.
+	  This benchmark mesures a big hash literal creation time.
+
+	* benchmark/bm*: change notation "i=0" to "i = 0".
+
+Sun May 27 13:33:26 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* benchmark/driver.rb: fix to continue benchmarks when
+	  an error is occurred.
+
+Sun May 27 11:27:50 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Runner#_prepare_run): fix operator
+	  precedence, so that platform and TERM should be counted.
+
+Sun May 27 10:02:33 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_strftime.c: allows %Ok and %Ol.
+
+Sun May 27 09:29:20 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_core.c: modified doc.
+
+Sat May 26 19:04:34 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_core.c: added description.
+
+Sat May 26 18:14:57 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_strftime.c: reduced the code.
+
+Sat May 26 18:08:59 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* time.c: modified doc.
+	* ext/date/date_core.c: ditto.
+
+Sat May 26 17:05:45 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c (backtrace_*): change type of lev and n from size_t to int.
+	  Also set type of rb_backtrace_t#backtrace_size to int.
+	  A patch from nobu.
+
+	* vm_eval.c: ditto.
+
+Sat May 26 16:26:30 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* file.c (realpath_rec): UNC prefix does not end with path separator,
+	  so new separator is needed after it.
+
+Sat May 26 15:29:22 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* test/ruby/test_backtrace.rb (test_caller_lev):
+	  decrease recursion size.
+
+Sat May 26 13:50:48 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* NEWS: add Kernel#caller's second argument.
+
+Sat May 26 13:40:29 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c (RubyVM::FrameInfo): add a class to access each frame
+	  information.  You don't need to parse strings from caller().
+	  FrameInfo has the following methods:
+	    FrameInfo#name: method name, class name, etc with decorations.
+	    FrameInfo#basename: name without decorations.
+	    FrameInfo#line_no: line number.
+	    FrameInfo#filename: file name.
+	    FrameInfo#filepath: full filepath.
+	    FrameInfo#iseq: iseq if it is iseq frame (defined by ruby script)
+	    FrameInfo#to_s: return caller() method style string.
+	  RubyVM::FrameInfo.caller(n, lev) returns array of FrameInfo objects.
+	  The name "RubyVM::FrameInfo.caller" is long and ambiguous (it is
+	  confusing with Kernel::caller() method), we need to change the name
+	  before Ruby 2.0 release. Good names or comments are welcome.
+
+	* test/ruby/test_backtrace.rb: add a test for above change.
+
+Sat May 26 12:18:09 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c (frame_info_to_str): add `break'.
+
+	* vm.c (backtrace_object): remove lev and n parameter.
+	  backtrace_object always returns all of backtrace information.
+
+	* vm.c (rb_backtrace_to_str_ary): fix to use backtrace_object().
+	  This change improve performance of caller(lev, n).
+
+	* benchmark/bm_vm3_backtrace.rb: added to check above improvement.
+	  FYI: measurement on my laptop, 1.9.3p229 needs 5.125 sec,
+	  and current trunk only needs 0.299sec.
+
+Sat May 26 11:05:09 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c (rb_frame_info_t): keep previous ISEQ frame info for CFUNC
+	  frame info.  And fix to cache a calculated line_no of ISEQ frame
+	  info.
+
+Sat May 26 09:54:53 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_ssl.c: Allow disabling client-side renegotiation.
+	* test/openssl/test_ssl.rb: Simple tests for this.
+
+	  Client-side renegotiation is still considered problematic, even
+	  when used in the context of secure renegotiation (RI, RFC 5746).
+	  The changes allow users to either completely disable client
+	  renegotiation on the server, or to specify a maximum number of
+	  handshakes allowed in total. The number of total handshakes is
+	  counted in a callback set as SSL_set_info_callback. If the
+	  maximum number of handshakes is exceeded an error will be raised
+	  We do not support renegotiation in the OpenSSL extension, therefore
+	  this feature can only be tested externally.
+	  The feature is opt-in, the default setting will be to allow
+	  unlimited client renegotiation, as was the case before.
+
+Fri May 25 23:38:58 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* test/openssl/test_ssl.rb: Clarify the intention of errors to be
+	  expected. Two errors are possible when connection is refused due
+	  to a protocol version that was explicitly disallowed,
+	  OpenSSL::SSL::SSLError or Errno::ECONNRESET, depending on the
+	  OpenSSL version in use.
+
+Fri May 25 22:19:40 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_ssl.c: Revert r35583
+	* test/openssl/test_ssl.rb: Handle ECONNRESET in code instead to avoid
+	  the test failing in Ruby CI [1]
+
+	[1] http://u64.rubyci.org/~chkbuild/ruby-trunk/log/20120507T190102Z.log.html.gz#test-all
+
+Fri May 25 19:51:36 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_eval.c (rb_f_caller): caller() method accepts second optional
+	  argument `n' which specify how many frames should return.
+	  For example, `caller(0, 1)' returns only one frame information
+	  which calls caller() method.  If there are less than n frame
+	  information, then all frame information are returned.  If n is 0,
+	  then always return [].
+	  This fix is part of [ruby-dev:42345] [Ruby 1.9-Feature#3917].
+	  However, performance and features are not enough.
+	  RDoc is also not available.
+
+	* test/ruby/test_backtrace.rb: add a test for above.
+
+Fri May 25 17:05:07 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c (oldbt_init, vm_backtrace_str_ary): arg->data should
+	  be initialized before calling `backtrace_each()'.
+
+Fri May 25 16:11:27 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* trunk/ext/-test-/printf/printf.c: change function names because of
+	  conflict with msvcrt.  fixed build error of mswin.
+
+Fri May 25 10:52:52 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c: refactoring backtrace related functions.
+	  (1) unify similar functions (rb_backtrace_each() and
+	      backtrace_object()).  backtrace_each() is a unified function.
+	      variation:
+	      a) backtrace_object(): create backtrace object.
+	      b) vm_backtrace_str_ary(): create bt as an array of string.
+	      c) vm_backtrace_print(): print backtrace to specified file.
+	      d) rb_backtrace_print_as_bugreport(): print backtrace on
+	                                            bugreport style.
+	  (2) remove rb_backtrace_each().  Use backtrace_each() instead.
+	  (3) change the type of lev parameter to size_t.
+	      a) lev == 0 means current frame (exception, etc use it).
+	      b) lev == 1 means upper frame (caller(0) use it).
+
+	* vm_core.h, vm_dump.c, vm_eval.c: ditto.
+
+	* vm.c (backtrace_object(), vm_backtrace_str_ary()): fix to return a
+	  correct size of caller(lev) array.
+	  Let n be a "caller(0).size" then ln as caller(lev).size should be
+	  (n - lev).  However, the previous implementation returns a wrong
+	  size array (ln > n - lev).  [ruby-dev:45673]
+
+	* test/ruby/test_backtrace.rb: add tests for backtrace.
+
+Fri May 25 08:51:39 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* enum.c (enum_count):  Enumerable#count no longer uses #size when
+	  counting elements.  Patch by Nobuhiro IMAI.  [ruby-trunk - Bug #6473]
+
+Fri May 25 01:15:39 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* sprintf.c (ruby__sfvextra): [EXPERIMENTAL] use inspect instead of
+	  to_s if plus flag is given.
+
+	* vsnprintf.c (BSD_vfprintf): pass sign flag.
+
+Fri May 25 00:37:22 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* test/rubygems/test_gem_indexer.rb (setup, teardown): save @tempdir
+	  to remove it properly.  [Bug #5348]
+
+Thu May 24 23:36:51 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vsnprintf.c (BSD_vfprintf): [EXPERIMENTAL] object representation in
+	  rb_enc_vsprintf(). [Feature #5896]
+
+Thu May 24 15:33:01 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_method.c (rb_method_defined_by): removed.
+	  nobu pointed out that rb_method_basic_definition_p() is enough
+	  for last commit.
+
+	* error.c, eval_error.c: change for above.
+
+Thu May 24 14:30:13 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm.c: add RubyVM::Backtrace object (btobj).
+	  Backtrace information contains an array consists of location
+          information for each frames by string.
+	  RubyVM::Backtrace object is lightweight backtrace information,
+	  which contains complete information to generate traditional style
+	  backtrace (an array of strings) with faster generation.
+	  If someone accesses to backtrace information via
+	  Exception#backtrace, then convert a RubyVM::Backtrace object to
+	  traditional style backtrace.
+	  This change causes incompatibility on marshal dumped binary
+	  of Exception.  If you have any trouble on it, please tell us
+	  before Ruby 2.0 release.
+	  Note that RubyVM::Backtrace object should not expose Ruby level.
+
+	* error.c, eval.c, vm_eval.c: ditto.
+
+	* internal.h: ditto.
+
+	* eval_error.c: fix to skip "set_backtrace" method invocation in
+	  creating an exception object if it call a normal set_backtrace
+	  method (defined by core).
+
+	* test/ruby/test_settracefunc.rb: fix for above change.
+
+	* vm_method.c (rb_method_defined_by): added.  This function
+	  checks that the given object responds with the given method
+	  by the given cfunc.
+
+	* benchmark/bm_vm2_raise1.rb, benchmark/bm_vm2_raise2.rb:
+	  add to measure exception creation speed. raise1 create
+	  exception objects from shallow stack frame.  raise2 create
+	  exception objects from deep stack frame.
+
+Thu May 24 12:07:46 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* io.c (io_strip_bom): check EOF.  [Bug #6487][ruby-core:45203]
+
+Wed May 23 22:06:14 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/net/http/header.rb (Net::HTTPHeader#range): fix broken parser of
+	  HTTP Range request. Old one can't parse invalid specs and multiple
+	  specs correctly.
+
+Wed May 23 10:18:54 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* win32/win32.c (finish_overlapped_socket, overlapped_socket_io):
+	  replace ECONNABORTED to EPIPE in send, sendto and sendmsg to improve
+	  BSD socket compatibility.  this change removes a failure on the test
+	  of net/ftp.
+
+Wed May 23 05:35:58 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* lib/net/http.rb:  Broke up Net::HTTP into individual files.
+	  [ruby-trunk - Feature #6435]
+	* lib/net/http/backward.rb:  ditto.
+	* lib/net/http/response.rb:  ditto.
+	* lib/net/http/exceptions.rb:  ditto.
+	* lib/net/http/responses.rb:  ditto.
+	* lib/net/http/generic_request.rb:  ditto.
+	* lib/net/http/header.rb:  ditto.
+	* lib/net/http/request.rb:  ditto.
+	* lib/net/http/proxy_delta.rb:  ditto.
+	* lib/net/http/requests.rb:  ditto.
+
+Wed May 23 05:15:11 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* class.c (rb_mod_init_copy):  Clear the cached inspect string of a
+	  dup'd anonymous module or class.  [ruby-trunk - Bug #6454]
+	* test/ruby/test_module.rb (class TestModule):  ditto
+
+Tue May 22 16:49:15 2012  Koichi Sasada  <ko1@atdot.net>
+
+	* vm_core.h: add a data type rb_location_t to store iseq location
+	  information.
+	  rb_location_t#filename, filepath, name and line_no was moved from
+	  rb_iseq_t.  rb_location_t#basename is a new field which is
+	  similar to `name' field without any decoration.
+	  `name' field contains some decoration such as `block in foo'.
+	  `basename' only contains `foo'.
+	  rb_iseq_t contains memory object of rb_location_t.
+
+	* iseq.c: setup rb_location_t for each rb_iseq_t memory objects.
+
+	* compile.c, proc.c, vm.c, vm_dump.c, vm_eval.c, vm_insnhelper.c,
+	  vm_method.c: support about it.
+
+Tue May 22 00:45:05 2012  Yusuke Endoh  <mame@tsg.ne.jp>
+
+	* struct.c (rb_struct_members): Refactoring.  As Struct#members had
+	  returned an array of String, the old code was needed to convert
+	  Symbols to Strings.  But it is almost unnecessary because the
+	  method now returns an array of Symbols.  A patch by Masaki
+	  Matsushita <glass.saga at gmail dot com>  [Feature #6218]
+	  [ruby-dev:45451]
+
+Mon May 21 19:20:25 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/net/ftp.rb (Net::FTP#retrbinary): close only if conn is not nil
+	  because transfercmd may fail and return nil.
+
+	* lib/net/ftp.rb (Net::FTP#retrlines): ditto.
+
+Mon May 21 15:10:28 2012  Akinori MUSHA  <knu@iDaemons.org>
+
+	* ext/syslog/syslog.c: Classify constants and macros into several
+	  sub-modules. (Syslog::Priority, Syslog::Level, Syslog::Option
+	  and Syslog::Macros)
+
+	* ext/syslog/syslog.c (mSyslog_inspect): Use rb_sprintf().
+
+	* ext/syslog/syslog.c (mSyslog_inspect): Make sure self is a
+	  module before calling rb_class2name().
+
+Mon May 21 12:44:11 2012  URABE Shyouhei  <shyouhei@ruby-lang.org>
+
+	* .travis.yml (install): It seems tcl/tk is skipped in Travis
+	  CI. Trying to fix the situation.
+
+Mon May 21 12:11:25 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* enc/depend (ENCOBJS): add dependencies.
+
+	* enc/make_encmake.rb (target_encodings): extract dependencies.
+
+Mon May 21 11:26:17 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/net/ftp.rb (Net::FTP#transfercmd): rescue shutdown.
+
+Sun May 20 23:00:11 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/extmk.rb (extmake): reopen $stdout to NULL, since setting
+	  $stdout cannot affect child processes.
+
+Sun May 20 21:36:39 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* enc/shift_jis.c (code_to_mbclen): return
+	  ONIGERR_INVALID_CODE_POINT_VALUE if the code is invalid.
+
+	* string.c (tr_next): increment character until the code
+	  is a valid character. [ruby-dev:45652] [Bug #6450]
+
+Sun May 20 12:25:10 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* Makefile.in (LIBRUBY_SO): link EXTSOLIBS too.
+
+	* ext/extmk.rb (mf.macro): use EXTSOLIBS instead of SOLIBS to get rid
+	  of discard libraries needed by default.  [Bug #6462]
+
+Sat May 19 19:04:38 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/extmk.rb (command_output): ENCOBJS is needed for all linked
+	  ruby, if --disable-shared and --with-static-linked-ext.
+
+	* ext/extmk.rb (command_output): dmyext is needed as DLDOBJS if no
+	  static linked extensions.
+
+	* Makefile.in, common.mk (PROGRAM): no extension libraries.
+
+	* common.mk (build-ext): pass macros for libruby.so.
+
+	* ext/extmk.rb (command_output): link extension libraries and encoding
+	  libraries into libruby.so, not ruby executable.
+
+	* ext/extmk.rb (command_output): fold long macro lines.
+
+	* Makefile.in (LIBEXT): add macro.
+
+	* configure.in (ENCOBJS, EXTOBJS): use LIBEXT, not hardcoded suffix.
+
+	* Makefile.in (LIBRUBY_A): fix typo.  re-applying r35242.
+
+Sat May 19 04:46:53 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/openssl/extconf.rb: Use Logging::message instead of message.
+	* ext/zlib/extconf.rb: ditto.
+
+Fri May 18 18:13:44 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/mkmf.rb (MakeMakefile#configuration): keep space at end of
+	  OUTFLAG and COUTFLAG.  [ruby-dev:45650]
+
+Fri May 18 17:39:42 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* thread_pthread.c (rb_thread_create_timer_thread): Added error
+	  check when failing fcntl(). [Bug #6147] [ruby-dev:45364]
+
+Fri May 18 17:41:00 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/extmk.rb (extmake): link archives only, skip script only
+	  extension libraries.
+
+Fri May 18 17:25:33 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* cont.c: bump up fiber machine stack size when running on 64bit
+	  arch. [Bug #6344] [ruby-dev:45554]
+
+Fri May 18 15:20:56 2012  NARUSE, Yui  <naruse@ruby-lang.org>
+
+	* lib/uri/generic.rb (URI::Generic.build): duplicate args before adding
+	  new items. (don't change arguments)
+
+	* lib/uri/generic.rb (URI::Generic.build): use URI::Generic::COMPONENT
+	  if this method is called from URI::Generic.
+
+	* lib/uri/generic.rb (URI::Generic.build2): escape only if the item is
+	  a String.
+
+	* lib/uri/generic.rb (URI::Generic.build2): use DEFAULT_PARSER because
+	  it doesn't have parser method. [Bug #6420]
+
+Fri May 18 15:54:07 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/zlib/extconf.rb: Use an exception instead of bare puts.
+
+Fri May 18 15:53:05 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/psych/extconf.rb: Use an exception instead of bare abort.
+
+Fri May 18 15:51:32 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/fiddle/extconf.rb: Use an exception instead of bare abort.
+
+Fri May 18 15:49:35 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/readline/extconf.rb: Use an exception instead of bare exit.
+
+Fri May 18 15:38:11 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/ripper/extconf.rb: Use an exception instead of bare
+	  Logging.message.
+
+Fri May 18 15:23:06 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/openssl/extconf.rb: Clarify a message when hit Apple
+	  OpenSSL issue.
+
+Fri May 18 15:14:32 2012  KOSAKI Motohiro  <kosaki.motohiro@gmail.com>
+
+	* ext/extmk.rb: Show a message when extconf.rb raised an exception.
+	* ext/openssl/extconf.rb: Use exception raising instead of message
+	  and/or abort. We want to display error message to console _and_
+	  logging into mkmf.log.
+
+Fri May 18 06:14:07 2012  Eric Hodel  <drbrain@segment7.net>
+
+	* ext/syslog/lib/syslog/logger.rb:  Added Syslog::Logger which was
+	  ported from the SyslogLogger gem.  [ruby-trunk - Feature #5096]
+	* NEWS:  ditto.
+	* test/syslog/test_syslog_logger.rb:  ditto.
+
+Fri May 18 01:28:21 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/parser.c (transcode_string): fix encoding index names.
+	  Thanks markizko for reporting.
+
+Thu May 17 23:03:58 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in: fix function name to be checked, to initialize
+	  rb_thread_cond_t properly.
+
+	* thread_pthread.c (native_cond_initialize, native_cond_destroy):
+	  fix macro name.
+
+Thu May 17 12:53:07 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* thread.c, thread_pthread.c: Moved pthread-specific preprocessor
+	  hacks to thread_pthread.c
+
+Thu May 17 12:18:47 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* io.c: Fix a mistake on merging the patch in the previous commit.
+
+Thu May 17 11:33:07 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	Imports Ruby's port to NativeClient (a.k.a NaCl).
+	Patch by Google Inc. [ruby-core:45073].
+
+	* configure.in (RUBY_NACL): New M4 func to configure variables for
+	  NaCl.
+	  (RUBY_NACL_CHECK_PEPPER_TYPES): New M4 func to check the old names
+	  of Pepper interface types.
+	  (BTESTRUBY): New variable to specify which ruby should be run on
+	  "make btest". NaCl can run the built binary by sel_ldr, but it need
+	  rbconfig.rb. So this variable is distinguished from $MINIRUBY.
+
+	* thread_pthread.c: Disabled some features on NaCl.
+
+	* io.c: ditto.
+
+	* process.c: ditto.
+
+	* signal.c: ditto.
+
+	* file.c: ditto.
+
+	* missing/flock.c: ditto.
+
+	* nacl/pepper_main.c: An example implementation of Pepper application
+	  that embeds Ruby.
+
+	* nacl/example.html: An example of web page that uses the Pepper
+	  application.
+
+	* nacl/nacl-config.rb: Detects variants of NaCl SDK.
+
+	* nacl/GNUmakefile.in: Makefile template for NaCl specific build
+	  process.
+
+	* nacl/package.rb: script for packaging a NaCl-Ruby embedding
+	  application.
+
+	* nacl/reate_nmf.rb: Wrapper script of create_nmf.py
+
+	* dln.c (dln_load): Added a hack to call on NaCl.
+
+	* util.c (ruby_getcwd): Path to the current directory is not available
+	  on NaCl.
+
+Thu May 17 10:54:58 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/tk/extconf.rb: add -l options to $libs not $LDFLAGS,
+	  to be passed to EXTLIBS in exts.mk.
+
+	* enc/encinit.c.erb: use %-lines to adjust indent in the generated file.
+
+	* lib/mkmf.rb (MakeMakefile#have_framework): combine -framework option
+	  and its argument with an equal sign not to be separated in merge_libs.
+
+	* ext/tk/extconf.rb: ditto.
+
+	* ext/extmk.rb: EXTLDFLAGS also needs to be passed.
+
+Wed May 16 15:44:22 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	* configure.in: Fix an unbalanced quote.
+
+Wed May 16 15:43:10 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* ext/extmk.rb (exts.mk): use double quotes instead of single quotes
+	  for commandline because it's not recognized as quotes on Windows.
+
+Wed May 16 15:15:55 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* configure.in (LD): enclose with single quotes but not double quotes
+	  not to expand command substitution.
+
+Wed May 16 14:19:51 2012  Yuki Yugui Sonoda  <yugui@google.com>
+
+	Supports static linking of extensions and encodings again.
+	Fixes --with-static-linked-ext.
+
+	Patch by Google Inc. [ruby-core:45073].
+
+	* Makefile.in (ENCOBJS, EXTOBJS): New variables to specify static
+	  linked libraries. Also reintroduces extinit.o, introduces encinit.o
+	  introduces encinit.o
+
+	* common.mk: Builds static libraries rather than shared objects if
+	  specified.
+
+	* configure.in (LD): new substitution.
+
+	* enc/depend: Supports static linked libraries
+	  (libencs, libenc, libtrans): New target.
+
+	* enc/encinit.c.erb: new template to generate the initialization of
+	  statically linked encodings.
+
+	* enc/make_encmake.rb (--module): new flag to specify whether static
+	  or dynamic.
+
+	* transcode_data.h (TRANS_INIT): New macro to get rid of the name
+	  collision of encoding initializers and transcoder initializers.
+
+	* ext/extmk.rb: Fixes the behavior on $extstatic is true.
+
+	* lib/mkmf.rb (clean-static): new target to clean up static linked
+	  libraries.
+
+	* ruby.c (process_options): New initializes statically linked
+	  encodings here.
+
+Wed May 16 14:30:43 2012  NAKAMURA Usaku  <usa@ruby-lang.org>
+
+	* io.c: fixed a merge mistake of r33878, reported by nobu via IRC.
+
+Wed May 16 06:59:41 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_strftime.c: should also be aware of flags on
+	  complex specifier.
+
+Wed May 16 05:11:29 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych/visitors/to_ruby.rb: fix a bug with string
+	  subclass dumping and loading.
+
+	* test/psych/test_array.rb: pertinent tests
+
+	* test/psych/test_string.rb: ditto
+
+Wed May 16 01:31:21 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych/visitors/to_ruby.rb: convert omap tagged maps to
+	  Psych::Omap objects rather than hashes. [Bug #6425]
+
+	* test/psych/test_omap.rb: pertinent test.
+
+Wed May 16 01:15:45 2012  Aaron Patterson <aaron@tenderlovemaking.com>
+
+	* ext/psych/lib/psych/visitors/yaml_tree.rb: keep a reference to
+	  custom coders so that GC does not impact dumped yaml reference ids.
+
+Tue May 15 23:59:48 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* lib/test/unit.rb (Test::Unit::Options#setup_options): add --color option.
+
+	* lib/test/unit.rb (Test::Unit::Runner#_prepare_run): defer color code
+	  initialization to regard --color option.
+
+Mon May 14 16:28:36 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* parse.y (f_arglist): should reset lexical states after empty
+	  argument list with no parenthesis as well as parenthesized list,
+	  so that reserved name method definition work.  [ruby-dev:45626]
+	  [Bug #6403]
+
+Mon May 14 00:14:24 2012  CHIKANAGA Tomoyuki  <nagachika@ruby-lang.org>
+
+	* enumerator.c (lazy_take_func, lazy_take): multiple calls of
+	  force/to_a method to Enumerator::Lazy#take should return same
+	  results. [ruby-dev:45634] [Bug #6428]
+
+	* test/ruby/test_lazy_enumerator.rb (test_take_recycle): add test for
+	  above.
+
+Sun May 13 23:38:31 2012  CHIKANAGA Tomoyuki  <nagachika@ruby-lang.org>
+
+	* test/ruby/test_io.rb (test_flush_in_finalizer1): don't use IO.for_fd
+	  to close IO objects. it create IO object with already closed fd, and
+	  cause occasional Errno::EBADF in following tests. [ruby-core:45020]
+	  [Bug #6228]
+
+Sun May 13 23:32:16 2012  CHIKANAGA Tomoyuki  <nagachika@ruby-lang.org>
+
+	* test/ruby/test_io.rb (TestIO): revert r35631. it broke the intent of
+	  test_flush_in_finalizer1.  [ruby-core:43951] [Bug #6228]
+
+Sun May 13 22:46:36 2012  Tanaka Akira  <akr@fsij.org>
+
+	* ext/etc/etc.c (passwd_ensure): move endpwent() call from
+	  passwd_iterate to close /etc/passwd on exception.
+	  (group_ensure): move endgrent() call from group_iterate to close
+	  /etc/group on exception.
+
+Sun May 13 18:10:43 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_strftime.c: removed unused code and changed the style.
+
+Sun May 13 17:37:56 2012  Tadayoshi Funaba  <tadf@dotrb.org>
+
+	* ext/date/date_strftime.c: refactored.
+
 Sun May 13 06:40:12 2012  Luis Lavena  <luislavena@gmail.com>
 
 	* test/ruby/test_io.rb (class TestIO):  Disable GC during IO tests to
@@ -95,7 +3598,7 @@ Wed May  9 06:23:33 2012  Tadayoshi Funaba  <tadf@dotrb.org>
 
 Wed May  9 04:31:26 2012  Masatoshi SEKI  <m_seki@mva.biglobe.ne.jp>
 
-	* lib/rinda/ring.rb (lookup_ring_any): fix Rinda::RingFinger.primary 
+	* lib/rinda/ring.rb (lookup_ring_any): fix Rinda::RingFinger.primary
 	  hungs forever. [ruby-talk:395364]
 
 Tue May  8 21:09:00 2012  Hiroshi Shirosaki  <h.shirosaki@gmail.com>
@@ -270,7 +3773,7 @@ Mon May  7 10:16:30 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 Mon May 07 09:14:11 2012  Martin Bosslet  <Martin.Bosslet@googlemail.com>
 
-	* ext/openssl/ossl_ssl.c: support TLSv1.1 & TLSv1.2. Add 
+	* ext/openssl/ossl_ssl.c: support TLSv1.1 & TLSv1.2. Add
 	  SSLContext#version to inspect the version that was negotiated for
 	  a given connection.
 	* ext/openssl/extconf.rb: detect TLS 1.1 & 1.2 support.
@@ -2791,7 +6294,7 @@ Wed Feb 22 17:36:22 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 Wed Feb 22 17:07:35 2012  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
-	* io.c (rb_io_s_foreach): return enumerator including kerword
+	* io.c (rb_io_s_foreach): return enumerator including keyword
 	  arguments.  [ruby-dev:45267][Bug #6054]
 
 Wed Feb 22 12:15:16 2012  NARUSE, Yui  <naruse@ruby-lang.org>

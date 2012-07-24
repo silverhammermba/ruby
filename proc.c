@@ -256,7 +256,7 @@ binding_mark(void *ptr)
     if (ptr) {
 	bind = ptr;
 	RUBY_MARK_UNLESS_NULL(bind->env);
-	RUBY_MARK_UNLESS_NULL(bind->filename);
+	RUBY_MARK_UNLESS_NULL(bind->path);
     }
     RUBY_MARK_LEAVE("binding");
 }
@@ -294,8 +294,8 @@ binding_dup(VALUE self)
     GetBindingPtr(self, src);
     GetBindingPtr(bindval, dst);
     dst->env = src->env;
-    dst->filename = src->filename;
-    dst->line_no = src->line_no;
+    dst->path = src->path;
+    dst->first_lineno = src->first_lineno;
     return bindval;
 }
 
@@ -322,8 +322,8 @@ rb_binding_new(void)
 
     GetBindingPtr(bindval, bind);
     bind->env = rb_vm_make_env_object(th, cfp);
-    bind->filename = cfp->iseq->filename;
-    bind->line_no = rb_vm_get_sourceline(cfp);
+    bind->path = cfp->iseq->location.path;
+    bind->first_lineno = rb_vm_get_sourceline(cfp);
     return bindval;
 }
 
@@ -383,17 +383,13 @@ proc_new(VALUE klass, int is_lambda)
     rb_control_frame_t *cfp = th->cfp;
     rb_block_t *block;
 
-    if ((GC_GUARDED_PTR_REF(cfp->lfp[0])) != 0) {
-
-	block = GC_GUARDED_PTR_REF(cfp->lfp[0]);
+    if ((block = rb_vm_control_frame_block_ptr(cfp)) != 0) {
+	/* block found */
     }
     else {
 	cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
 
-	if ((GC_GUARDED_PTR_REF(cfp->lfp[0])) != 0) {
-
-	    block = GC_GUARDED_PTR_REF(cfp->lfp[0]);
-
+	if ((block = rb_vm_control_frame_block_ptr(cfp)) != 0) {
 	    if (is_lambda) {
 		rb_warn("tried to create Proc object without a block");
 	    }
@@ -418,7 +414,7 @@ proc_new(VALUE klass, int is_lambda)
     }
 
     procval = rb_vm_make_proc(th, block, klass);
-    rb_vm_rewrite_dfp_in_errinfo(th, cfp);
+    rb_vm_rewrite_ep_in_errinfo(th, cfp);
 
     if (is_lambda) {
 	rb_proc_t *proc;
@@ -626,14 +622,25 @@ rb_proc_call_with_block(VALUE self, int argc, VALUE *argv, VALUE pass_procval)
  *  arguments. A <code>proc</code> with no argument declarations
  *  is the same a block declaring <code>||</code> as its arguments.
  *
- *     Proc.new {}.arity          #=>  0
- *     Proc.new {||}.arity        #=>  0
- *     Proc.new {|a|}.arity       #=>  1
- *     Proc.new {|a,b|}.arity     #=>  2
- *     Proc.new {|a,b,c|}.arity   #=>  3
- *     Proc.new {|*a|}.arity      #=> -1
- *     Proc.new {|a,*b|}.arity    #=> -2
- *     Proc.new {|a,*b, c|}.arity    #=> -3
+ *     proc {}.arity          #=>  0
+ *     proc {||}.arity        #=>  0
+ *     proc {|a|}.arity       #=>  1
+ *     proc {|a,b|}.arity     #=>  2
+ *     proc {|a,b,c|}.arity   #=>  3
+ *     proc {|*a|}.arity      #=> -1
+ *     proc {|a,*b|}.arity    #=> -2
+ *     proc {|a,*b, c|}.arity #=> -3
+ *
+ *     proc   { |x = 0| }.arity       #=> 0
+ *     lambda { |a = 0| }.arity       #=> -1
+ *     proc   { |x=0, y| }.arity      #=> 0
+ *     lambda { |x=0, y| }.arity      #=> -2
+ *     proc   { |x=0, y=0| }.arity    #=> 0
+ *     lambda { |x=0, y=0| }.arity    #=> -1
+ *     proc   { |x, y=0| }.arity      #=> 1
+ *     lambda { |x, y=0| }.arity      #=> -2
+ *     proc   { |(x, y), z=0| }.arity #=> 1
+ *     lambda { |(x, y), z=0| }.arity #=> -2
  */
 
 static VALUE
@@ -652,7 +659,7 @@ rb_proc_arity(VALUE self)
     iseq = proc->block.iseq;
     if (iseq) {
 	if (BUILTIN_TYPE(iseq) != T_NODE) {
-	    if (iseq->arg_rest < 0) {
+	    if (iseq->arg_rest < 0 && (!proc->is_lambda || iseq->arg_opts == 0)) {
 		return iseq->argc;
 	    }
 	    else {
@@ -699,7 +706,7 @@ iseq_location(rb_iseq_t *iseq)
     VALUE loc[2];
 
     if (!iseq) return Qnil;
-    loc[0] = iseq->filename;
+    loc[0] = iseq->location.path;
     if (iseq->line_info_table) {
 	loc[1] = INT2FIX(rb_iseq_first_lineno(iseq));
     }
@@ -801,7 +808,7 @@ rb_hash_proc(st_index_t hash, VALUE prc)
     GetProcPtr(prc, proc);
     hash = rb_hash_uint(hash, (st_index_t)proc->block.iseq);
     hash = rb_hash_uint(hash, (st_index_t)proc->envval);
-    return rb_hash_uint(hash, (st_index_t)proc->block.lfp >> 16);
+    return rb_hash_uint(hash, (st_index_t)proc->block.ep >> 16);
 }
 
 /*
@@ -843,14 +850,14 @@ proc_to_s(VALUE self)
     is_lambda = proc->is_lambda ? " (lambda)" : "";
 
     if (RUBY_VM_NORMAL_ISEQ_P(iseq)) {
-	int line_no = 0;
+	int first_lineno = 0;
 
 	if (iseq->line_info_table) {
-	    line_no = rb_iseq_first_lineno(iseq);
+	    first_lineno = rb_iseq_first_lineno(iseq);
 	}
 	str = rb_sprintf("#<%s:%p@%s:%d%s>", cname, (void *)self,
-			 RSTRING_PTR(iseq->filename),
-			 line_no, is_lambda);
+			 RSTRING_PTR(iseq->location.path),
+			 first_lineno, is_lambda);
     }
     else {
 	str = rb_sprintf("#<%s:%p%s>", cname, (void *)proc->block.iseq,
@@ -1364,7 +1371,8 @@ rb_mod_define_method(int argc, VALUE *argv, VALUE mod)
     if (rb_obj_is_method(body)) {
 	struct METHOD *method = (struct METHOD *)DATA_PTR(body);
 	VALUE rclass = method->rclass;
-	if (rclass != mod && !RTEST(rb_class_inherited_p(mod, rclass))) {
+	if (rclass != mod && !RB_TYPE_P(rclass, T_MODULE) &&
+	    !RTEST(rb_class_inherited_p(mod, rclass))) {
 	    if (FL_TEST(rclass, FL_SINGLETON)) {
 		rb_raise(rb_eTypeError,
 			 "can't bind singleton method to a different class");
@@ -1970,7 +1978,7 @@ proc_binding(VALUE self)
     rb_binding_t *bind;
 
     GetProcPtr(self, proc);
-    if (TYPE(proc->block.iseq) == T_NODE) {
+    if (RB_TYPE_P((VALUE)proc->block.iseq, T_NODE)) {
 	if (!IS_METHOD_PROC_NODE((NODE *)proc->block.iseq)) {
 	    rb_raise(rb_eArgError, "Can't create Binding from C level Proc");
 	}
@@ -1980,12 +1988,12 @@ proc_binding(VALUE self)
     GetBindingPtr(bindval, bind);
     bind->env = proc->envval;
     if (RUBY_VM_NORMAL_ISEQ_P(proc->block.iseq)) {
-	bind->filename = proc->block.iseq->filename;
-	bind->line_no = rb_iseq_first_lineno(proc->block.iseq);
+	bind->path = proc->block.iseq->location.path;
+	bind->first_lineno = rb_iseq_first_lineno(proc->block.iseq);
     }
     else {
-	bind->filename = Qnil;
-	bind->line_no = 0;
+	bind->path = Qnil;
+	bind->first_lineno = 0;
     }
     return bindval;
 }

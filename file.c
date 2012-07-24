@@ -60,6 +60,13 @@ int flock(int, int);
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#if defined(__native_client__) && defined(NACL_NEWLIB)
+# include "nacl/utime.h"
+# include "nacl/stat.h"
+# include "nacl/unistd.h"
+#endif
+
+
 #ifdef HAVE_SYS_MKDEV_H
 #include <sys/mkdev.h>
 #endif
@@ -850,8 +857,7 @@ w32_io_info(VALUE *file, BY_HANDLE_FILE_INFORMATION *st)
 	MultiByteToWideChar(CP_UTF8, 0, RSTRING_PTR(tmp), -1, ptr, len);
 	f = CreateFileW(ptr, 0,
 			FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-			rb_w32_iswin95() ? 0 : FILE_FLAG_BACKUP_SEMANTICS,
-			NULL);
+			FILE_FLAG_BACKUP_SEMANTICS, NULL);
 	ALLOCV_END(v);
 	if (f == INVALID_HANDLE_VALUE) return f;
 	ret = f;
@@ -1081,18 +1087,6 @@ access_internal(const char *path, int mode)
  *  those used in <code>File::Stat</code>. It exists as a standalone
  *  module, and its methods are also insinuated into the <code>File</code>
  *  class. (Note that this is not done by inclusion: the interpreter cheats).
- *
- */
-
-/*
- * Document-method: exist?
- *
- * call-seq:
- *   Dir.exist?(file_name)   ->  true or false
- *   Dir.exists?(file_name)   ->  true or false
- *
- * Returns <code>true</code> if the named file is a directory,
- * <code>false</code> otherwise.
  *
  */
 
@@ -1677,7 +1671,6 @@ rb_file_identical_p(VALUE obj, VALUE fname1, VALUE fname2)
 	st1.nFileIndexLow == st2.nFileIndexLow)
 	return Qtrue;
     if (!f1 || !f2) return Qfalse;
-    if (rb_w32_iswin95()) return Qfalse;
 # else
     FilePathValue(fname1);
     fname1 = rb_str_new4(fname1);
@@ -3343,6 +3336,13 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, const char *unresolved, VALUE l
             VALUE testpath = rb_str_dup(*resolvedp);
             if (*prefixlenp < RSTRING_LEN(testpath))
                 rb_str_cat2(testpath, "/");
+#if defined(DOSISH_UNC) || defined(DOSISH_DRIVE_LETTER)
+	    if (*prefixlenp > 1 && *prefixlenp == RSTRING_LEN(testpath)) {
+		const char *prefix = RSTRING_PTR(testpath);
+		const char *last = rb_enc_left_char_head(prefix, prefix + *prefixlenp - 1, prefix + *prefixlenp, enc);
+		if (!isdirsep(*last)) rb_str_cat2(testpath, "/");
+	    }
+#endif
             rb_str_cat(testpath, testname, testnamelen);
             checkval = rb_hash_aref(loopcheck, testpath);
             if (!NIL_P(checkval)) {
@@ -3358,7 +3358,11 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, const char *unresolved, VALUE l
                 struct stat sbuf;
                 int ret;
                 VALUE testpath2 = rb_str_encode_ospath(testpath);
+#ifdef __native_client__
+                ret = stat(RSTRING_PTR(testpath2), &sbuf);
+#else
                 ret = lstat(RSTRING_PTR(testpath2), &sbuf);
+#endif
                 if (ret == -1) {
                     if (errno == ENOENT) {
                         if (strict || !last || *unresolved_firstsep)
@@ -3403,6 +3407,13 @@ realpath_rec(long *prefixlenp, VALUE *resolvedp, const char *unresolved, VALUE l
     }
 }
 
+#ifdef __native_client__
+VALUE
+rb_realpath_internal(VALUE basedir, VALUE path, int strict)
+{
+    return path;
+}
+#else
 VALUE
 rb_realpath_internal(VALUE basedir, VALUE path, int strict)
 {
@@ -3476,6 +3487,7 @@ rb_realpath_internal(VALUE basedir, VALUE path, int strict)
     OBJ_TAINT(resolved);
     return resolved;
 }
+#endif
 
 /*
  * call-seq:
@@ -3622,8 +3634,9 @@ ruby_enc_find_basename(const char *name, long *baselen, long *alllen, rb_encodin
  *     File.basename(file_name [, suffix] )  ->  base_name
  *
  *  Returns the last component of the filename given in <i>file_name</i>,
- *  which must be formed using forward slashes (``<code>/</code>'')
- *  regardless of the separator used on the local file system. If
+ *  which can be formed using both <code>File::SEPARATOR</code> and
+ *  <code>File::ALT_SEPARETOR</code> as the separator when
+ *  <code>File::ALT_SEPARATOR</code> is not <code>nil</code>. If
  *  <i>suffix</i> is given and present at the end of <i>file_name</i>,
  *  it is removed.
  *
@@ -3682,9 +3695,9 @@ rb_file_s_basename(int argc, VALUE *argv)
  *     File.dirname(file_name )  ->  dir_name
  *
  *  Returns all components of the filename given in <i>file_name</i>
- *  except the last one. The filename must be formed using forward
- *  slashes (``<code>/</code>'') regardless of the separator used on the
- *  local file system.
+ *  except the last one. The filename can be formed using both
+ *  <code>File::SEPARATOR</code> and <code>File::ALT_SEPARETOR</code> as the
+ *  separator when <code>File::ALT_SEPARATOR</code> is not <code>nil</code>.
  *
  *     File.dirname("/home/gumby/work/ruby.rb")   #=> "/home/gumby/work"
  */
@@ -4444,12 +4457,7 @@ rb_stat_init_copy(VALUE copy, VALUE orig)
 {
     struct stat *nst;
 
-    if (copy == orig) return orig;
-    rb_check_frozen(copy);
-    /* need better argument type check */
-    if (!rb_obj_is_instance_of(orig, rb_obj_class(copy))) {
-	rb_raise(rb_eTypeError, "wrong argument class");
-    }
+    if (!OBJ_INIT_COPY(copy, orig)) return copy;
     if (DATA_PTR(copy)) {
 	xfree(DATA_PTR(copy));
 	DATA_PTR(copy) = 0;
@@ -5142,6 +5150,9 @@ rb_path_check(const char *path)
 }
 
 #ifndef _WIN32
+#ifdef __native_client__
+__attribute__((noinline))
+#endif
 int
 rb_file_load_ok(const char *path)
 {

@@ -20,16 +20,16 @@ extern "C" {
  *
  */
 
-//
-// Definitions for NT port of Perl
-//
+/*
+ * Definitions for NT port of Perl
+ */
 
 
-//
-// Ok now we can include the normal include files.
-//
+/*
+ * Ok now we can include the normal include files.
+ */
 
-// #include <stdarg.h> conflict with varargs.h?
+/* #include <stdarg.h> conflict with varargs.h? */
 #if !defined(WSAAPI)
 #if defined(__cplusplus) && defined(_MSC_VER)
 extern "C++" {			/* template without extern "C++" */
@@ -44,12 +44,10 @@ extern "C++" {			/* template without extern "C++" */
 #endif
 #endif
 
-#define NT 1			/* deprecated */
-
-//
-// We're not using Microsoft's "extensions" to C for
-// Structured Exception Handling (SEH) so we can nuke these
-//
+/*
+ * We're not using Microsoft's "extensions" to C for
+ * Structured Exception Handling (SEH) so we can nuke these
+ */
 #undef try
 #undef except
 #undef finally
@@ -105,14 +103,8 @@ typedef unsigned int uintptr_t;
 # include <unistd.h>
 #endif
 
-#ifdef WIN95
-extern DWORD rb_w32_osid(void);
-#define rb_w32_iswinnt()  (rb_w32_osid() == VER_PLATFORM_WIN32_NT)
-#define rb_w32_iswin95()  (rb_w32_osid() == VER_PLATFORM_WIN32_WINDOWS)
-#else
 #define rb_w32_iswinnt()  TRUE
 #define rb_w32_iswin95()  FALSE
-#endif
 
 #define WNOHANG -1
 
@@ -230,7 +222,7 @@ struct msghdr {
     int msg_flags;
 };
 
-#define NtInitialize ruby_sysinit
+extern DWORD  rb_w32_osid(void);
 extern int    rb_w32_cmdvector(const char *, char ***);
 extern rb_pid_t  rb_w32_pipe_exec(const char *, const char *, int, int *, int *);
 extern int    flock(int fd, int oper);
@@ -382,9 +374,9 @@ scalb(double a, long b)
 #define S_IXOTH 0001
 #endif
 
-//
-// define this so we can do inplace editing
-//
+/*
+ * define this so we can do inplace editing
+ */
 
 #define SUFFIX
 
@@ -425,9 +417,9 @@ extern int 	 rb_w32_fseeko(FILE *stream, off_t offset, int whence);
 #define ftello rb_w32_ftello
 #endif
 
-//
-// stubs
-//
+/*
+ * stubs
+ */
 extern int       ioctl (int, int, ...);
 extern rb_uid_t  getuid (void);
 extern rb_uid_t  geteuid (void);
@@ -573,11 +565,15 @@ extern char *rb_w32_strerror(int);
 #endif
 
 #define F_DUPFD 0
-//#define F_GETFD 1
-//#define F_SETFD 2
-//#define F_GETFL 3
+#if 0
+#define F_GETFD 1
+#define F_SETFD 2
+#define F_GETFL 3
+#endif
 #define F_SETFL 4
-//#define FD_CLOEXEC 1 /* F_GETFD, F_SETFD */
+#if 0
+#define FD_CLOEXEC 1 /* F_GETFD, F_SETFD */
+#endif
 #define O_NONBLOCK 1
 
 #undef FD_SET
@@ -726,6 +722,8 @@ long rb_w32_write_console(uintptr_t, int);	/* use uintptr_t instead of VALUE bec
 int  WINAPI rb_w32_Sleep(unsigned long msec);
 int  rb_w32_wait_events_blocking(HANDLE *events, int num, DWORD timeout);
 int  rb_w32_time_subtract(struct timeval *rest, const struct timeval *wait);
+int  rb_w32_wrap_io_handle(HANDLE, int);
+int  rb_w32_unwrap_io_handle(int);
 
 /*
 == ***CAUTION***

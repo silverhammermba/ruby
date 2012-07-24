@@ -461,6 +461,12 @@ rb_enc_unicode_p(rb_encoding *enc)
     return name[0] == 'U' && name[1] == 'T' && name[2] == 'F' && name[4] != '7';
 }
 
+static st_data_t
+enc_dup_name(st_data_t name)
+{
+    return (st_data_t)strdup((const char *)name);
+}
+
 /*
  * Returns copied alias name when the key is added for st_table,
  * else returns NULL.
@@ -469,7 +475,7 @@ static int
 enc_alias_internal(const char *alias, int idx)
 {
     return st_insert2(enc_table.names, (st_data_t)alias, (st_data_t)idx,
-	    (st_data_t(*)(st_data_t))strdup);
+		      enc_dup_name);
 }
 
 static int
@@ -576,7 +582,7 @@ load_encoding(const char *name)
 
     while (s < e) {
 	if (!ISALNUM(*s)) *s = '_';
-	else if (ISUPPER(*s)) *s = TOLOWER(*s);
+	else if (ISUPPER(*s)) *s = (char)TOLOWER(*s);
 	++s;
     }
     FL_UNSET(enclib, FL_TAINT|FL_UNTRUSTED);
@@ -1792,15 +1798,15 @@ rb_enc_aliases(VALUE klass)
  * output to ISO-8859-1 encoding, then read back in and transcoded to UTF-8:
  *
  *   string = "R\u00E9sum\u00E9"
- *   
+ *
  *   open("transcoded.txt", "w:ISO-8859-1") do |io|
  *     io.write(string)
  *   end
- *   
+ *
  *   puts "raw text:"
  *   p File.binread("transcoded.txt")
  *   puts
- *   
+ *
  *   open("transcoded.txt", "r:ISO-8859-1:UTF-8") do |io|
  *     puts "transcoded text:"
  *     p io.read
@@ -1809,14 +1815,14 @@ rb_enc_aliases(VALUE klass)
  * While writing the file, the internal encoding is not specified as it is
  * only necessary for reading.  While reading the file both the internal and
  * external encoding must be specified to obtain the correct result.
- *   
- *   $ ruby t.rb 
+ *
+ *   $ ruby t.rb
  *   raw text:
  *   "R\xE9sum\xE9"
  *
  *   transcoded text:
  *   "R\u00E9sum\u00E9"
- *   
+ *
  */
 
 void

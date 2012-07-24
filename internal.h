@@ -27,6 +27,7 @@ struct rb_classext_struct {
     VALUE super;
     struct st_table *iv_tbl;
     struct st_table *const_tbl;
+    VALUE origin;
 };
 
 #undef RCLASS_SUPER
@@ -36,6 +37,7 @@ struct rb_classext_struct {
 #define RCLASS_CONST_TBL(c) (RCLASS_EXT(c)->const_tbl)
 #define RCLASS_M_TBL(c) (RCLASS(c)->m_tbl)
 #define RCLASS_IV_INDEX_TBL(c) (RCLASS(c)->iv_index_tbl)
+#define RCLASS_ORIGIN(c) (RCLASS_EXT(c)->origin)
 
 struct vtm; /* defined by timev.h */
 
@@ -47,6 +49,8 @@ VALUE rb_ary_cat(VALUE, const VALUE *, long);
 /* bignum.c */
 VALUE rb_big_fdiv(VALUE x, VALUE y);
 VALUE rb_big_uminus(VALUE x);
+VALUE rb_integer_float_cmp(VALUE x, VALUE y);
+VALUE rb_integer_float_eq(VALUE x, VALUE y);
 
 /* class.c */
 VALUE rb_obj_methods(int argc, VALUE *argv, VALUE obj);
@@ -83,6 +87,7 @@ void rb_gc_mark_encodings(void);
 NORETURN(PRINTF_ARGS(void rb_compile_bug(const char*, int, const char*, ...), 3, 4));
 VALUE rb_check_backtrace(VALUE);
 NORETURN(void rb_async_bug_errno(const char *,int));
+const char *rb_builtin_type_name(int t);
 
 /* eval_error.c */
 void ruby_error_print(void);
@@ -90,6 +95,7 @@ VALUE rb_get_backtrace(VALUE info);
 
 /* eval_jump.c */
 void rb_call_end_proc(VALUE data);
+void rb_mark_end_proc(void);
 
 /* file.c */
 VALUE rb_home_dir(const char *user, VALUE result);
@@ -112,7 +118,6 @@ ssize_t rb_io_bufread(VALUE io, void *buf, size_t size);
 void rb_stdio_set_default_encoding(void);
 
 /* iseq.c */
-VALUE rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE filepath, VALUE line, VALUE opt);
 VALUE rb_iseq_clone(VALUE iseqval, VALUE newcbase);
 
 /* load.c */
@@ -152,10 +157,61 @@ int rb_is_attrset_name(VALUE name);
 int rb_is_local_name(VALUE name);
 int rb_is_method_name(VALUE name);
 int rb_is_junk_name(VALUE name);
+void rb_gc_mark_parser(void);
+void rb_gc_mark_symbols(void);
 
 /* proc.c */
 VALUE rb_proc_location(VALUE self);
 st_index_t rb_hash_proc(st_index_t hash, VALUE proc);
+
+/* process.c */
+
+struct rb_execarg {
+    int use_shell;
+    union {
+        struct {
+            VALUE shell_script;
+        } sh;
+        struct {
+            VALUE command_name;
+            VALUE command_abspath; /* full path string or nil */
+            VALUE argv_str;
+            VALUE argv_buf;
+        } cmd;
+    } invoke;
+    VALUE redirect_fds;
+    VALUE envp_str;
+    VALUE envp_buf;
+    VALUE dup2_tmpbuf;
+    unsigned pgroup_given : 1;
+    unsigned umask_given : 1;
+    unsigned unsetenv_others_given : 1;
+    unsigned unsetenv_others_do : 1;
+    unsigned close_others_given : 1;
+    unsigned close_others_do : 1;
+    unsigned chdir_given : 1;
+    unsigned new_pgroup_given : 1;
+    unsigned new_pgroup_flag : 1;
+    rb_pid_t pgroup_pgid; /* asis(-1), new pgroup(0), specified pgroup (0<V). */
+    VALUE rlimit_limits; /* Qfalse or [[rtype, softlim, hardlim], ...] */
+    mode_t umask_mask;
+    VALUE fd_dup2;
+    VALUE fd_close;
+    VALUE fd_open;
+    VALUE fd_dup2_child;
+    int close_others_maxhint;
+    VALUE env_modification; /* Qfalse or [[k1,v1], ...] */
+    VALUE chdir_dir;
+};
+
+/* argv_str contains extra two elements.
+ * The beginning one is for /bin/sh used by exec_with_sh.
+ * The last one for terminating NULL used by execve.
+ * See rb_exec_fillarg() in process.c. */
+#define ARGVSTR2ARGC(argv_str) (RSTRING_LEN(argv_str) / sizeof(char *) - 2)
+#define ARGVSTR2ARGV(argv_str) ((char **)RSTRING_PTR(argv_str) + 1)
+
+rb_pid_t rb_fork_ruby(int *status);
 
 /* rational.c */
 VALUE rb_lcm(VALUE x, VALUE y);
@@ -178,6 +234,7 @@ size_t rb_strftime(char *s, size_t maxsize, const char *format, rb_encoding *enc
 
 /* string.c */
 int rb_str_buf_cat_escaped_char(VALUE result, unsigned int c, int unicode_p);
+int rb_str_symname_p(VALUE);
 
 /* struct.c */
 VALUE rb_struct_init_copy(VALUE copy, VALUE s);
@@ -190,8 +247,11 @@ VALUE rb_obj_is_mutex(VALUE obj);
 VALUE ruby_suppress_tracing(VALUE (*func)(VALUE, int), VALUE arg, int always);
 void rb_thread_execute_interrupts(VALUE th);
 void rb_clear_trace_func(void);
-VALUE rb_thread_backtrace(VALUE thval);
 VALUE rb_get_coverages(void);
+VALUE rb_thread_shield_new(void);
+VALUE rb_thread_shield_wait(VALUE self);
+VALUE rb_thread_shield_release(VALUE self);
+VALUE rb_thread_shield_destroy(VALUE self);
 
 /* thread_pthread.c, thread_win32.c */
 void Init_native_thread(void);
@@ -217,9 +277,19 @@ VALUE rb_current_realfilepath(void);
 
 /* vm_method.c */
 void Init_eval_method(void);
+int rb_method_defined_by(VALUE obj, ID mid, VALUE (*cfunc)(ANYARGS));
 
 /* miniprelude.c, prelude.c */
 void Init_prelude(void);
+
+/* vm_backtrace.c */
+void Init_vm_backtrace(void);
+VALUE rb_thread_backtrace(VALUE thval);
+VALUE rb_make_backtrace(void);
+void rb_backtrace_print_as_bugreport(void);
+int rb_backtrace_p(VALUE obj);
+VALUE rb_backtrace_to_str_ary(VALUE obj);
+VALUE rb_vm_backtrace_object();
 
 #if defined __GNUC__ && __GNUC__ >= 4
 #pragma GCC visibility push(default)
@@ -229,18 +299,25 @@ const char *rb_objspace_data_type_name(VALUE obj);
 /* Temporary.  This API will be removed (renamed). */
 VALUE rb_thread_io_blocking_region(rb_blocking_function_t *func, void *data1, int fd);
 
-/* experimental.
- * These APIs can be changed on Ruby 1.9.4 or later.
- * We will change these APIs (spac, name and so on) if there are something wrong.
- * If you use these APIs, catch up future changes.
- */
-void *rb_thread_call_with_gvl(void *(*func)(void *), void *data1);
-VALUE rb_thread_call_without_gvl(
-    rb_blocking_function_t *func, void *data1,
-    rb_unblock_function_t *ubf, void *data2);
-
 /* io.c */
 void rb_maygvl_fd_fix_cloexec(int fd);
+
+/* process.c */
+int rb_exec_async_signal_safe(const struct rb_execarg *e, char *errmsg, size_t errmsg_buflen);
+rb_pid_t rb_fork_async_signal_safe(int *status, int (*chfunc)(void*, char *, size_t), void *charg, VALUE fds, char *errmsg, size_t errmsg_buflen);
+VALUE rb_execarg_new(int argc, VALUE *argv, int accept_shell);
+struct rb_execarg *rb_execarg_get(VALUE execarg_obj); /* dangerous.  needs GC guard. */
+VALUE rb_execarg_init(int argc, VALUE *argv, int accept_shell, VALUE execarg_obj);
+int rb_execarg_addopt(VALUE execarg_obj, VALUE key, VALUE val);
+void rb_execarg_fixup(VALUE execarg_obj);
+int rb_execarg_run_options(const struct rb_execarg *e, struct rb_execarg *s, char* errmsg, size_t errmsg_buflen);
+VALUE rb_execarg_extract_options(VALUE execarg_obj, VALUE opthash);
+void rb_execarg_setenv(VALUE execarg_obj, VALUE env);
+
+/* variable.c */
+void rb_gc_mark_global_tbl(void);
+void rb_mark_generic_ivar(VALUE);
+void rb_mark_generic_ivar_tbl(void);
 
 #if defined __GNUC__ && __GNUC__ >= 4
 #pragma GCC visibility pop

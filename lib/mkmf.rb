@@ -885,7 +885,7 @@ SRC
   end
 
   # Returns whether or not the given entry point +func+ can be found within
-  # +lib+.  If +func+ is nil, the <code>main()</code> entry point is used by
+  # +lib+.  If +func+ is +nil+, the <code>main()</code> entry point is used by
   # default.  If found, it adds the library to list of libraries to be used
   # when linking your extension.
   #
@@ -915,7 +915,7 @@ SRC
 
   # Returns whether or not the entry point +func+ can be found within the
   # library +lib+ in one of the +paths+ specified, where +paths+ is an array
-  # of strings.  If +func+ is nil , then the <code>main()</code> function is
+  # of strings.  If +func+ is +nil+ , then the <code>main()</code> function is
   # used as the entry point.
   #
   # If +lib+ is found, then the path it was found on is added to the list of
@@ -948,7 +948,11 @@ SRC
   # is passed as a preprocessor constant to the compiler using the function
   # name, in uppercase, prepended with +HAVE_+.
   #
-  # For example, if <code>have_func('foo')</code> returned true, then the
+  # To check functions in an additional library, you need to check that
+  # library first using <code>have_library()</code>.  The +func+ shall be
+  # either mere function name or function name with arguments.
+  #
+  # For example, if <code>have_func('foo')</code> returned +true+, then the
   # +HAVE_FOO+ preprocessor macro would be passed to the compiler.
   #
   def have_func(func, headers = nil, opt = "", &b)
@@ -966,6 +970,9 @@ SRC
   # header files, or within any +headers+ that you provide.  If found, a macro
   # is passed as a preprocessor constant to the compiler using the variable
   # name, in uppercase, prepended with +HAVE_+.
+  #
+  # To check variables in an additional library, you need to check that
+  # library first using <code>have_library()</code>.
   #
   # For example, if <code>have_var('foo')</code> returned true, then the
   # +HAVE_FOO+ preprocessor macro would be passed to the compiler.
@@ -1010,9 +1017,12 @@ SRC
   def have_framework(fw, &b)
     checking_for fw do
       src = cpp_include("#{fw}/#{fw}.h") << "\n" "int main(void){return 0;}"
-      if try_link(src, opt = "-ObjC -framework #{fw}", &b)
+      if try_link(src, "-ObjC -framework #{fw}", &b)
         $defs.push(format("-DHAVE_FRAMEWORK_%s", fw.tr_cpp))
-        $LDFLAGS << " " << opt
+	# TODO: non-worse way than this hack, to get rid of separating
+	# option and its argument.
+	opt = " -ObjC -framework\0#{fw}"
+        $LDFLAGS << opt
         true
       else
         false
@@ -1482,8 +1492,8 @@ SRC
   # :startdoc:
 
   # Tests for the presence of a <tt>--with-</tt>_config_ or
-  # <tt>--without-</tt>_config_ option.  Returns true if the with option is
-  # given, false if the without option is given, and the default value
+  # <tt>--without-</tt>_config_ option.  Returns +true+ if the with option is
+  # given, +false+ if the without option is given, and the default value
   # otherwise.
   #
   # This can be useful for adding custom definitions, such as debug
@@ -1517,8 +1527,8 @@ SRC
   end
 
   # Tests for the presence of an <tt>--enable-</tt>_config_ or
-  # <tt>--disable-</tt>_config_ option. Returns true if the enable option is
-  # given, false if the disable option is given, and the default value
+  # <tt>--disable-</tt>_config_ option. Returns +true+ if the enable option is
+  # given, +false+ if the disable option is given, and the default value
   # otherwise.
   #
   # This can be useful for adding custom definitions, such as debug
@@ -1641,6 +1651,9 @@ SRC
 
   # Handles meta information about installed libraries. Uses your platform's
   # pkg-config program if it has one.
+  #
+  # The actual command name can be overridden by
+  # <code>--with-pkg-config</code> command line option.
   def pkg_config(pkg)
     if pkgconfig = with_config("#{pkg}-config") and find_executable0(pkgconfig)
       # iff package specific config command is given
@@ -1770,8 +1783,9 @@ LIBRUBY = #{CONFIG['LIBRUBY']}
 LIBRUBY_A = #{CONFIG['LIBRUBY_A']}
 LIBRUBYARG_SHARED = #$LIBRUBYARG_SHARED
 LIBRUBYARG_STATIC = #$LIBRUBYARG_STATIC
-OUTFLAG = #{OUTFLAG}
-COUTFLAG = #{COUTFLAG}
+empty =
+OUTFLAG = #{OUTFLAG}$(empty)
+COUTFLAG = #{COUTFLAG}$(empty)
 
 RUBY_EXTCONF_H = #{$extconf_h}
 cflags   = #{CONFIG['cflags']}
@@ -1783,8 +1797,8 @@ INCFLAGS = -I. #$INCFLAGS
 DEFS     = #{CONFIG['DEFS']}
 CPPFLAGS = #{extconf_h}#{$CPPFLAGS}
 CXXFLAGS = $(CFLAGS) #{CONFIG['CXXFLAGS']}
-ldflags  = #{$LDFLAGS}
-dldflags = #{$DLDFLAGS}
+ldflags  = #{$LDFLAGS.tr("\0", " ")}
+dldflags = #{$DLDFLAGS} #{CONFIG['EXTDLDFLAGS']}
 ARCH_FLAG = #{$ARCH_FLAG}
 DLDFLAGS = $(ldflags) $(dldflags) $(ARCH_FLAG)
 LDSHARED = #{CONFIG['LDSHARED']}
@@ -1835,7 +1849,7 @@ DISTCLEANFILES = #{$distcleanfiles.join(' ')}
 
 all install static install-so install-rb: Makefile
 .PHONY: all install static install-so install-rb
-.PHONY: clean clean-so clean-rb
+.PHONY: clean clean-so clean-static clean-rb
 
 RULES
   end
@@ -2003,7 +2017,7 @@ RULES
           makedef = %{-pe "$_.sub!(/^(?=\\w)/,'#{EXPORT_PREFIX}') unless 1../^EXPORTS$/i"}
         end
       else
-        makedef = %{-e "puts 'EXPORTS', '#{EXPORT_PREFIX}' + 'Init_$(TARGET)'.sub(/\\..*\\z/,'')"}
+        makedef = %{-e "puts 'EXPORTS', '$(TARGET_ENTRY)'"}
       end
       if makedef
         $cleanfiles << '$(DEFFILE)'
@@ -2048,6 +2062,8 @@ ORIG_SRCS = #{orig_srcs.collect(&File.method(:basename)).join(' ')}
 SRCS = $(ORIG_SRCS) #{(srcs - orig_srcs).collect(&File.method(:basename)).join(' ')}
 OBJS = #{$objs.join(" ")}
 TARGET = #{target}
+TARGET_NAME = #{target && target[/\A\w+/]}
+TARGET_ENTRY = #{EXPORT_PREFIX || ''}Init_$(TARGET_NAME)
 DLLIB = #{dllib}
 EXTSTATIC = #{$static || ""}
 STATIC_LIB = #{staticlib unless $static.nil?}
@@ -2064,7 +2080,7 @@ CLEANOBJS     = *.#{$OBJEXT} #{config_string('cleanobjs') {|t| t.gsub(/\$\*/, "$
 all:    #{$extout ? "install" : target ? "$(DLLIB)" : "Makefile"}
 static: $(STATIC_LIB)#{$extout ? " install-rb" : ""}
 .PHONY: all install static install-so install-rb
-.PHONY: clean clean-so clean-rb
+.PHONY: clean clean-so clean-static clean-rb
 "
     mfile.print CLEANINGS
     fsep = config_string('BUILD_FILE_SEPARATOR') {|s| s unless s == "/"}
@@ -2100,6 +2116,8 @@ static: $(STATIC_LIB)#{$extout ? " install-rb" : ""}
           mfile.print "\t@echo #{dir}/#{File.basename(f)}>>$(INSTALLED_LIST)\n"
         end
       end
+      mfile.print "clean-static::\n"
+      mfile.print "\t-$(Q)$(RM) $(STATIC_LIB)\n"
     else
       mfile.puts "Makefile"
     end
@@ -2369,16 +2387,18 @@ MESSAGE
 
   sep = config_string('BUILD_FILE_SEPARATOR') {|s| ":/=#{s}" if s != "/"} || ""
   CLEANINGS = "
+clean-static::
 clean-rb-default::
 clean-rb::
 clean-so::
-clean: clean-so clean-rb-default clean-rb
+clean: clean-so clean-static clean-rb-default clean-rb
 \t\t-$(Q)$(RM) $(CLEANLIBS#{sep}) $(CLEANOBJS#{sep}) $(CLEANFILES#{sep})
 
 distclean-rb-default::
 distclean-rb::
 distclean-so::
-distclean: clean distclean-so distclean-rb-default distclean-rb
+distclean-static::
+distclean: clean distclean-so distclean-static distclean-rb-default distclean-rb
 \t\t-$(Q)$(RM) Makefile $(RUBY_EXTCONF_H) conftest.* mkmf.log
 \t\t-$(Q)$(RM) core ruby$(EXEEXT) *~ $(DISTCLEANFILES#{sep})
 \t\t-$(Q)$(RMDIRS) $(DISTCLEANDIRS#{sep})#{$ignore_error}

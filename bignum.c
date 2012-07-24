@@ -10,9 +10,13 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
+#include "ruby/thread.h"
 #include "ruby/util.h"
 #include "internal.h"
 
+#ifdef HAVE_STRINGS_H
+#include <strings.h>
+#endif
 #include <math.h>
 #include <float.h>
 #include <ctype.h>
@@ -730,7 +734,7 @@ rb_cstr_to_inum(const char *str, int base, int badcheck)
 		if (badcheck) goto bad;
 		break;
 	    }
-	    nondigit = c;
+	    nondigit = (char) c;
 	    continue;
 	}
 	else if ((c = conv_digit(c)) < 0) {
@@ -1035,7 +1039,8 @@ big2str_find_n1(VALUE x, int base)
 	bits = BITSPERDIG*RBIGNUM_LEN(x);
     }
 
-    return (long)ceil(bits/log_2[base - 2]);
+    /* @shyouhei note: vvvvvvvvvvvvv this cast is suspicious.  But I believe it is OK, because if that cast loses data, this x value is too big, and should have raised RangeError. */
+    return (long)ceil(((double)bits)/log_2[base - 2]);
 }
 
 static long
@@ -1430,6 +1435,88 @@ rb_big_to_f(VALUE x)
     return DBL2NUM(rb_big2dbl(x));
 }
 
+VALUE
+rb_integer_float_cmp(VALUE x, VALUE y)
+{
+    double yd = RFLOAT_VALUE(y);
+    double yi, yf;
+    VALUE rel;
+
+    if (isnan(yd))
+        return Qnil;
+    if (isinf(yd)) {
+        if (yd > 0.0) return INT2FIX(-1);
+        else return INT2FIX(1);
+    }
+    yf = modf(yd, &yi);
+    if (FIXNUM_P(x)) {
+#if SIZEOF_LONG * CHAR_BIT < DBL_MANT_DIG /* assume FLT_RADIX == 2 */
+        double xd = (double)FIX2LONG(x);
+        if (xd < yd)
+            return INT2FIX(-1);
+        if (xd > yd)
+            return INT2FIX(1);
+        return INT2FIX(0);
+#else
+        long xl, yl;
+        if (yi < FIXNUM_MIN)
+            return INT2FIX(1);
+        if (FIXNUM_MAX+1 <= yi)
+            return INT2FIX(-1);
+        xl = FIX2LONG(x);
+        yl = (long)yi;
+        if (xl < yl)
+            return INT2FIX(-1);
+        if (xl > yl)
+            return INT2FIX(1);
+        if (yf < 0.0)
+            return INT2FIX(1);
+        if (0.0 < yf)
+            return INT2FIX(-1);
+        return INT2FIX(0);
+#endif
+    }
+    y = rb_dbl2big(yi);
+    rel = rb_big_cmp(x, y);
+    if (yf == 0.0 || rel != INT2FIX(0))
+        return rel;
+    if (yf < 0.0)
+        return INT2FIX(1);
+    return INT2FIX(-1);
+}
+
+VALUE
+rb_integer_float_eq(VALUE x, VALUE y)
+{
+    double yd = RFLOAT_VALUE(y);
+    double yi, yf;
+
+    if (isnan(yd) || isinf(yd))
+        return Qfalse;
+    yf = modf(yd, &yi);
+    if (yf != 0)
+        return Qfalse;
+    if (FIXNUM_P(x)) {
+#if SIZEOF_LONG * CHAR_BIT < DBL_MANT_DIG /* assume FLT_RADIX == 2 */
+        double xd = (double)FIX2LONG(x);
+        if (xd != yd)
+            return Qfalse;
+        return Qtrue;
+#else
+        long xl, yl;
+        if (yi < LONG_MIN || LONG_MAX < yi)
+            return Qfalse;
+        xl = FIX2LONG(x);
+        yl = (long)yi;
+        if (xl != yl)
+            return Qfalse;
+        return Qtrue;
+#endif
+    }
+    y = rb_dbl2big(yi);
+    return rb_big_eq(x, y);
+}
+
 /*
  *  call-seq:
  *     big <=> numeric   -> -1, 0, +1 or nil
@@ -1455,15 +1542,7 @@ rb_big_cmp(VALUE x, VALUE y)
 	break;
 
       case T_FLOAT:
-	{
-	    double a = RFLOAT_VALUE(y);
-
-	    if (isinf(a)) {
-		if (a > 0.0) return INT2FIX(-1);
-		else return INT2FIX(1);
-	    }
-	    return rb_dbl_cmp(rb_big2dbl(x), a);
-	}
+        return rb_integer_float_cmp(x, y);
 
       default:
 	return rb_num_coerce_cmp(x, y, rb_intern("<=>"));
@@ -1486,8 +1565,15 @@ rb_big_cmp(VALUE x, VALUE y)
 	    (RBIGNUM_SIGN(x) ? INT2FIX(-1) : INT2FIX(1));
 }
 
+enum big_op_t {
+    big_op_gt,
+    big_op_ge,
+    big_op_lt,
+    big_op_le
+};
+
 static VALUE
-big_op(VALUE x, VALUE y, int op)
+big_op(VALUE x, VALUE y, enum big_op_t op)
 {
     VALUE rel;
     int n;
@@ -1499,26 +1585,17 @@ big_op(VALUE x, VALUE y, int op)
 	break;
 
       case T_FLOAT:
-	{
-	    double a = RFLOAT_VALUE(y);
-
-	    if (isinf(a)) {
-		if (a > 0.0) rel = INT2FIX(-1);
-		else rel = INT2FIX(1);
-		break;
-	    }
-	    rel = rb_dbl_cmp(rb_big2dbl(x), a);
-	    break;
-	}
+        rel = rb_integer_float_cmp(x, y);
+        break;
 
       default:
 	{
 	    ID id = 0;
 	    switch (op) {
-		case 0: id = '>'; break;
-		case 1: id = rb_intern(">="); break;
-		case 2: id = '<'; break;
-		case 3: id = rb_intern("<="); break;
+		case big_op_gt: id = '>'; break;
+		case big_op_ge: id = rb_intern(">="); break;
+		case big_op_lt: id = '<'; break;
+		case big_op_le: id = rb_intern("<="); break;
 	    }
 	    return rb_num_coerce_relop(x, y, id);
 	}
@@ -1528,10 +1605,10 @@ big_op(VALUE x, VALUE y, int op)
     n = FIX2INT(rel);
 
     switch (op) {
-	case 0: return n >  0 ? Qtrue : Qfalse;
-	case 1: return n >= 0 ? Qtrue : Qfalse;
-	case 2: return n <  0 ? Qtrue : Qfalse;
-	case 3: return n <= 0 ? Qtrue : Qfalse;
+	case big_op_gt: return n >  0 ? Qtrue : Qfalse;
+	case big_op_ge: return n >= 0 ? Qtrue : Qfalse;
+	case big_op_lt: return n <  0 ? Qtrue : Qfalse;
+	case big_op_le: return n <= 0 ? Qtrue : Qfalse;
     }
     return Qundef;
 }
@@ -1547,7 +1624,7 @@ big_op(VALUE x, VALUE y, int op)
 static VALUE
 big_gt(VALUE x, VALUE y)
 {
-    return big_op(x, y, 0);
+    return big_op(x, y, big_op_gt);
 }
 
 /*
@@ -1561,7 +1638,7 @@ big_gt(VALUE x, VALUE y)
 static VALUE
 big_ge(VALUE x, VALUE y)
 {
-    return big_op(x, y, 1);
+    return big_op(x, y, big_op_ge);
 }
 
 /*
@@ -1575,7 +1652,7 @@ big_ge(VALUE x, VALUE y)
 static VALUE
 big_lt(VALUE x, VALUE y)
 {
-    return big_op(x, y, 2);
+    return big_op(x, y, big_op_lt);
 }
 
 /*
@@ -1589,7 +1666,7 @@ big_lt(VALUE x, VALUE y)
 static VALUE
 big_le(VALUE x, VALUE y)
 {
-    return big_op(x, y, 3);
+    return big_op(x, y, big_op_le);
 }
 
 /*
@@ -1613,14 +1690,7 @@ rb_big_eq(VALUE x, VALUE y)
       case T_BIGNUM:
 	break;
       case T_FLOAT:
-	{
-	    volatile double a, b;
-
-	    a = RFLOAT_VALUE(y);
-	    if (isnan(a) || isinf(a)) return Qfalse;
-	    b = rb_big2dbl(x);
-	    return (a == b)?Qtrue:Qfalse;
-	}
+        return rb_integer_float_eq(x, y);
       default:
 	return rb_equal(y, x);
     }
@@ -2591,7 +2661,7 @@ struct big_div_struct {
     VALUE stop;
 };
 
-static VALUE
+static void *
 bigdivrem1(void *ptr)
 {
     struct big_div_struct *bds = (struct big_div_struct*)ptr;
@@ -2605,7 +2675,7 @@ bigdivrem1(void *ptr)
     j = nx==ny?nx+1:nx;
     for (nyzero = 0; !yds[nyzero]; nyzero++);
     do {
-	if (bds->stop) return Qnil;
+	if (bds->stop) return 0;
 	if (zds[j] ==  yds[ny-1]) q = (BDIGIT)BIGRAD-1;
 	else q = (BDIGIT)((BIGUP(zds[j]) + zds[j-1])/yds[ny-1]);
 	if (q) {
@@ -2633,7 +2703,7 @@ bigdivrem1(void *ptr)
 	}
 	zds[j] = q;
     } while (--j >= ny);
-    return Qnil;
+    return 0;
 }
 
 static void
@@ -2725,7 +2795,7 @@ bigdivrem(VALUE x, VALUE y, volatile VALUE *divp, volatile VALUE *modp)
     bds.yds = yds;
     bds.stop = Qfalse;
     if (nx > 10000 || ny > 10000) {
-	rb_thread_blocking_region(bigdivrem1, &bds, rb_big_stop, &bds.stop);
+	rb_thread_call_without_gvl(bigdivrem1, &bds, rb_big_stop, &bds.stop);
     }
     else {
 	bigdivrem1(&bds);

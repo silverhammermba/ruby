@@ -251,6 +251,10 @@ rb_check_trusted_inline(VALUE obj)
 }
 #define rb_check_trusted(obj) rb_check_trusted_inline(obj)
 #endif
+void rb_check_copyable(VALUE obj, VALUE orig);
+
+#define OBJ_INIT_COPY(obj, orig) \
+    ((obj) != (orig) && (rb_obj_init_copy((obj), (orig)), 1))
 
 /* eval.c */
 int rb_sourceline(void);
@@ -381,12 +385,7 @@ int rb_mod_method_arity(VALUE, ID);
 int rb_obj_method_arity(VALUE, ID);
 VALUE rb_protect(VALUE (*)(VALUE), VALUE, int*);
 void rb_set_end_proc(void (*)(VALUE), VALUE);
-void rb_mark_end_proc(void);
 void rb_exec_end_proc(void);
-void ruby_finalize(void);
-NORETURN(void ruby_stop(int));
-int ruby_cleanup(volatile int);
-DEPRECATED(void rb_gc_mark_threads(void));
 void rb_thread_schedule(void);
 void rb_thread_wait_fd(int);
 int rb_thread_fd_writable(int);
@@ -429,10 +428,7 @@ VALUE rb_file_directory_p(VALUE,VALUE);
 VALUE rb_str_encode_ospath(VALUE);
 int rb_is_absolute_path(const char *);
 /* gc.c */
-void ruby_set_stack_size(size_t);
 NORETURN(void rb_memerror(void));
-int ruby_stack_check(void);
-size_t ruby_stack_length(VALUE**);
 int rb_during_gc(void);
 void rb_gc_mark_locations(VALUE*, VALUE*);
 void rb_mark_tbl(struct st_table*);
@@ -448,7 +444,6 @@ void rb_gc_call_finalizer_at_exit(void);
 VALUE rb_gc_enable(void);
 VALUE rb_gc_disable(void);
 VALUE rb_gc_start(void);
-#define Init_stack(addr) ruby_init_stack(addr)
 void rb_gc_set_params(void);
 /* hash.c */
 void st_foreach_safe(struct st_table *, int (*)(ANYARGS), st_data_t);
@@ -515,7 +510,7 @@ VALUE rb_marshal_dump(VALUE, VALUE);
 VALUE rb_marshal_load(VALUE);
 void rb_marshal_define_compat(VALUE newclass, VALUE oldclass, VALUE (*dumper)(VALUE), VALUE (*loader)(VALUE, VALUE));
 /* numeric.c */
-void rb_num_zerodiv(void);
+NORETURN(void rb_num_zerodiv(void));
 #define RB_NUM_COERCE_FUNCS_NEED_OPID 1
 VALUE rb_num_coerce_bin(VALUE, VALUE, ID);
 VALUE rb_num_coerce_cmp(VALUE, VALUE, ID);
@@ -566,7 +561,6 @@ double rb_str_to_dbl(VALUE, int);
 RUBY_EXTERN int   ruby_sourceline;
 RUBY_EXTERN char *ruby_sourcefile;
 ID rb_id_attrset(ID);
-void rb_gc_mark_parser(void);
 int rb_is_const_id(ID);
 int rb_is_global_id(ID);
 int rb_is_instance_id(ID);
@@ -576,7 +570,6 @@ int rb_is_local_id(ID);
 int rb_is_junk_id(ID);
 int rb_symname_p(const char*);
 int rb_sym_interned_p(VALUE);
-void rb_gc_mark_symbols(void);
 VALUE rb_backref_get(void);
 void rb_backref_set(VALUE);
 VALUE rb_lastline_get(void);
@@ -586,24 +579,19 @@ VALUE rb_sym_all_symbols(void);
 void rb_last_status_set(int status, rb_pid_t pid);
 VALUE rb_last_status_get(void);
 struct rb_exec_arg {
-    int argc;
-    VALUE *argv;
-    const char *prog;
-    VALUE options;
-    VALUE redirect_fds;
-    VALUE progname;
+    VALUE execarg_obj;
 };
-int rb_proc_exec_n(int, VALUE*, const char*);
+DEPRECATED(int rb_proc_exec_n(int, VALUE*, const char*));
 int rb_proc_exec(const char*);
-VALUE rb_exec_arg_init(int argc, VALUE *argv, int accept_shell, struct rb_exec_arg *e);
-int rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val);
-void rb_exec_arg_fixup(struct rb_exec_arg *e);
-int rb_run_exec_options(const struct rb_exec_arg *e, struct rb_exec_arg *s);
-int rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char*, size_t);
-int rb_exec(const struct rb_exec_arg*);
-int rb_exec_err(const struct rb_exec_arg*, char*, size_t);
-rb_pid_t rb_fork(int*, int (*)(void*), void*, VALUE);
-rb_pid_t rb_fork_err(int*, int (*)(void*, char*, size_t), void*, VALUE, char*, size_t);
+DEPRECATED(VALUE rb_exec_arg_init(int argc, VALUE *argv, int accept_shell, struct rb_exec_arg *e));
+DEPRECATED(int rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val));
+DEPRECATED(void rb_exec_arg_fixup(struct rb_exec_arg *e));
+DEPRECATED(int rb_run_exec_options(const struct rb_exec_arg *e, struct rb_exec_arg *s));
+DEPRECATED(int rb_run_exec_options_err(const struct rb_exec_arg *e, struct rb_exec_arg *s, char*, size_t));
+DEPRECATED(int rb_exec(const struct rb_exec_arg*));
+DEPRECATED(int rb_exec_err(const struct rb_exec_arg*, char*, size_t));
+DEPRECATED(rb_pid_t rb_fork(int*, int (*)(void*), void*, VALUE));
+DEPRECATED(rb_pid_t rb_fork_err(int*, int (*)(void*, char*, size_t), void*, VALUE, char*, size_t));
 VALUE rb_f_exec(int,VALUE*);
 rb_pid_t rb_waitpid(rb_pid_t pid, int *status, int flags);
 void rb_syswait(rb_pid_t pid);
@@ -648,20 +636,12 @@ int rb_reg_options(VALUE);
 RUBY_EXTERN VALUE rb_argv0;
 VALUE rb_get_argv(void);
 void *rb_load_file(const char*);
-void ruby_script(const char*);
-void ruby_prog_init(void);
-void ruby_set_argv(int, char**);
-void *ruby_process_options(int, char**);
-void ruby_init_loadpath(void);
-void ruby_incpush(const char*);
 /* signal.c */
 VALUE rb_f_kill(int, VALUE*);
-void rb_gc_mark_trap_list(void);
 #ifdef POSIX_SIGNAL
 #define posix_signal ruby_posix_signal
 RETSIGTYPE (*posix_signal(int, RETSIGTYPE (*)(int)))(int);
 #endif
-void ruby_sig_finalize(void);
 void rb_trap_exit(void);
 void rb_trap_exec(void);
 const char *ruby_signal_name(int);
@@ -839,8 +819,8 @@ typedef void rb_unblock_function_t(void *);
 typedef VALUE rb_blocking_function_t(void *);
 void rb_thread_check_ints(void);
 int rb_thread_interrupted(VALUE thval);
-VALUE rb_thread_blocking_region(rb_blocking_function_t *func, void *data1,
-				rb_unblock_function_t *ubf, void *data2);
+DEPRECATED(VALUE rb_thread_blocking_region(rb_blocking_function_t *func, void *data1,
+					   rb_unblock_function_t *ubf, void *data2));
 #define RUBY_UBF_IO ((rb_unblock_function_t *)-1)
 #define RUBY_UBF_PROCESS ((rb_unblock_function_t *)-1)
 VALUE rb_mutex_new(void);
@@ -850,10 +830,6 @@ VALUE rb_mutex_lock(VALUE mutex);
 VALUE rb_mutex_unlock(VALUE mutex);
 VALUE rb_mutex_sleep(VALUE self, VALUE timeout);
 VALUE rb_mutex_synchronize(VALUE mutex, VALUE (*func)(VALUE arg), VALUE arg);
-VALUE rb_barrier_new(void);
-VALUE rb_barrier_wait(VALUE self);
-VALUE rb_barrier_release(VALUE self);
-VALUE rb_barrier_destroy(VALUE self);
 /* time.c */
 VALUE rb_time_new(time_t, long);
 VALUE rb_time_nano_new(time_t, long);
@@ -873,15 +849,12 @@ VALUE rb_class_name(VALUE);
 void rb_autoload(VALUE, ID, const char*);
 VALUE rb_autoload_load(VALUE, ID);
 VALUE rb_autoload_p(VALUE, ID);
-void rb_gc_mark_global_tbl(void);
 VALUE rb_f_trace_var(int, VALUE*);
 VALUE rb_f_untrace_var(int, VALUE*);
 VALUE rb_f_global_variables(void);
 void rb_alias_variable(ID, ID);
 struct st_table* rb_generic_ivar_table(VALUE);
 void rb_copy_generic_ivar(VALUE,VALUE);
-void rb_mark_generic_ivar(VALUE);
-void rb_mark_generic_ivar_tbl(void);
 void rb_free_generic_ivar(VALUE);
 VALUE rb_ivar_get(VALUE, ID);
 VALUE rb_ivar_set(VALUE, ID, VALUE);
@@ -913,11 +886,8 @@ VALUE rb_cvar_get(VALUE, ID);
 void rb_cv_set(VALUE, const char*, VALUE);
 VALUE rb_cv_get(VALUE, const char*);
 void rb_define_class_variable(VALUE, const char*, VALUE);
-VALUE rb_mod_class_variables(VALUE);
+VALUE rb_mod_class_variables(int, VALUE*, VALUE);
 VALUE rb_mod_remove_cvar(VALUE, VALUE);
-/* version.c */
-void ruby_show_version(void);
-void ruby_show_copyright(void);
 
 ID rb_frame_callee(void);
 VALUE rb_str_succ(VALUE);

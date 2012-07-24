@@ -340,21 +340,21 @@ static int
 native_mutex_lock(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
-    w32_mutex_lock(*lock);
+    w32_mutex_lock(lock->mutex);
 #else
-    EnterCriticalSection(lock);
-    return 0;
+    EnterCriticalSection(&lock->crit);
 #endif
+    return 0;
 }
 
 static int
 native_mutex_unlock(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
-    thread_debug("release mutex: %p\n", *lock);
-    return ReleaseMutex(*lock);
+    thread_debug("release mutex: %p\n", lock->mutex);
+    return ReleaseMutex(lock->mutex);
 #else
-    LeaveCriticalSection(lock);
+    LeaveCriticalSection(&lock->crit);
     return 0;
 #endif
 }
@@ -364,8 +364,8 @@ native_mutex_trylock(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
     int result;
-    thread_debug("native_mutex_trylock: %p\n", *lock);
-    result = w32_wait_events(&*lock, 1, 1, 0);
+    thread_debug("native_mutex_trylock: %p\n", lock->mutex);
+    result = w32_wait_events(&lock->mutex, 1, 1, 0);
     thread_debug("native_mutex_trylock result: %d\n", result);
     switch (result) {
       case WAIT_OBJECT_0:
@@ -375,7 +375,7 @@ native_mutex_trylock(rb_thread_lock_t *lock)
     }
     return EINVAL;
 #else
-    return TryEnterCriticalSection(lock) == 0;
+    return TryEnterCriticalSection(&lock->crit) == 0;
 #endif
 }
 
@@ -383,10 +383,10 @@ static void
 native_mutex_initialize(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
-    *lock = w32_mutex_create();
-    /* thread_debug("initialize mutex: %p\n", *lock); */
+    lock->mutex = w32_mutex_create();
+    /* thread_debug("initialize mutex: %p\n", lock->mutex); */
 #else
-    InitializeCriticalSection(lock);
+    InitializeCriticalSection(&lock->crit);
 #endif
 }
 
@@ -394,9 +394,9 @@ static void
 native_mutex_destroy(rb_thread_lock_t *lock)
 {
 #if USE_WIN32_MUTEX
-    w32_close_handle(lock);
+    w32_close_handle(lock->mutex);
 #else
-    DeleteCriticalSection(lock);
+    DeleteCriticalSection(&lock->crit);
 #endif
 }
 
@@ -448,7 +448,7 @@ native_cond_broadcast(rb_thread_cond_t *cond)
 
 
 static int
-__cond_timedwait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex, unsigned long msec)
+native_cond_timedwait_ms(rb_thread_cond_t *cond, rb_thread_lock_t *mutex, unsigned long msec)
 {
     DWORD r;
     struct cond_event_entry entry;
@@ -481,7 +481,7 @@ __cond_timedwait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex, unsigned long 
 static int
 native_cond_wait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex)
 {
-    return __cond_timedwait(cond, mutex, INFINITE);
+    return native_cond_timedwait_ms(cond, mutex, INFINITE);
 }
 
 static unsigned long
@@ -509,7 +509,7 @@ native_cond_timedwait(rb_thread_cond_t *cond, rb_thread_lock_t *mutex, struct ti
     if (!timeout_ms)
 	return ETIMEDOUT;
 
-    return __cond_timedwait(cond, mutex, timeout_ms);
+    return native_cond_timedwait_ms(cond, mutex, timeout_ms);
 }
 
 #if SIZEOF_TIME_T == SIZEOF_LONG
@@ -628,7 +628,7 @@ thread_start_func_1(void *th_ptr)
 static int
 native_thread_create(rb_thread_t *th)
 {
-    size_t stack_size = 4 * 1024; /* 4KB */
+    size_t stack_size = 4 * 1024; /* 4KB is the minimum commit size */
     th->thread_id = w32_create_thread(stack_size, thread_start_func_1, th);
 
     if ((th->thread_id) == 0) {

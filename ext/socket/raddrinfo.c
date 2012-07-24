@@ -154,12 +154,12 @@ struct getaddrinfo_arg
     struct addrinfo **res;
 };
 
-static VALUE
+static void *
 nogvl_getaddrinfo(void *arg)
 {
     struct getaddrinfo_arg *ptr = arg;
-    return getaddrinfo(ptr->node, ptr->service,
-                       ptr->hints, ptr->res);
+    return (void *)(VALUE)getaddrinfo(ptr->node, ptr->service,
+				      ptr->hints, ptr->res);
 }
 #endif
 
@@ -178,7 +178,7 @@ rb_getaddrinfo(const char *node, const char *service,
     arg.service = service;
     arg.hints = hints;
     arg.res = res;
-    ret = (int)BLOCKING_REGION(nogvl_getaddrinfo, &arg);
+    ret = (int)(VALUE)rb_thread_call_without_gvl(nogvl_getaddrinfo, &arg, RUBY_UBF_IO, 0);
     return ret;
 #endif
 }
@@ -195,14 +195,14 @@ struct getnameinfo_arg
     int flags;
 };
 
-static VALUE
+static void *
 nogvl_getnameinfo(void *arg)
 {
     struct getnameinfo_arg *ptr = arg;
-    return getnameinfo(ptr->sa, ptr->salen,
-                       ptr->host, (socklen_t)ptr->hostlen,
-                       ptr->serv, (socklen_t)ptr->servlen,
-                       ptr->flags);
+    return (void *)(VALUE)getnameinfo(ptr->sa, ptr->salen,
+				      ptr->host, (socklen_t)ptr->hostlen,
+				      ptr->serv, (socklen_t)ptr->servlen,
+				      ptr->flags);
 }
 #endif
 
@@ -223,7 +223,7 @@ rb_getnameinfo(const struct sockaddr *sa, socklen_t salen,
     arg.serv = serv;
     arg.servlen = servlen;
     arg.flags = flags;
-    ret = (int)BLOCKING_REGION(nogvl_getnameinfo, &arg);
+    ret = (int)(VALUE)rb_thread_call_without_gvl(nogvl_getnameinfo, &arg, RUBY_UBF_IO, 0);
     return ret;
 #endif
 }
@@ -673,25 +673,25 @@ make_inspectname(VALUE node, VALUE service, struct addrinfo *res)
                              sizeof(hbuf), pbuf, sizeof(pbuf),
                              NI_NUMERICHOST|NI_NUMERICSERV);
         if (ret == 0) {
-            if (TYPE(node) == T_STRING && strcmp(hbuf, RSTRING_PTR(node)) == 0)
+            if (RB_TYPE_P(node, T_STRING) && strcmp(hbuf, RSTRING_PTR(node)) == 0)
                 node = Qnil;
-            if (TYPE(service) == T_STRING && strcmp(pbuf, RSTRING_PTR(service)) == 0)
+            if (RB_TYPE_P(service, T_STRING) && strcmp(pbuf, RSTRING_PTR(service)) == 0)
                 service = Qnil;
-            else if (TYPE(service) == T_FIXNUM && atoi(pbuf) == FIX2INT(service))
+            else if (RB_TYPE_P(service, T_FIXNUM) && atoi(pbuf) == FIX2INT(service))
                 service = Qnil;
         }
     }
 
-    if (TYPE(node) == T_STRING) {
+    if (RB_TYPE_P(node, T_STRING)) {
         inspectname = rb_str_dup(node);
     }
-    if (TYPE(service) == T_STRING) {
+    if (RB_TYPE_P(service, T_STRING)) {
         if (NIL_P(inspectname))
             inspectname = rb_sprintf(":%s", StringValueCStr(service));
         else
             rb_str_catf(inspectname, ":%s", StringValueCStr(service));
     }
-    else if (TYPE(service) == T_FIXNUM && FIX2INT(service) != 0)
+    else if (RB_TYPE_P(service, T_FIXNUM) && FIX2INT(service) != 0)
     {
         if (NIL_P(inspectname))
             inspectname = rb_sprintf(":%d", FIX2INT(service));
@@ -1793,6 +1793,18 @@ addrinfo_ipv6_sitelocal_p(VALUE self)
 }
 
 /*
+ * Returns true for IPv6 unique local address (fc00::/7, RFC4193).
+ * It returns false otherwise.
+ */
+static VALUE
+addrinfo_ipv6_unique_local_p(VALUE self)
+{
+    struct in6_addr *addr = extract_in6_addr(self);
+    if (addr && IN6_IS_ADDR_UNIQUE_LOCAL(addr)) return Qtrue;
+    return Qfalse;
+}
+
+/*
  * Returns true for IPv4-mapped IPv6 address (::ffff:0:0/80).
  * It returns false otherwise.
  */
@@ -2207,6 +2219,7 @@ rsock_init_addrinfo(void)
     rb_define_method(rb_cAddrinfo, "ipv6_multicast?", addrinfo_ipv6_multicast_p, 0);
     rb_define_method(rb_cAddrinfo, "ipv6_linklocal?", addrinfo_ipv6_linklocal_p, 0);
     rb_define_method(rb_cAddrinfo, "ipv6_sitelocal?", addrinfo_ipv6_sitelocal_p, 0);
+    rb_define_method(rb_cAddrinfo, "ipv6_unique_local?", addrinfo_ipv6_unique_local_p, 0);
     rb_define_method(rb_cAddrinfo, "ipv6_v4mapped?", addrinfo_ipv6_v4mapped_p, 0);
     rb_define_method(rb_cAddrinfo, "ipv6_v4compat?", addrinfo_ipv6_v4compat_p, 0);
     rb_define_method(rb_cAddrinfo, "ipv6_mc_nodelocal?", addrinfo_ipv6_mc_nodelocal_p, 0);
